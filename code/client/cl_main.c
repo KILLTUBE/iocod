@@ -27,9 +27,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../sys/sys_local.h"
 #include "../sys/sys_loadlib.h"
 
-#ifdef STANDALONE
-#include "../qcommon/bg_weapon_cod1.h"
-#endif
 
 #ifdef USE_MUMBLE
 #include "libmumblelink.h"
@@ -3542,49 +3539,6 @@ void CL_Sayto_f( void ) {
 	CL_AddReliableCommand(va("tell %i \"%s\"", clientNum, p ), qfalse);
 }
 
-#ifdef STANDALONE
-/*
-==================
-CL_WeaponInfo_f
-
-Usage: weaponinfo <name>
-Parses and prints a CoD1 weapon definition file.
-==================
-*/
-static void CL_WeaponInfo_f( void ) {
-	weaponDef_t wd;
-	char name[64];
-
-	if ( Cmd_Argc() < 2 ) {
-		Com_Printf( "Usage: weaponinfo <weaponname>\n"
-		            "  e.g. weaponinfo colt_mp\n" );
-		return;
-	}
-	Q_strncpyz( name, Cmd_Argv(1), sizeof(name) );
-	if ( !BG_ParseWeaponDef( name, &wd ) ) {
-		Com_Printf( "weaponinfo: failed to load '%s'\n", name );
-		return;
-	}
-	Com_Printf( "=== Weapon: %s ===\n", name );
-	Com_Printf( "  Display    : %s\n",  wd.displayName );
-	Com_Printf( "  Type/Class : %s / %s\n", wd.weaponType, wd.weaponClass );
-	Com_Printf( "  Slot       : %s\n",  wd.weaponSlot );
-	Com_Printf( "  gunModel   : %s\n",  wd.gunModel );
-	Com_Printf( "  handModel  : %s\n",  wd.handModel );
-	Com_Printf( "  worldModel : %s\n",  wd.worldModel );
-	Com_Printf( "  Damage     : %d  (melee %d)\n", wd.damage, wd.meleeDamage );
-	Com_Printf( "  Clip/Max   : %d / %d\n", wd.clipSize, wd.maxAmmo );
-	Com_Printf( "  FireTime   : %.3f s\n", wd.fireTime );
-	Com_Printf( "  ReloadTime : %.3f s\n", wd.reloadTime );
-	Com_Printf( "  Animations :\n" );
-	if ( wd.anims.idleAnim[0]   ) Com_Printf( "    idle     = %s\n", wd.anims.idleAnim   );
-	if ( wd.anims.fireAnim[0]   ) Com_Printf( "    fire     = %s\n", wd.anims.fireAnim   );
-	if ( wd.anims.reloadAnim[0] ) Com_Printf( "    reload   = %s\n", wd.anims.reloadAnim );
-	if ( wd.anims.raiseAnim[0]  ) Com_Printf( "    raise    = %s\n", wd.anims.raiseAnim  );
-	if ( wd.anims.dropAnim[0]   ) Com_Printf( "    drop     = %s\n", wd.anims.dropAnim   );
-}
-#endif /* STANDALONE */
-
 /*
 ====================
 CL_Init
@@ -3790,7 +3744,6 @@ void CL_Init( void ) {
 	Cmd_AddCommand ("video", CL_Video_f );
 	Cmd_AddCommand ("stopvideo", CL_StopVideo_f );
 #ifdef STANDALONE
-	Cmd_AddCommand ("weaponinfo", CL_WeaponInfo_f );
 	CL_WeaponCod1_Init();
 #endif
 	if( !com_dedicated->integer ) {

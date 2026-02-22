@@ -2,13 +2,17 @@
 ===========================================================================
 cl_weapon_cod1.c  --  Client-side CoD1 weapon system
 
-Loads weapon definitions and renders the viewmodel independently of the
-Q3 cgame module.  The viewmodel is drawn after cgame's scene in a
-separate RE_RenderScene pass with RDF_NOWORLDMODEL + RF_DEPTHHACK.
+Auto-equips a weapon on player spawn and draws the viewmodel after the
+cgame scene in a second RE_RenderScene pass (RDF_NOWORLDMODEL).
 
-Usage (console):
-  give <weaponname>     -- equip weapon (e.g. "give colt_mp")
-  dropweapon            -- holster current weapon
+Console commands:
+  give <name>      e.g. "give mp44_mp"  or  "give colt_mp"
+  dropweapon       holster current weapon
+
+Cvars:
+  cl_startWeapon   weapon to auto-equip on spawn  (default "mp44_mp")
+  cl_gunFov        viewmodel FOV in degrees        (default 65)
+  cl_drawGun       0 = hide viewmodel              (default 1)
 ===========================================================================
 */
 #include "client.h"
@@ -18,14 +22,14 @@ Usage (console):
    Cvars
    =========================================================================== */
 
-static cvar_t *cl_gunFov;       /* viewmodel field of view (degrees) */
-static cvar_t *cl_drawGun;      /* 0 = hide viewmodel */
+static cvar_t *cl_startWeapon;  /* weapon name to auto-equip on spawn   */
+static cvar_t *cl_gunFov;       /* viewmodel field of view (degrees)    */
+static cvar_t *cl_drawGun;      /* 0 = hide viewmodel                   */
 
 /* ===========================================================================
    Weapon state
    =========================================================================== */
 
-/* Animation slot indices */
 #define WA_IDLE         0
 #define WA_FIRE         1
 #define WA_RELOAD       2
@@ -42,31 +46,28 @@ static cvar_t *cl_drawGun;      /* 0 = hide viewmodel */
 
 typedef struct {
     qboolean    active;
-    char        name[64];           /* weapon name, e.g. "colt_mp" */
+    char        name[64];
     weaponDef_t def;
 
-    /* Registered renderer handles */
-    qhandle_t   gunModel;           /* viewmodel (xmodel/gunModel) */
-    qhandle_t   handModel;          /* hands (xmodel/handModel) */
-    qhandle_t   worldModel;         /* pickup / world model */
+    qhandle_t   gunModel;
+    qhandle_t   handModel;
+    qhandle_t   worldModel;
 
-    /* Animation handles (0 if not loaded) */
     qhandle_t   anims[WA_COUNT];
-    int         currentAnim;        /* WA_* index of active anim */
-    int         animStartTime;      /* cls.realtime when anim began */
+    int         currentAnim;
+    int         animStartTime;
 } clWeapon_t;
 
 static clWeapon_t cl_weapon;
+
+/* Track player state to detect spawns */
+static int  s_prevPmType  = -1;  /* -1 = never set */
+static int  s_spawnSerial =  0;  /* incremented on each spawn */
 
 /* ===========================================================================
    Helpers
    =========================================================================== */
 
-/*
- * Register an xanim by name.  Returns 0 if name is empty or not found.
- * This calls back into the renderer's internal table via the render DLL.
- * For now we call the symbol directly; a proper refexport hook is a TODO.
- */
 static qhandle_t LoadAnim( const char *animName )
 {
     if ( !animName || !animName[0] ) return 0;
@@ -78,7 +79,6 @@ static qhandle_t LoadXModel( const char *shortName )
 {
     char path[MAX_QPATH];
     if ( !shortName || !shortName[0] ) return 0;
-    /* If it already starts with "xmodel/", use as-is */
     if ( Q_strncmp( shortName, "xmodel/", 7 ) == 0 )
         Q_strncpyz( path, shortName, sizeof(path) );
     else
@@ -88,29 +88,48 @@ static qhandle_t LoadXModel( const char *shortName )
 
 /* ===========================================================================
    CL_GiveWeapon
+   ===========================================================================
+   Tries  weapons/sp/<name>  then  weapons/mp/<name>.
+   If name has no  _mp  suffix, also tries  <name>_mp  automatically.
    =========================================================================== */
 
 void CL_GiveWeapon( const char *name )
 {
     weaponDef_t *d;
+    char         tryName[64];
 
     if ( !name || !name[0] ) return;
+    if ( !re.RegisterModel ) {
+        Com_Printf( "give: renderer not ready\n" );
+        return;
+    }
 
     Com_Memset( &cl_weapon, 0, sizeof(cl_weapon) );
     Q_strncpyz( cl_weapon.name, name, sizeof(cl_weapon.name) );
 
+    /* Try the name as-is */
     if ( !BG_ParseWeaponDef( name, &cl_weapon.def ) ) {
-        Com_Printf( "CL_GiveWeapon: could not load weapon '%s'\n", name );
-        return;
+        /* Try appending _mp if not already there */
+        if ( !strstr( name, "_mp" ) && !strstr( name, "_sp" ) ) {
+            Com_sprintf( tryName, sizeof(tryName), "%s_mp", name );
+            if ( !BG_ParseWeaponDef( tryName, &cl_weapon.def ) ) {
+                Com_Printf( "give: weapon '%s' not found "
+                            "(tried %s and %s)\n", name, name, tryName );
+                return;
+            }
+            Q_strncpyz( cl_weapon.name, tryName, sizeof(cl_weapon.name) );
+        } else {
+            Com_Printf( "give: weapon '%s' not found\n", name );
+            return;
+        }
     }
     d = &cl_weapon.def;
 
     /* Register models */
     cl_weapon.gunModel   = LoadXModel( d->gunModel  );
     cl_weapon.handModel  = LoadXModel( d->handModel );
-    cl_weapon.worldModel = d->worldModel[0]
-                           ? re.RegisterModel( d->worldModel )
-                           : 0;
+    if ( d->worldModel[0] )
+        cl_weapon.worldModel = re.RegisterModel( d->worldModel );
 
     /* Register animations */
     cl_weapon.anims[WA_IDLE]         = LoadAnim( d->anims.idleAnim          );
@@ -126,77 +145,69 @@ void CL_GiveWeapon( const char *name )
     cl_weapon.anims[WA_LAST_SHOT]    = LoadAnim( d->anims.lastShotAnim      );
     cl_weapon.anims[WA_EMPTY_IDLE]   = LoadAnim( d->anims.emptyIdleAnim     );
 
-    /* Start with raise anim, fall back to idle */
-    cl_weapon.currentAnim    = cl_weapon.anims[WA_RAISE] ? WA_RAISE : WA_IDLE;
-    cl_weapon.animStartTime  = cls.realtime;
-    cl_weapon.active         = qtrue;
+    cl_weapon.currentAnim   = cl_weapon.anims[WA_RAISE] ? WA_RAISE : WA_IDLE;
+    cl_weapon.animStartTime = cls.realtime;
+    cl_weapon.active        = qtrue;
 
-    Com_Printf( "Weapon equipped: %s  (gun=%s hands=%s)\n",
-                name,
+    Com_Printf( "Weapon: %s  gun=%s hands=%s  "
+                "(models: gun=%s hands=%s)\n",
+                cl_weapon.name,
                 d->gunModel[0]  ? d->gunModel  : "(none)",
-                d->handModel[0] ? d->handModel : "(none)" );
+                d->handModel[0] ? d->handModel : "(none)",
+                cl_weapon.gunModel  ? "OK" : "MISSING",
+                cl_weapon.handModel ? "OK" : "MISSING" );
 }
 
 /* ===========================================================================
-   Animation state machine
+   Spawn detection
    =========================================================================== */
 
 /*
- * Returns the current animation frame (fractional) for the active anim slot.
- * When the raise anim finishes it transitions to idle automatically.
+ * Called every client frame.  Detects player-alive transitions and
+ * auto-equips cl_startWeapon when the player spawns or respawns.
  */
-static float GetCurrentAnimFrame( void )
+static void CL_WeaponThink( void )
 {
-    qhandle_t h    = cl_weapon.anims[cl_weapon.currentAnim];
-    int       fps  = 30;
-    int       nf   = 1;
-    float     elapsed, frame;
+    int curPmType;
+    const char *startWeap;
 
-    if ( h && re.XAnimFramerate ) {
-        fps = re.XAnimFramerate( h );
-        nf  = re.XAnimNumFrames( h );
-        if ( fps <= 0 ) fps = 30;
-        if ( nf  <= 0 ) nf  = 1;
+    if ( !cl.snap.valid ) {
+        s_prevPmType = -1;
+        return;
     }
 
-    elapsed = (float)( cls.realtime - cl_weapon.animStartTime ) / 1000.0f;
-    frame   = elapsed * (float)fps;
+    curPmType = cl.snap.ps.pm_type;
 
-    /* Loop idle; finish-then-idle for one-shot anims */
-    if ( cl_weapon.currentAnim == WA_IDLE ||
-         cl_weapon.currentAnim == WA_EMPTY_IDLE ) {
-        if ( nf > 1 ) frame = (float)fmod( (double)frame, (double)nf );
-        else          frame = 0.0f;
-    } else {
-        if ( frame >= (float)nf ) {
-            /* One-shot anim finished: switch to idle */
-            cl_weapon.currentAnim   = WA_IDLE;
-            cl_weapon.animStartTime = cls.realtime;
-            frame = 0.0f;
+    /* PM_NORMAL == 0 → player is alive */
+    if ( curPmType == 0 && s_prevPmType != 0 ) {
+        /* Just spawned / respawned */
+        s_spawnSerial++;
+        startWeap = ( cl_startWeapon && cl_startWeapon->string[0] )
+                    ? cl_startWeapon->string : "";
+        if ( startWeap[0] ) {
+            Com_Printf( "Auto-equipping '%s' on spawn...\n", startWeap );
+            CL_GiveWeapon( startWeap );
         }
     }
-    return frame;
+
+    s_prevPmType = curPmType;
 }
 
 /* ===========================================================================
-   CL_DrawViewModel
+   Viewmodel rendering
    =========================================================================== */
 
-/*
- * Add a single xmodel entity to the current scene.
- * 'renderfx' should include at least RF_DEPTHHACK | RF_FIRST_PERSON.
- */
-static void AddViewmodelEnt( qhandle_t hModel, int renderfx,
+static void AddViewmodelEnt( qhandle_t hModel,
                               const vec3_t origin, vec3_t axis[3] )
 {
     refEntity_t ent;
     Com_Memset( &ent, 0, sizeof(ent) );
-    ent.reType    = RT_MODEL;
-    ent.hModel    = hModel;
-    ent.renderfx  = renderfx;
-    VectorCopy ( origin, ent.origin      );
-    VectorCopy ( origin, ent.oldorigin   );
-    AxisCopy   ( axis,   ent.axis        );
+    ent.reType   = RT_MODEL;
+    ent.hModel   = hModel;
+    ent.renderfx = RF_DEPTHHACK;   /* squish depth so gun stays in front */
+    VectorCopy( origin, ent.origin    );
+    VectorCopy( origin, ent.oldorigin );
+    AxisCopy  ( axis,   ent.axis      );
     re.AddRefEntityToScene( &ent );
 }
 
@@ -207,58 +218,47 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     vec3_t   viewAngles;
     vec3_t   axis[3];
     float    gunFov;
-    int      rfx = RF_DEPTHHACK | RF_FIRST_PERSON;
+
+    /* Run per-frame logic (spawn detection, anim state machine) */
+    CL_WeaponThink();
 
     if ( !cl_drawGun || !cl_drawGun->integer ) return;
     if ( !cl_weapon.active ) return;
     if ( !cl_weapon.gunModel && !cl_weapon.handModel ) return;
-
-    /* Need a valid snapshot for player position */
     if ( !cl.snap.valid ) return;
+    /* Only draw when player is alive (PM_NORMAL == 0) */
+    if ( cl.snap.ps.pm_type != 0 ) return;
 
-    /* ---- Build eye position from player state ---- */
-    VectorCopy( cl.snap.ps.origin, viewOrigin );
+    /* Build eye position from player state */
+    VectorCopy( cl.snap.ps.origin,    viewOrigin );
     viewOrigin[2] += cl.snap.ps.viewheight;
     VectorCopy( cl.snap.ps.viewangles, viewAngles );
     AnglesToAxis( viewAngles, axis );
 
-    /* ---- Set up a refdef covering the full viewport ---- */
+    /* Full-screen refdef with no world (just our weapon entities) */
     Com_Memset( &refdef, 0, sizeof(refdef) );
     refdef.x      = 0;
     refdef.y      = 0;
     refdef.width  = cls.glconfig.vidWidth;
     refdef.height = cls.glconfig.vidHeight;
     refdef.time   = cl.serverTime;
-    /* Skip BSP / sky; only render entities */
     refdef.rdflags = RDF_NOWORLDMODEL;
 
     gunFov = ( cl_gunFov && cl_gunFov->value > 1.0f ) ? cl_gunFov->value : 65.0f;
     refdef.fov_x = gunFov;
-    /* fov_y derived from aspect ratio */
-    refdef.fov_y = 2.0f * (float)atan( tan( gunFov * 0.5f * ( M_PI / 180.0f ) )
-                                        * (float)refdef.height / (float)refdef.width )
-                   * ( 180.0f / (float)M_PI );
+    refdef.fov_y = 2.0f * (float)atan(
+                        tan( gunFov * 0.5f * (float)(M_PI / 180.0) )
+                        * (float)refdef.height / (float)refdef.width )
+                   * (float)(180.0 / M_PI);
 
     VectorCopy( viewOrigin, refdef.vieworg );
     AxisCopy( axis, refdef.viewaxis );
 
-    /* ---- Build fresh entity list ---- */
+    /* Start a new entity list after cgame's committed scene */
     re.ClearScene();
-
-    if ( cl_weapon.handModel ) AddViewmodelEnt( cl_weapon.handModel, rfx, viewOrigin, axis );
-    if ( cl_weapon.gunModel  ) AddViewmodelEnt( cl_weapon.gunModel,  rfx, viewOrigin, axis );
-
+    if ( cl_weapon.handModel ) AddViewmodelEnt( cl_weapon.handModel, viewOrigin, axis );
+    if ( cl_weapon.gunModel  ) AddViewmodelEnt( cl_weapon.gunModel,  viewOrigin, axis );
     re.RenderScene( &refdef );
-}
-
-/*
- * Returns the fractional animation frame for the current anim slot.
- * Used by future animated rendering (bone evaluation + vertex skinning).
- * Currently unused until runtime skinning is implemented.
- */
-float CL_WeaponCurrentAnimFrame( void )
-{
-    return GetCurrentAnimFrame();
 }
 
 /* ===========================================================================
@@ -269,8 +269,9 @@ static void CL_Give_f( void )
 {
     if ( Cmd_Argc() < 2 ) {
         Com_Printf( "Usage: give <weaponname>\n"
+                    "  e.g.  give mp44_mp\n"
                     "  e.g.  give colt_mp\n"
-                    "  e.g.  give 30cal\n" );
+                    "  e.g.  give mp40_mp\n" );
         return;
     }
     CL_GiveWeapon( Cmd_Argv(1) );
@@ -283,24 +284,88 @@ static void CL_DropWeapon_f( void )
     Com_Memset( &cl_weapon, 0, sizeof(cl_weapon) );
 }
 
+static void CL_WeaponInfo_f( void )
+{
+    weaponDef_t wd;
+    const char *name;
+    if ( Cmd_Argc() < 2 ) {
+        Com_Printf( "Usage: weaponinfo <weaponname>\n" );
+        return;
+    }
+    name = Cmd_Argv(1);
+    if ( !BG_ParseWeaponDef( name, &wd ) ) {
+        Com_Printf( "weaponinfo: '%s' not found\n", name );
+        return;
+    }
+    Com_Printf( "=== %s ===\n", name );
+    Com_Printf( "  type/class : %s / %s\n", wd.weaponType, wd.weaponClass );
+    Com_Printf( "  gunModel   : %s\n", wd.gunModel  );
+    Com_Printf( "  handModel  : %s\n", wd.handModel );
+    Com_Printf( "  worldModel : %s\n", wd.worldModel);
+    Com_Printf( "  damage     : %d  (melee %d)\n", wd.damage, wd.meleeDamage );
+    Com_Printf( "  clip/max   : %d / %d\n", wd.clipSize, wd.maxAmmo );
+    Com_Printf( "  fireTime   : %.3f s\n", wd.fireTime   );
+    Com_Printf( "  reloadTime : %.3f s\n", wd.reloadTime );
+    if ( wd.anims.idleAnim[0]   ) Com_Printf( "  idle    : %s\n", wd.anims.idleAnim   );
+    if ( wd.anims.fireAnim[0]   ) Com_Printf( "  fire    : %s\n", wd.anims.fireAnim   );
+    if ( wd.anims.reloadAnim[0] ) Com_Printf( "  reload  : %s\n", wd.anims.reloadAnim );
+    if ( wd.anims.raiseAnim[0]  ) Com_Printf( "  raise   : %s\n", wd.anims.raiseAnim  );
+}
+
 /* ===========================================================================
-   Init / shutdown
+   Init / Shutdown
    =========================================================================== */
 
 void CL_WeaponCod1_Init( void )
 {
-    cl_gunFov  = Cvar_Get( "cl_gunFov",  "65",  CVAR_ARCHIVE );
-    cl_drawGun = Cvar_Get( "cl_drawGun", "1",   CVAR_ARCHIVE );
+    cl_startWeapon = Cvar_Get( "cl_startWeapon", "mp44_mp", CVAR_ARCHIVE );
+    cl_gunFov      = Cvar_Get( "cl_gunFov",      "65",      CVAR_ARCHIVE );
+    cl_drawGun     = Cvar_Get( "cl_drawGun",     "1",       CVAR_ARCHIVE );
 
     Cmd_AddCommand( "give",        CL_Give_f        );
     Cmd_AddCommand( "dropweapon",  CL_DropWeapon_f  );
+    Cmd_AddCommand( "weaponinfo",  CL_WeaponInfo_f  );
 
     Com_Memset( &cl_weapon, 0, sizeof(cl_weapon) );
+    s_prevPmType  = -1;
+    s_spawnSerial =  0;
 }
 
 void CL_WeaponCod1_Shutdown( void )
 {
     Cmd_RemoveCommand( "give"       );
     Cmd_RemoveCommand( "dropweapon" );
+    Cmd_RemoveCommand( "weaponinfo" );
     Com_Memset( &cl_weapon, 0, sizeof(cl_weapon) );
+    s_prevPmType = -1;
+}
+
+/*
+ * CL_WeaponCurrentAnimFrame -- exposes the animation evaluator for future
+ * per-frame bone skinning integration (unused until runtime skinning is added).
+ */
+float CL_WeaponCurrentAnimFrame( void )
+{
+    qhandle_t h   = cl_weapon.anims[cl_weapon.currentAnim];
+    int       fps = re.XAnimFramerate ? re.XAnimFramerate(h) : 30;
+    int       nf  = re.XAnimNumFrames ? re.XAnimNumFrames(h) : 1;
+    float     elapsed, frame;
+
+    if ( fps <= 0 ) fps = 30;
+    if ( nf  <= 0 ) nf  = 1;
+
+    elapsed = (float)( cls.realtime - cl_weapon.animStartTime ) / 1000.0f;
+    frame   = elapsed * (float)fps;
+
+    if ( cl_weapon.currentAnim == WA_IDLE || cl_weapon.currentAnim == WA_EMPTY_IDLE ) {
+        if ( nf > 1 ) frame = (float)fmod( (double)frame, (double)nf );
+        else          frame = 0.0f;
+    } else {
+        if ( frame >= (float)nf ) {
+            cl_weapon.currentAnim   = WA_IDLE;
+            cl_weapon.animStartTime = cls.realtime;
+            frame = 0.0f;
+        }
+    }
+    return frame;
 }
