@@ -194,7 +194,7 @@ static void CL_WeaponThink( void )
     }
 
     /* Handle reload button */
-    if ( ( cl.snap.ps.buttons & BUTTON_RELOAD ) && cl_weapon.active ) {
+    if ( ( cl.cmds[ (cl.cmdNumber - 1) & (CMD_BACKUP - 1) ].buttons & BUTTON_RELOAD ) && cl_weapon.active ) {
         if ( cl_weapon.currentAnim == WA_IDLE || cl_weapon.currentAnim == WA_EMPTY_IDLE ) {
             if ( cl_weapon.anims[WA_RELOAD] ) {
                 cl_weapon.currentAnim   = WA_RELOAD;
