@@ -174,21 +174,6 @@ static void XAnim_FreeTransTrack( xaTransTrack_t *t )
     t->numKeys = 0;
 }
 
-static void XAnim_Free( xaAnim_t *anim )
-{
-    int i;
-    if ( !anim ) return;
-    if ( anim->parts ) {
-        for ( i = 0; i < anim->numParts; i++ ) {
-            XAnim_FreeRotTrack  ( &anim->parts[i].rotTrack   );
-            XAnim_FreeTransTrack( &anim->parts[i].transTrack );
-        }
-        ri.Free( anim->parts );
-        anim->parts = NULL;
-    }
-    ri.Free( anim );
-}
-
 /* Read a rotation track.  When flipquat is set the data is consumed but discarded. */
 static void XAnim_ReadRotTrack( xmR_t *r, int numFrames,
                                   xaRotTrack_t *track,

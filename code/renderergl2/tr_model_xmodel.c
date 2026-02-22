@@ -515,6 +515,9 @@ qhandle_t R_RegisterXModel( const char *name, model_t *mod )
 
 	}
 
+	/* Cache bind pose for animation evaluation (R_EvalXAnimBones) */
+	R_StoreXModelBindPose( (qhandle_t)mod->index, bones, numBones );
+
 	ri.Free( bones );
 
 	ri.Printf( PRINT_DEVELOPER,
