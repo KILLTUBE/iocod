@@ -561,7 +561,7 @@ typedef struct {
 /* CoD1 TriangleSoup - 16 bytes */
 typedef struct {
     unsigned short  materialIdx;
-    unsigned short  drawOrder;
+    unsigned short  lightmapIndex; /* index into the lightmap array (lump 1); 0xFFFF = no lightmap */
     unsigned int    vertsOffset;   /* first vertex index in the global vertex array */
     unsigned short  vertsLength;   /* number of vertices */
     unsigned short  trisLength;    /* number of triangle indices */

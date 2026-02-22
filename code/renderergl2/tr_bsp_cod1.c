@@ -164,16 +164,25 @@ static void R_LoadCod1Surfaces( const byte *base ) {
 		srfBspSurface_t       *cv;
 		const cod1_trianglesoup_t *ts = &ts_in[i];
 		int   mat_idx   = LittleShort( ts->materialIdx );
+		int   lm_idx    = (int)(unsigned short)LittleShort( ts->lightmapIndex );
 		int   verts_off = LittleLong ( ts->vertsOffset );
 		int   verts_len = LittleShort( ts->vertsLength );
 		int   tris_off  = LittleLong ( ts->trisOffset  );
 		int   tris_len  = LittleShort( ts->trisLength  );
 
+		/* Apply vertex light / fullbright overrides (mirrors ShaderForShaderNum logic) */
+		if ( r_vertexLight->integer || glConfig.hardwareType == GLHW_PERMEDIA2 ) {
+			lm_idx = LIGHTMAP_BY_VERTEX;
+		} else if ( r_fullbright->integer ) {
+			lm_idx = LIGHTMAP_WHITEIMAGE;
+		}
+		/* 0xFFFF means no lightmap; R_FindShader will fall back gracefully if >= tr.numLightmaps */
+
 		/* Assign shader */
 		surf->cubemapIndex = 0;
 		if ( mat_idx >= 0 && mat_idx < s_worldData.numShaders ) {
 			dshader_t *dsh = &s_worldData.shaders[mat_idx];
-			surf->shader = R_FindShader( dsh->shader, LIGHTMAP_WHITEIMAGE, qtrue );
+			surf->shader = R_FindShader( dsh->shader, lm_idx, qtrue );
 		} else {
 			surf->shader = tr.defaultShader;
 		}
