@@ -6,159 +6,14 @@ Reads xmodel / xmodelparts / xmodelsurfs binary files and builds a
 static mdvModel_t (bind-pose) for rendering through the existing
 MD3 pipeline.
 
+Animated rendering: R_RegisterXAnim (tr_model_xanim.c) loads xanim
+files; R_EvalXAnimBones evaluates bone transforms per frame.
 ===========================================================================
 */
 #include "tr_local.h"
-#include <math.h>
+#include "tr_xmodel.h"
 
-/* ===========================================================================
-   Version constants
-   =========================================================================== */
-
-#define COD1_XMODEL_VERSION		0x0E
-#define COD1_RIGGED				65535	/* bone index meaning per-vertex skinning */
-
-/* ===========================================================================
-   Binary reader  (little-endian sequential)
-   =========================================================================== */
-
-typedef struct {
-	const byte	*buf;
-	int			pos;
-	int			size;
-} xmR_t;
-
-static void xmR_init( xmR_t *r, const byte *buf, int size )
-{
-	r->buf = buf; r->pos = 0; r->size = size;
-}
-
-static byte xmR_u8( xmR_t *r )
-{
-	return ( r->pos < r->size ) ? r->buf[ r->pos++ ] : 0;
-}
-
-static signed char xmR_s8( xmR_t *r )
-{
-	return (signed char)xmR_u8( r );
-}
-
-static unsigned short xmR_u16( xmR_t *r )
-{
-	unsigned short v;
-	if ( r->pos + 2 > r->size ) { r->pos = r->size; return 0; }
-	v = (unsigned short)( r->buf[r->pos] | ( r->buf[r->pos+1] << 8 ) );
-	r->pos += 2;
-	return v;
-}
-
-static short xmR_s16( xmR_t *r )
-{
-	return (short)xmR_u16( r );
-}
-
-static unsigned int xmR_u32( xmR_t *r )
-{
-	unsigned int v;
-	if ( r->pos + 4 > r->size ) { r->pos = r->size; return 0; }
-	v = (unsigned int)( r->buf[r->pos]
-		| ( r->buf[r->pos+1] << 8 )
-		| ( r->buf[r->pos+2] << 16 )
-		| ( r->buf[r->pos+3] << 24 ) );
-	r->pos += 4;
-	return v;
-}
-
-static float xmR_float( xmR_t *r )
-{
-	union { unsigned int i; float f; } u;
-	u.i = xmR_u32( r );
-	return u.f;
-}
-
-static void xmR_vec3( xmR_t *r, vec3_t out )
-{
-	out[0] = xmR_float( r );
-	out[1] = xmR_float( r );
-	out[2] = xmR_float( r );
-}
-
-static void xmR_skip( xmR_t *r, int n )
-{
-	r->pos += n;
-	if ( r->pos > r->size ) r->pos = r->size;
-}
-
-/* Read null-terminated string. Returns char count (0 = empty string). */
-static int xmR_str( xmR_t *r, char *buf, int maxlen )
-{
-	int  i = 0;
-	byte c;
-	while ( ( c = xmR_u8( r ) ) != 0 ) {
-		if ( i < maxlen - 1 ) buf[ i++ ] = (char)c;
-	}
-	buf[i] = '\0';
-	return i;
-}
-
-/*
- * CoD1 compact quaternion encoding in xmodelparts:
- *   3 x int16 / 32768.0  ->  x, y, z
- *   w = sqrt( clamp( 1 - x^2-y^2-z^2, 0, 1 ) )
- * Result stored as [w, x, y, z] (Hamilton convention).
- */
-static void xmR_quat( xmR_t *r, vec4_t q )
-{
-	float x, y, z, ww;
-	x  = xmR_s16( r ) / 32768.0f;
-	y  = xmR_s16( r ) / 32768.0f;
-	z  = xmR_s16( r ) / 32768.0f;
-	ww = 1.0f - x*x - y*y - z*z;
-	q[0] = ( ww > 0.0f ) ? (float)sqrt( (double)ww ) : 0.0f;
-	q[1] = x;
-	q[2] = y;
-	q[3] = z;
-}
-
-/* ===========================================================================
-   Quaternion math  (Hamilton convention: q = [w, x, y, z])
-   =========================================================================== */
-
-/* out = a * b */
-static void Quat_Mul( const vec4_t a, const vec4_t b, vec4_t out )
-{
-	out[0] = a[0]*b[0] - a[1]*b[1] - a[2]*b[2] - a[3]*b[3];
-	out[1] = a[0]*b[1] + a[1]*b[0] + a[2]*b[3] - a[3]*b[2];
-	out[2] = a[0]*b[2] - a[1]*b[3] + a[2]*b[0] + a[3]*b[1];
-	out[3] = a[0]*b[3] + a[1]*b[2] - a[2]*b[1] + a[3]*b[0];
-}
-
-/* out = rotate v by unit quaternion q  (q = [w, x, y, z]) */
-static void Quat_RotVec( const vec4_t q, const vec3_t v, vec3_t out )
-{
-	float qw = q[0], qx = q[1], qy = q[2], qz = q[3];
-	float vx = v[0], vy = v[1], vz = v[2];
-	float tx = 2.0f * ( qy*vz - qz*vy );
-	float ty = 2.0f * ( qz*vx - qx*vz );
-	float tz = 2.0f * ( qx*vy - qy*vx );
-	out[0] = vx + qw*tx + qy*tz - qz*ty;
-	out[1] = vy + qw*ty + qz*tx - qx*tz;
-	out[2] = vz + qw*tz + qx*ty - qy*tx;
-}
-
-/* ===========================================================================
-   Bone structures
-   =========================================================================== */
-
-#define XMODEL_MAX_BONES	256
-
-typedef struct {
-	int		parent;		/* -1 = root */
-	vec3_t	lTrans;		/* local translation */
-	vec4_t	lRot;		/* local rotation [w,x,y,z] */
-	vec3_t	wTrans;		/* computed world translation */
-	vec4_t	wRot;		/* computed world rotation [w,x,y,z] */
-} xmBone_t;
+#define COD1_RIGGED		65535	/* bone index meaning per-vertex skinning */
 
 /* ===========================================================================
    xmodelparts/<lodName>  (CoD1 V14 = 0x0E)
@@ -218,6 +73,7 @@ static int XModel_LoadParts( const char *lodName, xmBone_t *bones, int maxBones 
 		bones[i].parent  = -1;
 		bones[i].lRot[0] = 1.0f;	/* identity: w=1 */
 		bones[i].wRot[0] = 1.0f;
+		bones[i].name[0] = '\0';
 	}
 
 	/* Non-root bone transforms at [rootBoneCount .. totalBones-1] */
@@ -231,22 +87,14 @@ static int XModel_LoadParts( const char *lodName, xmBone_t *bones, int maxBones 
 
 	/* All bone names (root first) + 24-byte skip per bone + world transform */
 	for ( i = 0; i < totalBones && i < maxBones; i++ ) {
-		int p;
-		vec3_t rotTrans;
-
 		xmR_str ( &r, boneName, sizeof(boneName) );
 		xmR_skip( &r, 24 );	/* CoD1 V14: 24 extra bytes after each bone name */
 
-		p = bones[i].parent;
-		if ( p > -1 && p < totalBones ) {
-			Quat_Mul   ( bones[p].wRot, bones[i].lRot, bones[i].wRot );
-			Quat_RotVec( bones[p].wRot, bones[i].lTrans, rotTrans );
-			VectorAdd  ( bones[p].wTrans, rotTrans, bones[i].wTrans );
-		} else {
-			VectorCopy ( bones[i].lTrans, bones[i].wTrans );
-			Vector4Copy( bones[i].lRot,   bones[i].wRot   );
-		}
+		Q_strncpyz( bones[i].name, boneName, sizeof(bones[i].name) );
 	}
+
+	/* Compute world transforms from local after all names are read */
+	XModel_ComputeWorldBones( bones, totalBones );
 
 	ri.FS_FreeFile( buf );
 	return totalBones;
@@ -664,6 +512,7 @@ qhandle_t R_RegisterXModel( const char *name, model_t *mod )
 		ri.Free( bones );
 		mod->type = MOD_BAD;
 		return 0;
+
 	}
 
 	ri.Free( bones );
