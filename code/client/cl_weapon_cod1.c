@@ -198,7 +198,7 @@ static void CL_WeaponThink( void )
    =========================================================================== */
 
 static void AddViewmodelEnt( qhandle_t hModel,
-                              const vec3_t origin, vec3_t axis[3] )
+                              const vec3_t origin, vec3_t viewAxis[3] )
 {
     refEntity_t ent;
     Com_Memset( &ent, 0, sizeof(ent) );
@@ -207,7 +207,20 @@ static void AddViewmodelEnt( qhandle_t hModel,
     ent.renderfx = RF_DEPTHHACK;   /* squish depth so gun stays in front */
     VectorCopy( origin, ent.origin    );
     VectorCopy( origin, ent.oldorigin );
-    AxisCopy  ( axis,   ent.axis      );
+
+    /*
+     * CoD1 model space:  +X = right,  +Y = up,  +Z = toward camera
+     * ioq3 view space:   axis[0] = forward,  axis[1] = left,  axis[2] = up
+     *
+     * Remap model axes to world directions:
+     *   model +X (right)  → world right = -viewAxis[1]
+     *   model +Y (up)     → world up    =  viewAxis[2]
+     *   model +Z (back)   → world back  = -viewAxis[0]
+     */
+    VectorNegate( viewAxis[1], ent.axis[0] );  /* model X → world right  */
+    VectorCopy  ( viewAxis[2], ent.axis[1] );  /* model Y → world up     */
+    VectorNegate( viewAxis[0], ent.axis[2] );  /* model Z → world back   */
+
     re.AddRefEntityToScene( &ent );
 }
 
