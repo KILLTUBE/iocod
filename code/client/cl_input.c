@@ -993,6 +993,12 @@ void CL_InitInput( void ) {
 	Cmd_AddCommand ("+mlook", IN_MLookDown);
 	Cmd_AddCommand ("-mlook", IN_MLookUp);
 
+	// CoD1 stance commands
+	Cmd_AddCommand ("+gostand", IN_Button13Down);
+	Cmd_AddCommand ("-gostand", IN_Button13Up);
+	Cmd_AddCommand ("gocrouch", IN_Button11Down);  // Toggle/hold for crouch
+	Cmd_AddCommand ("goprone", IN_Button12Down);    // Toggle/hold for prone
+
 #ifdef USE_VOIP
 	Cmd_AddCommand ("+voiprecord", IN_VoipRecordDown);
 	Cmd_AddCommand ("-voiprecord", IN_VoipRecordUp);
@@ -1069,6 +1075,12 @@ void CL_ShutdownInput(void)
 	Cmd_RemoveCommand("-button14");
 	Cmd_RemoveCommand("+mlook");
 	Cmd_RemoveCommand("-mlook");
+
+	// CoD1 stance commands
+	Cmd_RemoveCommand("+gostand");
+	Cmd_RemoveCommand("-gostand");
+	Cmd_RemoveCommand("gocrouch");
+	Cmd_RemoveCommand("goprone");
 
 #ifdef USE_VOIP
 	Cmd_RemoveCommand("+voiprecord");

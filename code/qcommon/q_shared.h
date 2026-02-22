@@ -1228,7 +1228,12 @@ typedef struct playerState_s {
 #define BUTTON_PATROL		512
 #define BUTTON_FOLLOWME		1024
 
-#define	BUTTON_ANY			2048			// any key whatsoever
+// CoD1 stance buttons
+#define BUTTON_CROUCH		2048
+#define BUTTON_PRONE		4096
+#define BUTTON_STAND		8192
+
+#define	BUTTON_ANY			16384			// any key whatsoever (updated from 2048)
 
 #define	MOVE_RUN			120			// if forwardmove or rightmove are >= MOVE_RUN,
 										// then BUTTON_WALKING should be set
