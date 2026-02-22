@@ -28,6 +28,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 static qboolean R_LoadMD3(model_t *mod, int lod, void *buffer, int bufferSize, const char *modName);
 static qboolean R_LoadMDR(model_t *mod, void *buffer, int filesize, const char *name );
 
+/* Defined in tr_model_xmodel.c */
+extern qhandle_t R_RegisterXModel( const char *name, model_t *mod );
+
 /*
 ====================
 R_RegisterMD3
@@ -298,6 +301,13 @@ qhandle_t RE_RegisterModel( const char *name ) {
 
 	mod->type = MOD_BAD;
 	mod->numLods = 0;
+
+	//
+	// CoD1 XMODEL: extensionless paths under "xmodel/" directory
+	//
+	if ( Q_strncmp( name, "xmodel/", 7 ) == 0 ) {
+		return R_RegisterXModel( name, mod );
+	}
 
 	//
 	// load the files
