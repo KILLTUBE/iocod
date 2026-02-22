@@ -1150,6 +1150,21 @@ typedef struct {
 	int			numSurfaces;
 } bmodel_t;
 
+// CoD1 cell-based rendering structures
+typedef struct {
+	vec3_t mins, maxs;
+	int    visframe;           // set when visible this frame
+	int    *surfaceIndices;    // array of surface indices (into s_worldData.surfaces)
+	int    numSurfaces;
+} cod1CullGroup_t;
+
+typedef struct {
+	vec3_t mins, maxs;
+	int    visframe;           // set when visible this frame
+	cod1CullGroup_t *cullgroups;
+	int    numCullGroups;
+} cod1Cell_t;
+
 typedef struct {
 	char		name[MAX_QPATH];		// ie: maps/tim_dm2.bsp
 	char		baseName[MAX_QPATH];	// ie: tim_dm2
@@ -1197,6 +1212,11 @@ typedef struct {
 
 	char		*entityString;
 	char		*entityParsePoint;
+	// CoD1 cell-based rendering (only when bspVersion == COD1_BSP_VERSION)
+	int          numCod1Cells;
+	cod1Cell_t   *cod1Cells;
+	int          numCod1CullGroups;
+	cod1CullGroup_t *cod1CullGroups;
 } world_t;
 
 
@@ -1980,6 +2000,9 @@ void		RE_BeginFrame( stereoFrame_t stereoFrame );
 void		RE_BeginRegistration( glconfig_t *glconfig );
 void		RE_LoadWorldMap( const char *mapname );
 void		RE_SetWorldVisData( const byte *vis );
+
+// CoD1 cell-based rendering
+void		R_AddCod1CellSurfaces( void );
 qhandle_t	RE_RegisterModel( const char *name );
 qhandle_t	RE_RegisterSkin( const char *name );
 void		RE_Shutdown( qboolean destroyWindow );

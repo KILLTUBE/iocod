@@ -686,60 +686,64 @@ static void R_MarkCod1Cells( void ) {
 =================
 R_AddCod1CellSurfaces
 
-Add surfaces from visible CoD1 cells to the render list.
+CoD1 cell system contains minimal data - render all trianglesoups directly.
 =================
 */
 void R_AddCod1CellSurfaces( void ) {
-	int i, j;
-	cod1Cell_t *cell;
-	cod1CullGroup_t *cg;
+	int i;
 	msurface_t *surf;
 	int dlightBits;
 	vec3_t bounds[2];
+	int addedSurfs = 0;
+	int culledSurfs = 0;
 
 	if ( !tr.world->numCod1Cells ) {
 		return;
 	}
 
+	/* CoD1 cell system is nearly empty - render all trianglesoups directly with AABB culling */
+	ri.Printf( PRINT_ALL, "CoD1: rendering all %d trianglesoups (cell system has minimal data)\n", tr.world->numsurfaces );
+
 	dlightBits = ( 1ULL << tr.refdef.num_dlights ) - 1;
 
-	for ( i = 0; i < tr.world->numCod1Cells; i++ ) {
-		cell = &tr.world->cod1Cells[i];
+	/* Render all trianglesoups with AABB culling */
+	for ( i = 0; i < tr.world->numsurfaces; i++ ) {
+		surf = &tr.world->surfaces[i];
 
-		if ( cell->visframe != tr.visCount ) {
+		/* Check if surface was already added this frame */
+		if ( surf->viewCount == tr.viewCount ) {
 			continue;
 		}
 
-		/* Add surfaces from each cullgroup in this cell */
-		for ( j = 0; j < cell->numCullGroups; j++ ) {
-			cg = &cell->cullgroups[j];
+		/* CoD1 only uses SF_TRIANGLES (triangle soups) */
+		if ( *surf->data != SF_TRIANGLES ) {
+			continue;
+		}
 
-			/* Frustum cull the cullgroup */
-			if ( !r_nocull->integer ) {
-				VectorCopy( cg->mins, bounds[0] );
-				VectorCopy( cg->maxs, bounds[1] );
-				if ( R_CullLocalBox( bounds ) == CULL_OUT ) {
-					continue;
-				}
-			}
+		srfTriangles_t *tri = (srfTriangles_t *)surf->data;
+		VectorCopy( tri->bounds[0], bounds[0] );
+		VectorCopy( tri->bounds[1], bounds[1] );
 
-			/* Add all surfaces in this cullgroup */
-			for ( int s = 0; s < cg->numSurfaces; s++ ) {
-				surf = cg->surfaces[s];
-
-				/* Check if surface was already added this frame */
-				if ( surf->viewCount == tr.viewCount ) {
-					continue;
-				}
-				surf->viewCount = tr.viewCount;
-
-				/* Cull individual surface */
-				if ( !R_CullSurface( surf->data, surf->shader ) ) {
-					R_AddWorldSurface( surf, dlightBits );
-				}
+		/* Frustum cull */
+		if ( !r_nocull->integer ) {
+			if ( R_CullLocalBox( bounds ) == CULL_OUT ) {
+				culledSurfs++;
+				continue;
 			}
 		}
+
+		surf->viewCount = tr.viewCount;
+
+		/* Cull individual surface */
+		if ( !R_CullSurface( surf->data, surf->shader ) ) {
+			R_AddWorldSurface( surf, dlightBits );
+			addedSurfs++;
+		} else {
+			culledSurfs++;
+		}
 	}
+
+	ri.Printf( PRINT_ALL, "CoD1: %d added, %d culled\n", addedSurfs, culledSurfs );
 }
 
 /*
@@ -761,6 +765,8 @@ void R_AddWorldSurfaces (void) {
 
 	// clear out the visible min/max
 	ClearBounds( tr.viewParms.visBounds[0], tr.viewParms.visBounds[1] );
+
+	ri.Printf( PRINT_ALL, "R_AddWorldSurfaces: numCod1Cells=%d\n", tr.world->numCod1Cells );
 
 	// CoD1 uses cell-based rendering instead of BSP leaf rendering
 	if ( tr.world->numCod1Cells > 0 ) {

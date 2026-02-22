@@ -1837,8 +1837,11 @@ void RE_LoadWorldMap( const char *name ) {
 
 	i = LittleLong (header->version);
 
+	ri.Printf( PRINT_ALL, "BSP version: %d (COD1=%d, Q3=%d)\n", i, COD1_BSP_VERSION, BSP_VERSION );
+
 	if ( i == COD1_BSP_VERSION ) {
 		/* CoD1 / CoDUO IBSP version 59 */
+		ri.Printf( PRINT_ALL, "Using CoD1 BSP loader\n" );
 		R_LoadCod1WorldMap( buffer.b );
 		s_worldData.dataSize = (byte *)ri.Hunk_Alloc(0, h_low) - startMarker;
 	} else {

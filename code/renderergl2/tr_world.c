@@ -734,6 +734,146 @@ static void R_MarkLeaves (void) {
 
 
 /*
+=============================================================================
+CoD1 Cell-based rendering
+
+CoD1 uses cells instead of BSP leaves for world geometry rendering.
+=============================================================================
+*/
+
+/*
+=================
+R_MarkCod1Cells
+
+Mark cells that are potentially visible from the current position.
+For now, use simple AABB culling against frustum.
+=================
+*/
+static void R_MarkCod1Cells( void ) {
+	int i;
+	cod1Cell_t *cell;
+	vec3_t bounds[2];
+
+	if ( !tr.world->numCod1Cells ) {
+		return;
+	}
+
+	tr.visCounts[tr.visIndex]++;
+
+	/* For now, mark all cells that pass frustum culling */
+	for ( i = 0; i < tr.world->numCod1Cells; i++ ) {
+		cell = &tr.world->cod1Cells[i];
+
+		/* Frustum cull */
+		if ( !r_nocull->integer ) {
+			VectorCopy( cell->mins, bounds[0] );
+			VectorCopy( cell->maxs, bounds[1] );
+			if ( R_CullBox( bounds ) == CULL_OUT ) {
+				continue;
+			}
+		}
+
+		cell->visframe = tr.visCounts[tr.visIndex];
+	}
+}
+
+/*
+=================
+R_AddCod1CellSurfaces
+
+Add surfaces from visible CoD1 cells to the render list.
+=================
+*/
+void R_AddCod1CellSurfaces( void ) {
+	int i;
+	msurface_t *surf;
+	int dlightBits, pshadowBits;
+	vec3_t bounds[2];
+	int markedCount = 0;
+
+	if ( !tr.world->numCod1Cells ) {
+		return;
+	}
+
+	/* CoD1 cell system is nearly empty - render all trianglesoups directly with AABB culling */
+	ri.Printf( PRINT_ALL, "CoD1: rendering all %d trianglesoups (cell system has minimal data)\n", tr.world->numsurfaces );
+
+	/* Debug: check first surface type */
+	if ( tr.world->numsurfaces > 0 ) {
+		ri.Printf( PRINT_ALL, "CoD1: first surface type = %d (SF_TRIANGLES=%d, SF_GRID=%d, SF_FACE=%d)\n",
+			*tr.world->surfaces[0].data, SF_TRIANGLES, SF_GRID, SF_FACE );
+	}
+
+	/* Set dlight/pshadow bits */
+	if ( tr.refdef.num_dlights > MAX_DLIGHTS ) {
+		tr.refdef.num_dlights = MAX_DLIGHTS;
+	}
+	dlightBits = ( 1ULL << tr.refdef.num_dlights ) - 1;
+
+	if ( tr.refdef.num_pshadows > MAX_DRAWN_PSHADOWS ) {
+		tr.refdef.num_pshadows = MAX_DRAWN_PSHADOWS;
+	}
+	pshadowBits = ( 1ULL << tr.refdef.num_pshadows ) - 1;
+
+	/* Mark all trianglesoups for rendering with AABB culling */
+	int notTriangles = 0;
+	int culledFustum = 0;
+
+	for ( i = 0; i < tr.world->numsurfaces; i++ ) {
+		surf = &tr.world->surfaces[i];
+
+		/* Check surface type */
+		if ( *surf->data != SF_TRIANGLES && *surf->data != SF_GRID && *surf->data != SF_FACE ) {
+			notTriangles++;
+			continue;
+		}
+
+		srfBspSurface_t *bspSurf = (srfBspSurface_t *)surf->data;
+		VectorCopy( bspSurf->cullBounds[0], bounds[0] );
+		VectorCopy( bspSurf->cullBounds[1], bounds[1] );
+
+		/* Frustum cull */
+		if ( !r_nocull->integer ) {
+			if ( R_CullBox( bounds ) == CULL_OUT ) {
+				culledFustum++;
+				continue;
+			}
+		}
+
+		tr.world->surfacesViewCount[i] = tr.viewCount;
+		tr.world->surfacesDlightBits[i] = dlightBits;
+		tr.world->surfacesPshadowBits[i] = pshadowBits;
+		markedCount++;
+	}
+
+	ri.Printf( PRINT_ALL, "CoD1: %d not SF_TRIANGLES, %d frustum culled, %d marked\n",
+		notTriangles, culledFustum, markedCount );
+
+	/* Now add all the marked surfaces */
+	tr.refdef.dlightMask = 0;
+	int addedCount = 0;
+	int culledCount = 0;
+
+	for ( i = 0; i < tr.world->numsurfaces; i++ ) {
+		if ( tr.world->surfacesViewCount[i] != tr.viewCount ) {
+			continue;
+		}
+
+		surf = &tr.world->surfaces[i];
+		if ( !R_CullSurface( surf ) ) {
+			R_AddWorldSurface( surf, tr.world->surfacesDlightBits[i], tr.world->surfacesPshadowBits[i] );
+			tr.refdef.dlightMask |= tr.world->surfacesDlightBits[i];
+			addedCount++;
+		} else {
+			culledCount++;
+		}
+	}
+	tr.refdef.dlightMask = ~tr.refdef.dlightMask;
+
+	ri.Printf( PRINT_ALL, "CoD1: %d marked, %d added, %d culled\n", markedCount, addedCount, culledCount );
+}
+
+/*
 =============
 R_AddWorldSurfaces
 =============
@@ -752,12 +892,19 @@ void R_AddWorldSurfaces (void) {
 	tr.currentEntityNum = REFENTITYNUM_WORLD;
 	tr.shiftedEntityNum = tr.currentEntityNum << QSORT_REFENTITYNUM_SHIFT;
 
+	// clear out the visible min/max
+	ClearBounds( tr.viewParms.visBounds[0], tr.viewParms.visBounds[1] );
+
+	// CoD1 uses cell-based rendering instead of BSP leaf rendering
+	if ( tr.world->numCod1Cells > 0 ) {
+		R_AddCod1CellSurfaces();
+		return;
+	}
+
+	// Q3-style BSP leaf rendering
 	// determine which leaves are in the PVS / areamask
 	if (!(tr.viewParms.flags & VPF_DEPTHSHADOW))
 		R_MarkLeaves ();
-
-	// clear out the visible min/max
-	ClearBounds( tr.viewParms.visBounds[0], tr.viewParms.visBounds[1] );
 
 	// perform frustum culling and flag all the potentially visible surfaces
 	if ( tr.refdef.num_dlights > MAX_DLIGHTS ) {

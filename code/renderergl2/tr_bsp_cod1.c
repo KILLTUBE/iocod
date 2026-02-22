@@ -431,6 +431,158 @@ static void R_LoadSubmodelsCod1( const byte *base ) {
 	}
 }
 
+/* -------------------------------------------------------------------------
+   CoD1 Cell-based rendering structures
+
+   CoD1 uses cells instead of BSP leaves for world geometry rendering.
+   Each cell contains cullgroups (AABB-bounded groups of surfaces).
+   ------------------------------------------------------------------------- */
+
+/*
+ * R_LoadCod1CullGroups - Load cullgroups (lump 9) with indices (lump 10)
+ * GL2 uses surface indices (not pointers) for world geometry.
+ */
+static void R_LoadCod1CullGroups( const byte *base ) {
+	const cod1_cullgroup_t *in;
+	const int *indices; /* Cullgroup indices array (lump 10) */
+	cod1CullGroup_t *out;
+	int i, j, count, numIndices;
+	lump_t cg_l, idx_l;
+
+	cg_l = R_GetCod1Lump( base, COD1_LUMP_CULLGROUPS );
+	idx_l = R_GetCod1Lump( base, COD1_LUMP_CULLGROUPINDICES );
+
+	if ( cg_l.filelen % sizeof( cod1_cullgroup_t ) )
+		ri.Error( ERR_DROP, "R_LoadCod1CullGroups: bad cullgroup lump size" );
+
+	count = cg_l.filelen / sizeof( cod1_cullgroup_t );
+	numIndices = idx_l.filelen / sizeof( int );
+	in = (const cod1_cullgroup_t *)( base + cg_l.fileofs );
+	indices = (const int *)( base + idx_l.fileofs );
+
+	out = ri.Hunk_Alloc( count * sizeof( *out ), h_low );
+	s_worldData.cod1CullGroups = out;
+	s_worldData.numCod1CullGroups = count;
+
+	ri.Printf( PRINT_ALL, "...loading %d CoD1 cullgroups with %d indices\n", count, numIndices );
+
+	/* Count total surfaces referenced by cullgroups for debug */
+	int totalSurfs = 0;
+	int emptyCullGroups = 0;
+	for ( i = 0; i < count; i++ ) {
+		int numIdx = LittleLong( in[i].surfaceCount );
+		totalSurfs += numIdx;
+		if ( numIdx == 0 ) {
+			emptyCullGroups++;
+		}
+	}
+	ri.Printf( PRINT_ALL, "  total surfaces referenced: %d (vs %d trianglesoups loaded)\n",
+		totalSurfs, s_worldData.numsurfaces );
+	ri.Printf( PRINT_ALL, "  %d/%d cullgroups are empty!\n", emptyCullGroups, count );
+
+	for ( i = 0; i < count; i++, in++, out++ ) {
+		out->mins[0] = LittleFloat( in->mins[0] );
+		out->mins[1] = LittleFloat( in->mins[1] );
+		out->mins[2] = LittleFloat( in->mins[2] );
+		out->maxs[0] = LittleFloat( in->maxs[0] );
+		out->maxs[1] = LittleFloat( in->maxs[1] );
+		out->maxs[2] = LittleFloat( in->maxs[2] );
+		out->visframe = -1;
+
+		int firstIdx = LittleLong( in->firstSurface );
+		int numIdx = LittleLong( in->surfaceCount );
+
+		/* Validate index range */
+		if ( firstIdx < 0 || firstIdx + numIdx > numIndices ) {
+			ri.Printf( PRINT_WARNING, "R_LoadCod1CullGroups: cullgroup %d has bad index range %d+%d (total indices: %d)\n",
+				i, firstIdx, numIdx, numIndices );
+			out->numSurfaces = 0;
+			out->surfaceIndices = NULL;
+		} else {
+			out->numSurfaces = numIdx;
+			/* Allocate array of surface indices (GL2 uses indices, not pointers) */
+			out->surfaceIndices = ri.Hunk_Alloc( numIdx * sizeof( int ), h_low );
+			int validCount = 0;
+			for ( j = 0; j < numIdx; j++ ) {
+				int triSoupIndex = LittleLong( indices[firstIdx + j] );
+				if ( triSoupIndex >= 0 && triSoupIndex < s_worldData.numsurfaces ) {
+					out->surfaceIndices[j] = triSoupIndex;
+					validCount++;
+				} else {
+					ri.Printf( PRINT_WARNING, "R_LoadCod1CullGroups: cullgroup %d index %d points to invalid trianglesoup %d\n",
+						i, j, triSoupIndex );
+					out->surfaceIndices[j] = -1;
+				}
+			}
+			if ( validCount == 0 && numIdx > 0 ) {
+				ri.Printf( PRINT_WARNING, "R_LoadCod1CullGroups: cullgroup %d has %d indices but ALL are invalid!\n", i, numIdx );
+			}
+		}
+	}
+}
+
+/*
+ * R_LoadCod1Cells - Load cells (lump 17)
+ */
+static void R_LoadCod1Cells( const byte *base ) {
+	const cod1_cell_t *in;
+	cod1Cell_t *out;
+	int i, count;
+	lump_t l;
+
+	l = R_GetCod1Lump( base, COD1_LUMP_CELLS );
+
+	if ( l.filelen % sizeof( cod1_cell_t ) )
+		ri.Error( ERR_DROP, "R_LoadCod1Cells: bad lump size" );
+
+	count = l.filelen / sizeof( cod1_cell_t );
+	in = (const cod1_cell_t *)( base + l.fileofs );
+
+	out = ri.Hunk_Alloc( count * sizeof( *out ), h_low );
+	s_worldData.cod1Cells = out;
+	s_worldData.numCod1Cells = count;
+
+	ri.Printf( PRINT_ALL, "...loading %d CoD1 cells\n", count );
+
+	/* Count total cullgroups referenced by cells */
+	int totalCellCullgroups = 0;
+	int emptyCells = 0;
+	for ( i = 0; i < count; i++ ) {
+		int numCg = LittleLong( in[i].cullGroupCount );
+		totalCellCullgroups += numCg;
+		if ( numCg == 0 ) {
+			emptyCells++;
+		}
+	}
+	ri.Printf( PRINT_ALL, "  total cullgroups referenced by cells: %d (vs %d cullgroups loaded)\n",
+		totalCellCullgroups, s_worldData.numCod1CullGroups );
+	ri.Printf( PRINT_ALL, "  %d/%d cells have no cullgroups!\n", emptyCells, count );
+
+	for ( i = 0; i < count; i++, in++, out++ ) {
+		out->mins[0] = LittleFloat( in->mins[0] );
+		out->mins[1] = LittleFloat( in->mins[1] );
+		out->mins[2] = LittleFloat( in->mins[2] );
+		out->maxs[0] = LittleFloat( in->maxs[0] );
+		out->maxs[1] = LittleFloat( in->maxs[1] );
+		out->maxs[2] = LittleFloat( in->maxs[2] );
+		out->visframe = -1;
+
+		int firstCg = LittleLong( in->firstCullGroup );
+		int numCg = LittleLong( in->cullGroupCount );
+
+		/* Validate cullgroup range */
+		if ( firstCg < 0 || firstCg + numCg > s_worldData.numCod1CullGroups ) {
+			ri.Printf( PRINT_WARNING, "R_LoadCod1Cells: cell %d has bad cullgroup range %d+%d\n",
+				i, firstCg, numCg );
+			out->numCullGroups = 0;
+			out->cullgroups = NULL;
+		} else {
+			out->numCullGroups = numCg;
+			out->cullgroups = &s_worldData.cod1CullGroups[firstCg];
+		}
+	}
+}
+
 /* =========================================================================
    R_LoadCod1WorldMap – main entry point called from RE_LoadWorldMap.
    ========================================================================= */
@@ -448,8 +600,13 @@ void R_LoadCod1WorldMap( const byte *base ) {
 
 	R_LoadCod1Surfaces   ( base );
 	R_LoadCod1Marksurfaces( base );
+	R_LoadCod1CullGroups ( base );
+	R_LoadCod1Cells      ( base );
 	R_LoadCod1NodesAndLeafs( base );
 	R_LoadSubmodelsCod1  ( base );
 	R_LoadVisibilityCod1 ( base );
 	R_LoadEntitiesCod1   ( base );
+
+	ri.Printf( PRINT_ALL, "CoD1 map loaded: %d trianglesoups, %d cullgroups, %d cells\n",
+		s_worldData.numsurfaces, s_worldData.numCod1CullGroups, s_worldData.numCod1Cells );
 }

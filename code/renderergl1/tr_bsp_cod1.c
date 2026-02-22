@@ -173,6 +173,9 @@ static void R_LoadCod1Surfaces( const byte *base ) {
 	s_worldData.numsurfaces = num_ts;
 
 	ri.Printf( PRINT_ALL, "...loading %d CoD1 triangle soups\n", num_ts );
+	ri.Printf( PRINT_ALL, "  vertices: %d, triangles: %d\n",
+		vt_l.filelen / sizeof(cod1_vertex_t),
+		tr_l.filelen / sizeof(unsigned short) );
 
 	for ( i = 0; i < num_ts; i++ ) {
 		msurface_t      *surf = &s_worldData.surfaces[i];
@@ -435,28 +438,44 @@ static void R_LoadSubmodelsCod1( const byte *base ) {
    ------------------------------------------------------------------------- */
 
 /*
- * R_LoadCod1CullGroups - Load cullgroups (lump 9)
+ * R_LoadCod1CullGroups - Load cullgroups (lump 9) with indices (lump 10)
  * Cullgroups are AABB-bounded groups of TriangleSoup surfaces for culling.
+ * The cullgroup's firstSurface/surfaceCount reference the cullgroup indices array (lump 10),
+ * which contains indices into the TriangleSoup array.
  */
 static void R_LoadCod1CullGroups( const byte *base ) {
 	const cod1_cullgroup_t *in;
+	const int *indices; /* Cullgroup indices array (lump 10) */
 	cod1CullGroup_t *out;
-	int i, count;
-	lump_t l;
+	int i, j, count, numIndices;
+	lump_t cg_l, idx_l;
 
-	l = R_GetCod1Lump( base, COD1_LUMP_CULLGROUPS );
+	cg_l = R_GetCod1Lump( base, COD1_LUMP_CULLGROUPS );
+	idx_l = R_GetCod1Lump( base, COD1_LUMP_CULLGROUPINDICES );
 
-	if ( l.filelen % sizeof( cod1_cullgroup_t ) )
-		ri.Error( ERR_DROP, "R_LoadCod1CullGroups: bad lump size" );
+	if ( cg_l.filelen % sizeof( cod1_cullgroup_t ) )
+		ri.Error( ERR_DROP, "R_LoadCod1CullGroups: bad cullgroup lump size" );
 
-	count = l.filelen / sizeof( cod1_cullgroup_t );
-	in = (const cod1_cullgroup_t *)( base + l.fileofs );
+	count = cg_l.filelen / sizeof( cod1_cullgroup_t );
+	numIndices = idx_l.filelen / sizeof( int );
+	in = (const cod1_cullgroup_t *)( base + cg_l.fileofs );
+	indices = (const int *)( base + idx_l.fileofs );
 
 	out = ri.Hunk_Alloc( count * sizeof( *out ), h_low );
 	s_worldData.cod1CullGroups = out;
 	s_worldData.numCod1CullGroups = count;
 
-	ri.Printf( PRINT_ALL, "...loading %d CoD1 cullgroups\n", count );
+	ri.Printf( PRINT_ALL, "...loading %d CoD1 cullgroups with %d indices\n", count, numIndices );
+
+	/* Count total surfaces referenced by cullgroups for debug */
+	int totalSurfs = 0;
+	for ( i = 0; i < count; i++ ) {
+		int firstIdx = LittleLong( in[i].firstSurface );
+		int numIdx = LittleLong( in[i].surfaceCount );
+		totalSurfs += numIdx;
+	}
+	ri.Printf( PRINT_ALL, "  total surfaces referenced: %d (vs %d trianglesoups loaded)\n",
+		totalSurfs, s_worldData.numsurfaces );
 
 	for ( i = 0; i < count; i++, in++, out++ ) {
 		out->mins[0] = LittleFloat( in->mins[0] );
@@ -467,21 +486,28 @@ static void R_LoadCod1CullGroups( const byte *base ) {
 		out->maxs[2] = LittleFloat( in->maxs[2] );
 		out->visframe = -1;
 
-		int firstSurf = LittleLong( in->firstSurface );
-		int numSurfs = LittleLong( in->surfaceCount );
+		int firstIdx = LittleLong( in->firstSurface );
+		int numIdx = LittleLong( in->surfaceCount );
 
-		/* Validate surface range */
-		if ( firstSurf < 0 || firstSurf + numSurfs > s_worldData.numsurfaces ) {
-			ri.Printf( PRINT_WARNING, "R_LoadCod1CullGroups: cullgroup %d has bad surface range %d+%d\n",
-				i, firstSurf, numSurfs );
+		/* Validate index range */
+		if ( firstIdx < 0 || firstIdx + numIdx > numIndices ) {
+			ri.Printf( PRINT_WARNING, "R_LoadCod1CullGroups: cullgroup %d has bad index range %d+%d (total indices: %d)\n",
+				i, firstIdx, numIdx, numIndices );
 			out->numSurfaces = 0;
 			out->surfaces = NULL;
 		} else {
-			out->numSurfaces = numSurfs;
+			out->numSurfaces = numIdx;
 			/* Allocate array of surface pointers */
-			out->surfaces = ri.Hunk_Alloc( numSurfs * sizeof( msurface_t * ), h_low );
-			for ( int j = 0; j < numSurfs; j++ ) {
-				out->surfaces[j] = &s_worldData.surfaces[firstSurf + j];
+			out->surfaces = ri.Hunk_Alloc( numIdx * sizeof( msurface_t * ), h_low );
+			for ( j = 0; j < numIdx; j++ ) {
+				int triSoupIndex = LittleLong( indices[firstIdx + j] );
+				if ( triSoupIndex >= 0 && triSoupIndex < s_worldData.numsurfaces ) {
+					out->surfaces[j] = &s_worldData.surfaces[triSoupIndex];
+				} else {
+					ri.Printf( PRINT_WARNING, "R_LoadCod1CullGroups: cullgroup %d index %d points to invalid trianglesoup %d\n",
+						i, j, triSoupIndex );
+					out->surfaces[j] = NULL;
+				}
 			}
 		}
 	}
@@ -564,4 +590,7 @@ void R_LoadCod1WorldMap( const byte *base ) {
 	R_LoadEntitiesCod1   ( base );   /* lump 29 – entities     */
 
 	s_worldData.dataSize = (byte *)ri.Hunk_Alloc( 0, h_low ) - startMarker;
+
+	ri.Printf( PRINT_ALL, "CoD1 map loaded: %d cells, %d cullgroups, %d trianglesoups\n",
+		s_worldData.numCod1Cells, s_worldData.numCod1CullGroups, s_worldData.numsurfaces );
 }
