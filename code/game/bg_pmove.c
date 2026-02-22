@@ -45,6 +45,9 @@ float	pm_waterfriction = 1.0f;
 float	pm_flightfriction = 3.0f;
 float	pm_spectatorfriction = 5.0f;
 
+float	pm_ladderScale = 0.5f;
+float	pm_ladderaccelerate = 20.0f;
+
 int		c_pmove = 0;
 
 
@@ -177,7 +180,7 @@ static void PM_Friction( void ) {
 	vel = pm->ps->velocity;
 	
 	VectorCopy( vel, vec );
-	if ( pml.walking ) {
+	if ( pml.walking && !(pm->ps->pm_flags & PMF_ON_LADDER) ) {
 		vec[2] = 0;	// ignore slope movement
 	}
 
@@ -210,6 +213,11 @@ static void PM_Friction( void ) {
 	// apply flying friction
 	if ( pm->ps->powerups[PW_FLIGHT]) {
 		drop += speed*pm_flightfriction*pml.frametime;
+	}
+
+	// apply ladder friction
+	if ( pm->ps->pm_flags & PMF_ON_LADDER ) {
+		drop += speed*pm_friction*pml.frametime;
 	}
 
 	if ( pm->ps->pm_type == PM_SPECTATOR) {
@@ -475,8 +483,10 @@ static void PM_LadderMove( void ) {
 	int		i;
 
 	// Cancel ladder if player presses jump (CoD1 behavior: jump exits ladder)
-	if ( pm->cmd.upmove < 0 ) {
+	if ( pm->cmd.upmove >= 10 ) {
 		pm->ps->pm_flags &= ~PMF_ON_LADDER;
+		pm->ps->pm_flags |= PMF_TIME_LADDER;
+		pm->ps->pm_time = 200;
 		return;
 	}
 
@@ -485,12 +495,21 @@ static void PM_LadderMove( void ) {
 	scale = PM_CmdScale( &pm->cmd );
 
 	// Get movement direction from player input
+	// On a ladder, forward move maps to vertical movement if looking up/down
+	// but we also want to allow just moving up with forwardmove
 	for (i=0 ; i<3 ; i++) {
 		wishvel[i] = scale * pml.forward[i]*pm->cmd.forwardmove + scale * pml.right[i]*pm->cmd.rightmove;
 	}
 
-	// Add upmove (forward/back on ladder = up/down)
-	wishvel[2] += scale * pm->cmd.upmove;
+	// Forward move maps to vertical movement on a ladder
+	if ( pml.forward[2] > -0.1 ) {
+		wishvel[2] += scale * pm->cmd.forwardmove;
+	} else {
+		wishvel[2] -= scale * pm->cmd.forwardmove;
+	}
+
+	// Add upmove (crouch/jump on ladder = down/up)
+	// wishvel[2] += scale * pm->cmd.upmove;
 
 	VectorCopy (wishvel, wishdir);
 	wishspeed = VectorNormalize(wishdir);
@@ -1240,6 +1259,45 @@ static void PM_GroundTrace( void ) {
 	PM_AddTouchEnt( trace.entityNum );
 }
 
+
+/*
+===================
+PM_CheckLadder
+===================
+*/
+static void PM_CheckLadder( void ) {
+	vec3_t	flatforward, point;
+	trace_t	trace;
+
+	if ( pm->ps->pm_flags & PMF_TIME_LADDER ) {
+		return;
+	}
+
+	flatforward[0] = pml.forward[0];
+	flatforward[1] = pml.forward[1];
+	flatforward[2] = 0;
+	if ( VectorNormalize (flatforward) == 0 ) {
+		// looking straight up or down, use the previous forward if we are already on a ladder
+		if ( pm->ps->pm_flags & PMF_ON_LADDER ) {
+			// for now just allow it, maybe it will keep us on
+		} else {
+			return;
+		}
+	}
+
+	VectorMA (pm->ps->origin, 1.0, flatforward, point);
+
+	pm->trace (&trace, pm->ps->origin, pm->mins, pm->maxs, point, pm->ps->clientNum, pm->tracemask);
+
+	if ( trace.fraction < 1.0 && (trace.surfaceFlags & SURF_LADDER) ) {
+		// If we are already on a ladder, or if we are moving forward into one
+		if ( (pm->ps->pm_flags & PMF_ON_LADDER) || pm->cmd.forwardmove > 0 ) {
+			pm->ps->pm_flags |= PMF_ON_LADDER;
+		}
+	} else {
+		pm->ps->pm_flags &= ~PMF_ON_LADDER;
+	}
+}
 
 /*
 =============
@@ -2003,6 +2061,9 @@ void PmoveSingle (pmove_t *pmove) {
 	// set mins, maxs, and viewheight
 	PM_CheckDuck ();
 
+	// ladder movement
+	PM_CheckLadder();
+
 	// set groundentity
 	PM_GroundTrace();
 
@@ -2024,6 +2085,8 @@ void PmoveSingle (pmove_t *pmove) {
 		PM_GrappleMove();
 		// We can wiggle a bit
 		PM_AirMove();
+	} else if (pm->ps->pm_flags & PMF_ON_LADDER) {
+		PM_LadderMove();
 	} else if (pm->ps->pm_flags & PMF_TIME_WATERJUMP) {
 		PM_WaterJumpMove();
 	} else if ( pm->waterlevel > 1 ) {
