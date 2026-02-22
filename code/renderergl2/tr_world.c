@@ -822,9 +822,8 @@ void R_AddCod1CellSurfaces( void ) {
 			continue;
 		}
 
-		srfBspSurface_t *bspSurf = (srfBspSurface_t *)surf->data;
-		VectorCopy( bspSurf->cullBounds[0], bounds[0] );
-		VectorCopy( bspSurf->cullBounds[1], bounds[1] );
+		VectorCopy( surf->cullinfo.bounds[0], bounds[0] );
+		VectorCopy( surf->cullinfo.bounds[1], bounds[1] );
 
 		/* Frustum cull */
 		if ( !r_nocull->integer ) {
