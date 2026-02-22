@@ -155,11 +155,13 @@ typedef enum {
 #define	PMF_RESPAWNED		512		// clear after attack and jump buttons come up
 #define	PMF_USE_ITEM_HELD	1024
 #define PMF_GRAPPLE_PULL	2048	// pull towards grapple location
-#define PMF_FOLLOW			4096	// spectate following another player
-#define PMF_SCOREBOARD		8192	// spectate as a scoreboard
+#define PMF_ON_LADDER		4096	// CoD1: player is on a ladder
+#define PMF_TIME_LADDER		8192	// CoD1: pm_time before can jump off ladder
+#define PMF_FOLLOW			16384	// spectate following another player
+#define PMF_SCOREBOARD		32768	// spectate as a scoreboard
 #define PMF_INVULEXPAND		16384	// invulnerability sphere set to full size
 
-#define	PMF_ALL_TIMES	(PMF_TIME_WATERJUMP|PMF_TIME_LAND|PMF_TIME_KNOCKBACK)
+#define	PMF_ALL_TIMES	(PMF_TIME_WATERJUMP|PMF_TIME_LAND|PMF_TIME_KNOCKBACK|PMF_TIME_LADDER)
 
 #define	MAXTOUCH	32
 typedef struct {

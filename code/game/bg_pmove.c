@@ -463,6 +463,51 @@ static void PM_WaterJumpMove( void ) {
 
 /*
 ===================
+PM_LadderMove
+===================
+CoD1 ladder movement - can move freely up/down along ladder
+*/
+static void PM_LadderMove( void ) {
+	vec3_t	wishvel;
+	float	wishspeed;
+	vec3_t	wishdir;
+	float	scale;
+	int		i;
+
+	// Cancel ladder if player presses jump (CoD1 behavior: jump exits ladder)
+	if ( pm->cmd.upmove < 0 ) {
+		pm->ps->pm_flags &= ~PMF_ON_LADDER;
+		return;
+	}
+
+	PM_Friction();
+
+	scale = PM_CmdScale( &pm->cmd );
+
+	// Get movement direction from player input
+	for (i=0 ; i<3 ; i++) {
+		wishvel[i] = scale * pml.forward[i]*pm->cmd.forwardmove + scale * pml.right[i]*pm->cmd.rightmove;
+	}
+
+	// Add upmove (forward/back on ladder = up/down)
+	wishvel[2] += scale * pm->cmd.upmove;
+
+	VectorCopy (wishvel, wishdir);
+	wishspeed = VectorNormalize(wishdir);
+
+	// Cap ladder speed
+	if ( wishspeed > pm->ps->speed * pm_ladderScale ) {
+		wishspeed = pm->ps->speed * pm_ladderScale;
+	}
+
+	PM_Accelerate( wishdir, wishspeed, pm_ladderaccelerate );
+
+	// No gravity when on ladder
+	PM_SlideMove( qfalse );
+}
+
+/*
+===================
 PM_WaterMove
 
 ===================
