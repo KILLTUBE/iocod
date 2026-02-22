@@ -795,6 +795,10 @@ CL_CGameRendering
 void CL_CGameRendering( stereoFrame_t stereo ) {
 	VM_Call( cgvm, CG_DRAW_ACTIVE_FRAME, cl.serverTime, stereo, clc.demoplaying );
 	VM_Debug( 0 );
+#ifdef STANDALONE
+	/* Draw CoD1 viewmodel on top of the cgame scene */
+	CL_DrawViewModel( stereo );
+#endif
 }
 
 

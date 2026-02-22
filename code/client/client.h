@@ -642,3 +642,11 @@ qboolean CL_VideoRecording( void );
 //
 void CL_WriteDemoMessage ( msg_t *msg, int headerBytes );
 
+#ifdef STANDALONE
+/* cl_weapon_cod1.c */
+void CL_WeaponCod1_Init( void );
+void CL_WeaponCod1_Shutdown( void );
+void CL_GiveWeapon( const char *name );
+void CL_DrawViewModel( stereoFrame_t stereo );
+#endif
+

@@ -47,7 +47,10 @@ list(APPEND CLIENT_DEFINITIONS BOTLIB)
 
 if(BUILD_STANDALONE)
     list(APPEND CLIENT_DEFINITIONS STANDALONE NO_QVM)
-    list(APPEND CLIENT_SOURCES ${SOURCE_DIR}/qcommon/bg_weapon_cod1.c)
+    list(APPEND CLIENT_SOURCES
+        ${SOURCE_DIR}/qcommon/bg_weapon_cod1.c
+        ${SOURCE_DIR}/client/cl_weapon_cod1.c
+    )
 endif()
 
 if(USE_RENDERER_DLOPEN)

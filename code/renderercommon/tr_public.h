@@ -99,6 +99,11 @@ typedef struct {
 	qboolean (*inPVS)( const vec3_t p1, const vec3_t p2 );
 
 	void (*TakeVideoFrame)( int h, int w, byte* captureBuffer, byte *encodeBuffer, qboolean motionJpeg );
+
+	/* CoD1 xanim support */
+	qhandle_t (*RegisterXAnim)( const char *name );
+	int       (*XAnimNumFrames)( qhandle_t anim );
+	int       (*XAnimFramerate)( qhandle_t anim );
 } refexport_t;
 
 //
