@@ -267,6 +267,25 @@ void IN_Button14Up(void) {IN_KeyUp(&in_buttons[14]);}
 void IN_Button15Down(void) {IN_KeyDown(&in_buttons[15]);}
 void IN_Button15Up(void) {IN_KeyUp(&in_buttons[15]);}
 
+// CoD1: +gostand - stand up if crouching, jump if already standing
+// DEFAULT_VIEWHEIGHT from bg_public.h is 26
+#define DEFAULT_VIEWHEIGHT 26
+
+void IN_GoStandDown(void) {
+	// If already standing (or close to standing height), trigger jump instead
+	if (cl.snap.ps.viewheight >= DEFAULT_VIEWHEIGHT - 2) {
+		IN_UpDown();  // Jump
+	} else {
+		IN_KeyDown(&in_buttons[13]);  // BUTTON_STAND
+	}
+}
+
+void IN_GoStandUp(void) {
+	IN_KeyUp(&in_buttons[13]);  // BUTTON_STAND
+	// Also release jump key if we triggered it
+	IN_UpUp();
+}
+
 void IN_CenterView (void) {
 	cl.viewangles[PITCH] = -SHORT2ANGLE(cl.snap.ps.delta_angles[PITCH]);
 }
@@ -994,8 +1013,8 @@ void CL_InitInput( void ) {
 	Cmd_AddCommand ("-mlook", IN_MLookUp);
 
 	// CoD1 stance commands
-	Cmd_AddCommand ("+gostand", IN_Button13Down);
-	Cmd_AddCommand ("-gostand", IN_Button13Up);
+	Cmd_AddCommand ("+gostand", IN_GoStandDown);
+	Cmd_AddCommand ("-gostand", IN_GoStandUp);
 	Cmd_AddCommand ("gocrouch", IN_Button11Down);  // Toggle/hold for crouch
 	Cmd_AddCommand ("goprone", IN_Button12Down);    // Toggle/hold for prone
 
