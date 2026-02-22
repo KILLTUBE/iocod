@@ -180,6 +180,11 @@ static void R_LoadCod1Surfaces( const byte *base ) {
 		if ( r_singleShader->integer && !surf->shader->isSky )
 			surf->shader = tr.defaultShader;
 
+		/* CoD1 geometry may have different winding order - make two-sided */
+		if ( surf->shader && surf->shader->cullType == CT_FRONT_SIDED ) {
+			((shader_t *)surf->shader)->cullType = CT_TWO_SIDED;
+		}
+
 		surf->fogIndex = 0;
 
 		/* Allocate srfBspSurface_t + vertices + indices */

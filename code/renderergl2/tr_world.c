@@ -796,13 +796,7 @@ void R_AddCod1CellSurfaces( void ) {
 	}
 
 	/* CoD1 cell system is nearly empty - render all trianglesoups directly with AABB culling */
-	ri.Printf( PRINT_ALL, "CoD1: rendering all %d trianglesoups (cell system has minimal data)\n", tr.world->numsurfaces );
-
-	/* Debug: check first surface type */
-	if ( tr.world->numsurfaces > 0 ) {
-		ri.Printf( PRINT_ALL, "CoD1: first surface type = %d (SF_TRIANGLES=%d, SF_GRID=%d, SF_FACE=%d)\n",
-			*tr.world->surfaces[0].data, SF_TRIANGLES, SF_GRID, SF_FACE );
-	}
+	/* ri.Printf( PRINT_ALL, "CoD1: rendering all %d trianglesoups (cell system has minimal data)\n", tr.world->numsurfaces); */
 
 	/* Set dlight/pshadow bits */
 	if ( tr.refdef.num_dlights > MAX_DLIGHTS ) {
@@ -846,8 +840,7 @@ void R_AddCod1CellSurfaces( void ) {
 		markedCount++;
 	}
 
-	ri.Printf( PRINT_ALL, "CoD1: %d not SF_TRIANGLES, %d frustum culled, %d marked\n",
-		notTriangles, culledFustum, markedCount );
+	/* ri.Printf( PRINT_ALL, "CoD1: %d marked\n", markedCount); */
 
 	/* Now add all the marked surfaces */
 	tr.refdef.dlightMask = 0;
@@ -860,6 +853,10 @@ void R_AddCod1CellSurfaces( void ) {
 		}
 
 		surf = &tr.world->surfaces[i];
+		if ( !surf->shader ) {
+			ri.Printf( PRINT_ALL, "CoD1: surface %d has NULL shader!\n", i );
+			continue;
+		}
 		if ( !R_CullSurface( surf ) ) {
 			R_AddWorldSurface( surf, tr.world->surfacesDlightBits[i], tr.world->surfacesPshadowBits[i] );
 			tr.refdef.dlightMask |= tr.world->surfacesDlightBits[i];
@@ -870,7 +867,7 @@ void R_AddCod1CellSurfaces( void ) {
 	}
 	tr.refdef.dlightMask = ~tr.refdef.dlightMask;
 
-	ri.Printf( PRINT_ALL, "CoD1: %d marked, %d added, %d culled\n", markedCount, addedCount, culledCount );
+	/* ri.Printf( PRINT_ALL, "CoD1: %d added, %d culled\n", addedCount, culledCount ); */
 }
 
 /*
