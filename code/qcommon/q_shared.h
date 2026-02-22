@@ -1233,6 +1233,8 @@ typedef struct playerState_s {
 #define BUTTON_PRONE		4096
 #define BUTTON_STAND		8192
 
+#define BUTTON_RELOAD		32768
+
 #define	BUTTON_ANY			16384			// any key whatsoever (updated from 2048)
 
 #define	MOVE_RUN			120			// if forwardmove or rightmove are >= MOVE_RUN,

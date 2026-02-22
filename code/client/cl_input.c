@@ -51,6 +51,7 @@ kbutton_t	in_left, in_right, in_forward, in_back;
 kbutton_t	in_lookup, in_lookdown, in_moveleft, in_moveright;
 kbutton_t	in_strafe, in_speed;
 kbutton_t	in_up, in_down;
+kbutton_t	in_reload;
 
 #ifdef USE_VOIP
 kbutton_t	in_voiprecord;
@@ -214,6 +215,9 @@ void IN_MoveleftDown(void) {IN_KeyDown(&in_moveleft);}
 void IN_MoveleftUp(void) {IN_KeyUp(&in_moveleft);}
 void IN_MoverightDown(void) {IN_KeyDown(&in_moveright);}
 void IN_MoverightUp(void) {IN_KeyUp(&in_moveright);}
+
+void IN_ReloadDown(void) {IN_KeyDown(&in_reload);}
+void IN_ReloadUp(void) {IN_KeyUp(&in_reload);}
 
 void IN_SpeedDown(void) {IN_KeyDown(&in_speed);}
 void IN_SpeedUp(void) {IN_KeyUp(&in_speed);}
@@ -555,6 +559,11 @@ void CL_CmdButtons( usercmd_t *cmd ) {
 		}
 		in_buttons[i].wasPressed = qfalse;
 	}
+
+	if ( in_reload.active || in_reload.wasPressed ) {
+		cmd->buttons |= BUTTON_RELOAD;
+	}
+	in_reload.wasPressed = qfalse;
 
 	if ( Key_GetCatcher( ) ) {
 		cmd->buttons |= BUTTON_TALK;
@@ -1009,6 +1018,8 @@ void CL_InitInput( void ) {
 	Cmd_AddCommand ("-button13", IN_Button13Up);
 	Cmd_AddCommand ("+button14", IN_Button14Down);
 	Cmd_AddCommand ("-button14", IN_Button14Up);
+	Cmd_AddCommand ("+reload", IN_ReloadDown);
+	Cmd_AddCommand ("-reload", IN_ReloadUp);
 	Cmd_AddCommand ("+mlook", IN_MLookDown);
 	Cmd_AddCommand ("-mlook", IN_MLookUp);
 
@@ -1092,6 +1103,8 @@ void CL_ShutdownInput(void)
 	Cmd_RemoveCommand("-button13");
 	Cmd_RemoveCommand("+button14");
 	Cmd_RemoveCommand("-button14");
+	Cmd_RemoveCommand("+reload");
+	Cmd_RemoveCommand("-reload");
 	Cmd_RemoveCommand("+mlook");
 	Cmd_RemoveCommand("-mlook");
 
