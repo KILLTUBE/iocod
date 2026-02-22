@@ -2,7 +2,7 @@
 ===========================================================================
 tr_bsp_cod1.c -- CoD1 IBSP version 59 BSP loader for the GL2 renderer.
 
-Adapted from renderergl1/tr_bsp_cod1.c to use GL2 types:
+Adapted from the legacy renderer to use GL2 types:
   - srfBspSurface_t / srfVert_t instead of srfTriangles_t / drawVert_t
   - marksurfaces stored as int* indices (not msurface_t** pointers)
   - bmodel_t uses int firstSurface/numSurfaces indices
@@ -34,7 +34,7 @@ static lump_t R_GetCod1Lump( const byte *base, int idx ) {
 }
 
 /* -------------------------------------------------------------------------
-   Shaders / materials (identical to GL1 version)
+   Shaders / materials (identical to legacy version)
    ------------------------------------------------------------------------- */
 static void R_LoadShadersCod1( const byte *base ) {
 	lump_t l = R_GetCod1Lump( base, COD1_LUMP_MATERIALS );
@@ -58,7 +58,7 @@ static void R_LoadShadersCod1( const byte *base ) {
 }
 
 /* -------------------------------------------------------------------------
-   Lightmaps (identical 128x128x3 format, identical to GL1 version)
+   Lightmaps (identical 128x128x3 format, identical to legacy version)
    ------------------------------------------------------------------------- */
 static void R_LoadLightmapsCod1( const byte *base ) {
 	lump_t      l = R_GetCod1Lump( base, COD1_LUMP_LIGHTMAPS );
@@ -98,7 +98,7 @@ static void R_LoadLightmapsCod1( const byte *base ) {
 }
 
 /* -------------------------------------------------------------------------
-   Planes (identical to GL1 version)
+   Planes (identical to legacy version)
    ------------------------------------------------------------------------- */
 static void R_LoadPlanesCod1( const byte *base ) {
 	lump_t    l = R_GetCod1Lump( base, COD1_LUMP_PLANES );
@@ -344,7 +344,7 @@ static void R_LoadCod1NodesAndLeafs( const byte *base ) {
 }
 
 /* -------------------------------------------------------------------------
-   Visibility stub (identical to GL1 version)
+   Visibility stub (identical to legacy version)
    ------------------------------------------------------------------------- */
 static void R_LoadVisibilityCod1( const byte *base ) {
 	s_worldData.numClusters  = s_worldData.numClusters  ? s_worldData.numClusters  : 1;
@@ -360,7 +360,7 @@ static void R_LoadVisibilityCod1( const byte *base ) {
 }
 
 /* -------------------------------------------------------------------------
-   Entities (identical to GL1 version)
+   Entities (identical to legacy version)
    ------------------------------------------------------------------------- */
 static void R_LoadEntitiesCod1( const byte *base ) {
 	lump_t l = R_GetCod1Lump( base, COD1_LUMP_ENTITIES );

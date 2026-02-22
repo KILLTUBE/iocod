@@ -39,7 +39,6 @@ For Win32:
 2. Copy the following files into Quake 3's install directory: 
      
      ioquake3.x86.exe
-     renderer_opengl1_x86.dll
      renderer_opengl2_x86.dll
      
    These can be found in build/release-mingw32-x86 after compiling, or bug

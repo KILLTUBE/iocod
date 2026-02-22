@@ -65,11 +65,6 @@ function(finish_macos_app)
     if(USE_RENDERER_DLOPEN)
         set(MACOS_APP_BINARY_DIR ${CLIENT_BINARY}.app/Contents/MacOS)
 
-        if(BUILD_RENDERER_GL1)
-            set_output_dirs(${RENDERER_GL1_BINARY} SUBDIRECTORY ${MACOS_APP_BINARY_DIR})
-            add_dependencies(${CLIENT_BINARY} ${RENDERER_GL1_BINARY})
-        endif()
-
         if(BUILD_RENDERER_GL2)
             set_output_dirs(${RENDERER_GL2_BINARY} SUBDIRECTORY ${MACOS_APP_BINARY_DIR})
             add_dependencies(${CLIENT_BINARY} ${RENDERER_GL2_BINARY})

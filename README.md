@@ -161,7 +161,6 @@ The following CMake variables may be set, using `-D` on the command line.
 ```
   BUILD_SERVER            - build the 'ioq3ded' server binary
   BUILD_CLIENT            - build the 'ioquake3' client binary
-  BUILD_RENDERER_OPENGL1  - build the opengl1 client / renderer library
   BUILD_RENDERER_OPENGL2  - build the opengl2 client / renderer library
   BUILD_GAME_LIBRARIES    - build the game shared libraries
   BUILD_GAME_QVMS         - build the game qvms
@@ -203,8 +202,6 @@ The defaults for these variables may differ depending on the target platform.
 The opengl2 renderer (the default) supports OpenGL ES 2+. Though there
 are many missing features and the performance may not be sufficient for
 embedded System-on-a-Chip and mobile platforms.
-
-The opengl1 renderer does not have OpenGL ES support.
 
 The opengl2 renderer will try both OpenGL and OpenGL ES APIs to find one that
 works. The `r_preferOpenGLES` cvar controls which API to try first.

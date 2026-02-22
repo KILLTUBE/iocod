@@ -2122,7 +2122,7 @@ static void Upload32(byte *data, int x, int y, int width, int height, GLenum pic
 		if (type == IMGTYPE_COLORALPHA)
 		{
 
-			// This corresponds to what the OpenGL1 renderer does.
+			// This corresponds to what the legacy renderer did.
 			if (!(flags & IMGFLAG_NOLIGHTSCALE) && (scaled || mipmap))
 				R_LightScaleTexture(data, width, height, !mipmap);
 		}

@@ -29,10 +29,8 @@ endif()
 
 if(USE_RENDERER_DLOPEN)
     list(APPEND RENDERER_DEFINITIONS USE_RENDERER_DLOPEN)
-elseif(BUILD_RENDERER_GL1 AND BUILD_RENDERER_GL2)
-    message(FATAL_ERROR "Multiple static renderers enabled; choose one")
-elseif(NOT BUILD_RENDERER_GL1 AND NOT BUILD_RENDERER_GL2)
-    message(FATAL_ERROR "Zero static renderers enabled; choose one")
+elseif(NOT BUILD_RENDERER_GL2)
+    message(FATAL_ERROR "No static renderer enabled; choose GL2")
 endif()
 
 list(APPEND RENDERER_LIBRARIES ${COMMON_LIBRARIES})
