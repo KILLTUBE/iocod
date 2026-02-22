@@ -58,13 +58,17 @@ static void R_LoadShadersCod1( const byte *base ) {
 }
 
 /* -------------------------------------------------------------------------
-   Lightmaps (identical 128x128x3 format, identical to legacy version)
+   Lightmaps — CoD1 stores 512x512 RGB lightmaps (786432 bytes each).
+   Unlike Q3's 128x128, multiple triangle soups share a single 512x512 tile.
    ------------------------------------------------------------------------- */
+#define COD1_LIGHTMAP_SIZE 512
+#define COD1_LIGHTMAP_BYTES (COD1_LIGHTMAP_SIZE * COD1_LIGHTMAP_SIZE * 3)
+
 static void R_LoadLightmapsCod1( const byte *base ) {
 	lump_t      l = R_GetCod1Lump( base, COD1_LUMP_LIGHTMAPS );
 	byte       *buf, *buf_p;
 	int         len, i, j;
-	static byte image[128 * 128 * 4];
+	static byte image[COD1_LIGHTMAP_SIZE * COD1_LIGHTMAP_SIZE * 4];
 	byte        tmp[4];
 
 	len = l.filelen;
@@ -74,17 +78,17 @@ static void R_LoadLightmapsCod1( const byte *base ) {
 
 	R_IssuePendingRenderCommands();
 
-	tr.numLightmaps = len / ( 128 * 128 * 3 );
-	if ( tr.numLightmaps == 1 )
-		tr.numLightmaps++;
+	tr.numLightmaps = len / COD1_LIGHTMAP_BYTES;
+	ri.Printf( PRINT_ALL, "...loading %d CoD1 lightmaps (%dx%d)\n",
+		tr.numLightmaps, COD1_LIGHTMAP_SIZE, COD1_LIGHTMAP_SIZE );
 
 	if ( r_vertexLight->integer || glConfig.hardwareType == GLHW_PERMEDIA2 )
 		return;
 
 	tr.lightmaps = ri.Hunk_Alloc( tr.numLightmaps * sizeof( image_t * ), h_low );
 	for ( i = 0; i < tr.numLightmaps; i++ ) {
-		buf_p = buf + i * 128 * 128 * 3;
-		for ( j = 0; j < 128 * 128; j++ ) {
+		buf_p = buf + i * COD1_LIGHTMAP_BYTES;
+		for ( j = 0; j < COD1_LIGHTMAP_SIZE * COD1_LIGHTMAP_SIZE; j++ ) {
 			tmp[0] = buf_p[j*3+0];
 			tmp[1] = buf_p[j*3+1];
 			tmp[2] = buf_p[j*3+2];
@@ -92,7 +96,7 @@ static void R_LoadLightmapsCod1( const byte *base ) {
 			R_ColorShiftLightingBytes( tmp, &image[j*4] );
 		}
 		tr.lightmaps[i] = R_CreateImage( va( "*lightmap%d", i ), image,
-			128, 128, IMGTYPE_COLORALPHA,
+			COD1_LIGHTMAP_SIZE, COD1_LIGHTMAP_SIZE, IMGTYPE_COLORALPHA,
 			IMGFLAG_NOLIGHTSCALE | IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, 0 );
 	}
 }
