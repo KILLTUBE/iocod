@@ -638,6 +638,111 @@ static void R_MarkLeaves (void) {
 
 
 /*
+=============================================================================
+CoD1 Cell-based rendering
+
+CoD1 uses cells instead of BSP leaves for world geometry rendering.
+=============================================================================
+*/
+
+/*
+=================
+R_MarkCod1Cells
+
+Mark cells that are potentially visible from the current position.
+For now, use simple AABB culling against frustum.
+TODO: Implement portal-based visibility for proper PVS.
+=================
+*/
+static void R_MarkCod1Cells( void ) {
+	int i;
+	cod1Cell_t *cell;
+	vec3_t bounds[2];
+
+	if ( !tr.world->numCod1Cells ) {
+		return;
+	}
+
+	tr.visCount++;
+
+	/* For now, mark all cells that pass frustum culling */
+	for ( i = 0; i < tr.world->numCod1Cells; i++ ) {
+		cell = &tr.world->cod1Cells[i];
+
+		/* Frustum cull */
+		if ( !r_nocull->integer ) {
+			VectorCopy( cell->mins, bounds[0] );
+			VectorCopy( cell->maxs, bounds[1] );
+			if ( R_CullLocalBox( bounds ) == CULL_OUT ) {
+				continue;
+			}
+		}
+
+		cell->visframe = tr.visCount;
+	}
+}
+
+/*
+=================
+R_AddCod1CellSurfaces
+
+Add surfaces from visible CoD1 cells to the render list.
+=================
+*/
+void R_AddCod1CellSurfaces( void ) {
+	int i, j;
+	cod1Cell_t *cell;
+	cod1CullGroup_t *cg;
+	msurface_t *surf;
+	int dlightBits;
+	vec3_t bounds[2];
+
+	if ( !tr.world->numCod1Cells ) {
+		return;
+	}
+
+	dlightBits = ( 1ULL << tr.refdef.num_dlights ) - 1;
+
+	for ( i = 0; i < tr.world->numCod1Cells; i++ ) {
+		cell = &tr.world->cod1Cells[i];
+
+		if ( cell->visframe != tr.visCount ) {
+			continue;
+		}
+
+		/* Add surfaces from each cullgroup in this cell */
+		for ( j = 0; j < cell->numCullGroups; j++ ) {
+			cg = &cell->cullgroups[j];
+
+			/* Frustum cull the cullgroup */
+			if ( !r_nocull->integer ) {
+				VectorCopy( cg->mins, bounds[0] );
+				VectorCopy( cg->maxs, bounds[1] );
+				if ( R_CullLocalBox( bounds ) == CULL_OUT ) {
+					continue;
+				}
+			}
+
+			/* Add all surfaces in this cullgroup */
+			for ( int s = 0; s < cg->numSurfaces; s++ ) {
+				surf = cg->surfaces[s];
+
+				/* Check if surface was already added this frame */
+				if ( surf->viewCount == tr.viewCount ) {
+					continue;
+				}
+				surf->viewCount = tr.viewCount;
+
+				/* Cull individual surface */
+				if ( !R_CullSurface( surf->data, surf->shader ) ) {
+					R_AddWorldSurface( surf, dlightBits );
+				}
+			}
+		}
+	}
+}
+
+/*
 =============
 R_AddWorldSurfaces
 =============
@@ -654,15 +759,22 @@ void R_AddWorldSurfaces (void) {
 	tr.currentEntityNum = REFENTITYNUM_WORLD;
 	tr.shiftedEntityNum = tr.currentEntityNum << QSORT_REFENTITYNUM_SHIFT;
 
-	// determine which leaves are in the PVS / areamask
-	R_MarkLeaves ();
-
 	// clear out the visible min/max
 	ClearBounds( tr.viewParms.visBounds[0], tr.viewParms.visBounds[1] );
 
-	// perform frustum culling and add all the potentially visible surfaces
-	if ( tr.refdef.num_dlights > MAX_DLIGHTS ) {
-		tr.refdef.num_dlights = MAX_DLIGHTS ;
+	// CoD1 uses cell-based rendering instead of BSP leaf rendering
+	if ( tr.world->numCod1Cells > 0 ) {
+		R_MarkCod1Cells();
+		R_AddCod1CellSurfaces();
+	} else {
+		// Q3-style BSP leaf rendering
+		// determine which leaves are in the PVS / areamask
+		R_MarkLeaves();
+
+		// perform frustum culling and add all the potentially visible surfaces
+		if ( tr.refdef.num_dlights > MAX_DLIGHTS ) {
+			tr.refdef.num_dlights = MAX_DLIGHTS ;
+		}
+		R_RecursiveWorldNode( tr.world->nodes, 15, ( 1ULL << tr.refdef.num_dlights ) - 1 );
 	}
-	R_RecursiveWorldNode( tr.world->nodes, 15, ( 1ULL << tr.refdef.num_dlights ) - 1 );
 }

@@ -427,6 +427,115 @@ static void R_LoadSubmodelsCod1( const byte *base ) {
 	}
 }
 
+/* -------------------------------------------------------------------------
+   CoD1 Cell-based rendering structures
+
+   CoD1 uses cells instead of BSP leaves for world geometry rendering.
+   Each cell contains cullgroups (AABB-bounded groups of surfaces).
+   ------------------------------------------------------------------------- */
+
+/*
+ * R_LoadCod1CullGroups - Load cullgroups (lump 9)
+ * Cullgroups are AABB-bounded groups of TriangleSoup surfaces for culling.
+ */
+static void R_LoadCod1CullGroups( const byte *base ) {
+	const cod1_cullgroup_t *in;
+	cod1CullGroup_t *out;
+	int i, count;
+	lump_t l;
+
+	l = R_GetCod1Lump( base, COD1_LUMP_CULLGROUPS );
+
+	if ( l.filelen % sizeof( cod1_cullgroup_t ) )
+		ri.Error( ERR_DROP, "R_LoadCod1CullGroups: bad lump size" );
+
+	count = l.filelen / sizeof( cod1_cullgroup_t );
+	in = (const cod1_cullgroup_t *)( base + l.fileofs );
+
+	out = ri.Hunk_Alloc( count * sizeof( *out ), h_low );
+	s_worldData.cod1CullGroups = out;
+	s_worldData.numCod1CullGroups = count;
+
+	ri.Printf( PRINT_ALL, "...loading %d CoD1 cullgroups\n", count );
+
+	for ( i = 0; i < count; i++, in++, out++ ) {
+		out->mins[0] = LittleFloat( in->mins[0] );
+		out->mins[1] = LittleFloat( in->mins[1] );
+		out->mins[2] = LittleFloat( in->mins[2] );
+		out->maxs[0] = LittleFloat( in->maxs[0] );
+		out->maxs[1] = LittleFloat( in->maxs[1] );
+		out->maxs[2] = LittleFloat( in->maxs[2] );
+		out->visframe = -1;
+
+		int firstSurf = LittleLong( in->firstSurface );
+		int numSurfs = LittleLong( in->surfaceCount );
+
+		/* Validate surface range */
+		if ( firstSurf < 0 || firstSurf + numSurfs > s_worldData.numsurfaces ) {
+			ri.Printf( PRINT_WARNING, "R_LoadCod1CullGroups: cullgroup %d has bad surface range %d+%d\n",
+				i, firstSurf, numSurfs );
+			out->numSurfaces = 0;
+			out->surfaces = NULL;
+		} else {
+			out->numSurfaces = numSurfs;
+			/* Allocate array of surface pointers */
+			out->surfaces = ri.Hunk_Alloc( numSurfs * sizeof( msurface_t * ), h_low );
+			for ( int j = 0; j < numSurfs; j++ ) {
+				out->surfaces[j] = &s_worldData.surfaces[firstSurf + j];
+			}
+		}
+	}
+}
+
+/*
+ * R_LoadCod1Cells - Load cells (lump 17)
+ * Cells are spatial partitioning units containing cullgroups.
+ */
+static void R_LoadCod1Cells( const byte *base ) {
+	const cod1_cell_t *in;
+	cod1Cell_t *out;
+	int i, count;
+	lump_t l;
+
+	l = R_GetCod1Lump( base, COD1_LUMP_CELLS );
+
+	if ( l.filelen % sizeof( cod1_cell_t ) )
+		ri.Error( ERR_DROP, "R_LoadCod1Cells: bad lump size" );
+
+	count = l.filelen / sizeof( cod1_cell_t );
+	in = (const cod1_cell_t *)( base + l.fileofs );
+
+	out = ri.Hunk_Alloc( count * sizeof( *out ), h_low );
+	s_worldData.cod1Cells = out;
+	s_worldData.numCod1Cells = count;
+
+	ri.Printf( PRINT_ALL, "...loading %d CoD1 cells\n", count );
+
+	for ( i = 0; i < count; i++, in++, out++ ) {
+		out->mins[0] = LittleFloat( in->mins[0] );
+		out->mins[1] = LittleFloat( in->mins[1] );
+		out->mins[2] = LittleFloat( in->mins[2] );
+		out->maxs[0] = LittleFloat( in->maxs[0] );
+		out->maxs[1] = LittleFloat( in->maxs[1] );
+		out->maxs[2] = LittleFloat( in->maxs[2] );
+		out->visframe = -1;
+
+		int firstCg = LittleLong( in->firstCullGroup );
+		int numCg = LittleLong( in->cullGroupCount );
+
+		/* Validate cullgroup range */
+		if ( firstCg < 0 || firstCg + numCg > s_worldData.numCod1CullGroups ) {
+			ri.Printf( PRINT_WARNING, "R_LoadCod1Cells: cell %d has bad cullgroup range %d+%d\n",
+				i, firstCg, numCg );
+			out->numCullGroups = 0;
+			out->cullgroups = NULL;
+		} else {
+			out->numCullGroups = numCg;
+			out->cullgroups = &s_worldData.cod1CullGroups[firstCg];
+		}
+	}
+}
+
 /* =========================================================================
    R_LoadCod1WorldMap – main entry point called from RE_LoadWorldMap.
    ========================================================================= */
@@ -447,6 +556,8 @@ void R_LoadCod1WorldMap( const byte *base ) {
 	s_worldData.numfogs = 0;
 	R_LoadCod1Surfaces   ( base );   /* lumps 6/7/8 – geometry */
 	R_LoadCod1Marksurfaces( base );  /* lump 13 – leaf-surface indices */
+	R_LoadCod1CullGroups ( base );   /* lump 9  – cullgroups   */
+	R_LoadCod1Cells      ( base );   /* lump 17 – cells        */
 	R_LoadCod1NodesAndLeafs( base ); /* lumps 20/21 – BSP tree */
 	R_LoadSubmodelsCod1  ( base );   /* lump 27 – submodels    */
 	R_LoadVisibilityCod1 ( base );   /* lump 26 – vis (stub)   */

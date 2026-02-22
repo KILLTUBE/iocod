@@ -521,8 +521,16 @@ typedef struct {
 #define COD1_LUMP_TRIANGLESOUPS    6   /* DiskTriangleSoup */
 #define COD1_LUMP_VERTICES         7   /* DiskGfxVertexV59 (44 bytes) */
 #define COD1_LUMP_TRIANGLES        8   /* u16 draw indices */
-/* 9=CullGroups 10=CullGroupIndices 11=PortalVerts 12=Occluders 13=OccluderPlanes */
-/* 14=OccluderEdges 15=OccluderIndices 16=AabbTrees 17=Cells 18=Portals */
+#define COD1_LUMP_CULLGROUPS       9   /* cod1_cullgroup_t */
+#define COD1_LUMP_CULLGROUPINDICES 10  /* s32 indices into trianglesoups */
+#define COD1_LUMP_PORTALVERTS      11  /* cod1_portal_vertex_t */
+#define COD1_LUMP_OCCLUDERS        12
+#define COD1_LUMP_OCCLUDERPLANES   13
+#define COD1_LUMP_OCCLUDEREDGES    14
+#define COD1_LUMP_OCCLUDERINDICES  15
+#define COD1_LUMP_AABBTREES        16
+#define COD1_LUMP_CELLS            17  /* cod1_cell_t */
+#define COD1_LUMP_PORTALS          18  /* cod1_portal_t */
 /* 19 = unknown extra slot (retail CoD1 only) */
 #define COD1_LUMP_BSPNODES         20  /* dnode_t (36 bytes) */
 #define COD1_LUMP_BSPLEAFS         21  /* cod1_dleaf_t (36 bytes) */
@@ -611,6 +619,41 @@ typedef struct {
 	int			firstSurface, numSurfaces;
 	int			firstBrush, numBrushes;
 } cod1_dmodel_t;
+
+/* CoD1 CullGroup - 24 bytes (lump 9)
+ * AABB-bounded group of TriangleSoup indices for rendering culling */
+typedef struct {
+    float mins[3], maxs[3];    /* Bounding box */
+    int   firstSurface;        /* First TriangleSoup index (global) */
+    int   surfaceCount;        /* Number of TriangleSoups in this cullgroup */
+} cod1_cullgroup_t;
+
+/* CoD1 Cell - 48 bytes (lump 16)
+ * Spatial partitioning unit for rendering. Contains cullgroups and portals. */
+typedef struct {
+    float mins[3], maxs[3];    /* Cell bounding box */
+    int   aabbTreeIndex;       /* Index into AABB tree lump */
+    int   firstPortal;         /* First portal index */
+    int   portalCount;         /* Number of portals */
+    int   firstCullGroup;      /* First cullgroup index */
+    int   cullGroupCount;      /* Number of cullgroups */
+    int   firstOccluder;       /* First occluder index (unused for basic render) */
+    int   occluderCount;       /* Number of occluders */
+} cod1_cell_t;
+
+/* CoD1 Portal vertex - 12 bytes (lump 10) */
+typedef struct {
+    float xyz[3];
+} cod1_portal_vertex_t;
+
+/* CoD1 Portal - 16 bytes (lump 17)
+ * Connection between two cells for visibility determination */
+typedef struct {
+    unsigned int planeIndex;       /* Plane index for the portal */
+    unsigned int cellIndex;        /* Cell on the other side of this portal */
+    unsigned int firstPortalVertex;/* First vertex index */
+    unsigned int portalVertexCount;/* Number of vertices defining portal poly */
+} cod1_portal_t;
 
 
 #endif
