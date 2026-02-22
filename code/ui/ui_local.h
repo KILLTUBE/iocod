@@ -998,6 +998,11 @@ void			trap_CIN_SetExtents (int handle, int x, int y, int w, int h);
 int				trap_RealTime(qtime_t *qtime);
 void			trap_R_RemapShader( const char *oldShader, const char *newShader, const char *timeOffset );
 qboolean		trap_VerifyCDKey( const char *key, const char *chksum);
+int				trap_PC_AddGlobalDefine( char *string );
+int				trap_PC_LoadSource( const char *filename );
+int				trap_PC_FreeSource( int handle );
+int				trap_PC_ReadToken( int handle, pc_token_t *pc_token );
+int				trap_PC_SourceFileAndLine( int handle, char *filename, int *line );
 
 void			trap_SetPbClStatus( int status );
 

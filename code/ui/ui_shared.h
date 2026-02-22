@@ -248,7 +248,10 @@ typedef struct itemDef_s {
 	colorRangeDef_t colorRanges[MAX_COLOR_RANGES];
 	float special;								 // used for feeder id's etc.. diff per type
   int cursorPos;                 // cursor position in characters
-	void *typeData;								 // type specific data ptr's	
+	int textFont;                  // CoD1: font selection (UI_FONT_*)
+	const char *textFile;          // CoD1: text file path for briefing/etc
+	const char *textSaveGame;      // CoD1: savegame text flag
+	void *typeData;								 // type specific data ptr's
 } itemDef_t;
 
 typedef struct {

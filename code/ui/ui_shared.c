@@ -5203,6 +5203,38 @@ qboolean ItemParse_hideCvar( itemDef_t *item, int handle ) {
 	return qfalse;
 }
 
+// CoD1: textfont keyword parser
+// Preprocessor expands UI_FONT_NORMAL etc. to numeric values
+qboolean ItemParse_textfont( itemDef_t *item, int handle ) {
+	int fontIndex;
+
+	if (!PC_Int_Parse(handle, &fontIndex)) {
+		return qfalse;
+	}
+
+	item->textFont = fontIndex;
+	return qtrue;
+}
+
+// CoD1: textfile keyword parser (briefing screen, etc)
+qboolean ItemParse_textfile( itemDef_t *item, int handle ) {
+	const char *fileName;
+
+	if (!PC_String_Parse(handle, &fileName)) {
+		return qfalse;
+	}
+
+	item->textFile = String_Alloc(fileName);
+	return qtrue;
+}
+
+// CoD1: textsavegame keyword parser (savegame info display)
+qboolean ItemParse_textsavegame( itemDef_t *item, int handle ) {
+	// This is a flag - if present, it indicates the item should display savegame info
+	item->textSaveGame = "";  // Non-NULL to indicate flag is set
+	return qtrue;
+}
+
 
 keywordHash_t itemParseKeywords[] = {
 	{"name", ItemParse_name, NULL},
@@ -5238,6 +5270,9 @@ keywordHash_t itemParseKeywords[] = {
 	{"textaligny", ItemParse_textaligny, NULL},
 	{"textscale", ItemParse_textscale, NULL},
 	{"textstyle", ItemParse_textstyle, NULL},
+	{"textfont", ItemParse_textfont, NULL},
+	{"textfile", ItemParse_textfile, NULL},
+	{"textsavegame", ItemParse_textsavegame, NULL},
 	{"backcolor", ItemParse_backcolor, NULL},
 	{"forecolor", ItemParse_forecolor, NULL},
 	{"bordercolor", ItemParse_bordercolor, NULL},
@@ -5806,6 +5841,35 @@ qboolean MenuParse_fadeCycle( itemDef_t *item, int handle ) {
 	return qtrue;
 }
 
+// CoD1: execKey menu keyword parser (key bindings)
+// This is a no-op that just skips over the execKey block to avoid parse errors
+// Full implementation would store key bindings and execute them when keys are pressed
+qboolean MenuParse_execKey( itemDef_t *item, int handle ) {
+	pc_token_t token;
+	// execKey "keyname" { ... }
+	// Read the key name
+	if (!trap_PC_ReadToken(handle, &token)) {
+		return qfalse;
+	}
+	// Read the opening brace
+	if (!trap_PC_ReadToken(handle, &token)) {
+		return qfalse;
+	}
+	if (token.string[0] != '{') {
+		return qfalse;
+	}
+	// Skip to matching closing brace
+	int depth = 1;
+	while (depth > 0 && trap_PC_ReadToken(handle, &token)) {
+		if (token.string[0] == '{') {
+			depth++;
+		} else if (token.string[0] == '}') {
+			depth--;
+		}
+	}
+	return (depth == 0);
+}
+
 
 qboolean MenuParse_itemDef( itemDef_t *item, int handle ) {
 	menuDef_t *menu = (menuDef_t*)item;
@@ -5848,6 +5912,7 @@ keywordHash_t menuParseKeywords[] = {
 	{"outOfBoundsClick", MenuParse_outOfBounds, NULL},
 	{"soundLoop", MenuParse_soundLoop, NULL},
 	{"itemDef", MenuParse_itemDef, NULL},
+	{"execKey", MenuParse_execKey, NULL},
 	{"cinematic", MenuParse_cinematic, NULL},
 	{"popup", MenuParse_popup, NULL},
 	{"fadeClamp", MenuParse_fadeClamp, NULL},
