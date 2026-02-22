@@ -25,6 +25,9 @@ Cvars:
 static cvar_t *cl_startWeapon;  /* weapon name to auto-equip on spawn   */
 static cvar_t *cl_gunFov;       /* viewmodel field of view (degrees)    */
 static cvar_t *cl_drawGun;      /* 0 = hide viewmodel                   */
+static cvar_t *cg_gunX;
+static cvar_t *cg_gunY;
+static cvar_t *cg_gunZ;
 
 /* ===========================================================================
    Weapon state
@@ -241,6 +244,11 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     VectorCopy( cl.snap.ps.viewangles, viewAngles );
     AnglesToAxis( viewAngles, axis );
 
+    /* Apply gun offsets */
+    if ( cg_gunX && cg_gunX->value != 0.0f ) VectorMA( viewOrigin, cg_gunX->value, axis[0], viewOrigin );
+    if ( cg_gunY && cg_gunY->value != 0.0f ) VectorMA( viewOrigin, cg_gunY->value, axis[1], viewOrigin );
+    if ( cg_gunZ && cg_gunZ->value != 0.0f ) VectorMA( viewOrigin, cg_gunZ->value, axis[2], viewOrigin );
+
     /* Full-screen refdef with no world (just our weapon entities) */
     Com_Memset( &refdef, 0, sizeof(refdef) );
     refdef.x      = 0;
@@ -262,8 +270,36 @@ void CL_DrawViewModel( stereoFrame_t stereo )
 
     /* Start a new entity list after cgame's committed scene */
     re.ClearScene();
-    if ( cl_weapon.handModel ) AddViewmodelEnt( cl_weapon.handModel, viewOrigin, axis );
-    if ( cl_weapon.gunModel  ) AddViewmodelEnt( cl_weapon.gunModel,  viewOrigin, axis );
+
+    if ( cl_weapon.handModel ) {
+        AddViewmodelEnt( cl_weapon.handModel, viewOrigin, axis );
+
+        if ( cl_weapon.gunModel ) {
+            orientation_t tag;
+            /* Use re.LerpTag to find tag_weapon on the hands model.
+               Since we don't have skeletal animation integrated into refEntity_t yet,
+               this will use the bind-pose position. */
+            if ( re.LerpTag( &tag, cl_weapon.handModel, 0, 0, 0, "tag_weapon" ) ) {
+                vec3_t gunOrigin;
+                vec3_t gunAxis[3];
+
+                VectorCopy( viewOrigin, gunOrigin );
+                VectorMA( gunOrigin, tag.origin[0], axis[0], gunOrigin );
+                VectorMA( gunOrigin, tag.origin[1], axis[1], gunOrigin );
+                VectorMA( gunOrigin, tag.origin[2], axis[2], gunOrigin );
+
+                MatrixMultiply( tag.axis, axis, gunAxis );
+
+                AddViewmodelEnt( cl_weapon.gunModel, gunOrigin, gunAxis );
+            } else {
+                /* fallback to old behavior if tag not found */
+                AddViewmodelEnt( cl_weapon.gunModel, viewOrigin, axis );
+            }
+        }
+    } else if ( cl_weapon.gunModel ) {
+        AddViewmodelEnt( cl_weapon.gunModel, viewOrigin, axis );
+    }
+
     re.RenderScene( &refdef );
 }
 
@@ -327,6 +363,9 @@ void CL_WeaponCod1_Init( void )
     cl_startWeapon = Cvar_Get( "cl_startWeapon", "mp44_mp", CVAR_ARCHIVE );
     cl_gunFov      = Cvar_Get( "cl_gunFov",      "65",      CVAR_ARCHIVE );
     cl_drawGun     = Cvar_Get( "cl_drawGun",     "1",       CVAR_ARCHIVE );
+    cg_gunX        = Cvar_Get( "cg_gunX",        "0",       CVAR_CHEAT );
+    cg_gunY        = Cvar_Get( "cg_gunY",        "0",       CVAR_CHEAT );
+    cg_gunZ        = Cvar_Get( "cg_gunZ",        "0",       CVAR_CHEAT );
 
     Cmd_AddCommand( "give",        CL_Give_f        );
     Cmd_AddCommand( "dropweapon",  CL_DropWeapon_f  );

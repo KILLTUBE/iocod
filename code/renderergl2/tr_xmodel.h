@@ -188,6 +188,28 @@ static inline void Quat_Slerp( const vec4_t a, const vec4_t b, float t, vec4_t o
     }
 }
 
+/* Hamiltonian quaternion to 3x3 axis matrix */
+static inline void Quat_ToAxis( const vec4_t q, vec3_t axis[3] )
+{
+    float w = q[0], x = q[1], y = q[2], z = q[3];
+    float x2 = x + x, y2 = y + y, z2 = z + z;
+    float xx = x * x2, xy = x * y2, xz = x * z2;
+    float yy = y * y2, yz = y * z2, zz = z * z2;
+    float wx = w * x2, wy = w * y2, wz = w * z2;
+
+    axis[0][0] = 1.0f - (yy + zz);
+    axis[0][1] = xy + wz;
+    axis[0][2] = xz - wy;
+
+    axis[1][0] = xy - wz;
+    axis[1][1] = 1.0f - (xx + zz);
+    axis[1][2] = yz + wx;
+
+    axis[2][0] = xz + wy;
+    axis[2][1] = yz - wx;
+    axis[2][2] = 1.0f - (xx + yy);
+}
+
 /* ===========================================================================
    Shared function declarations (defined in tr_model_xanim.c)
    =========================================================================== */
@@ -200,6 +222,12 @@ void XModel_ComputeWorldBones( xmBone_t *bones, int numBones );
  * Called by R_RegisterXModel after xmodelparts is parsed. */
 void R_StoreXModelBindPose( qhandle_t modelHandle,
                              const xmBone_t *bones, int numBones );
+
+/* Look up a bone by name in the bind-pose (or cached pose) and return its
+ * world-space orientation (tag).  Returns 1 if found, 0 otherwise. */
+int R_XModelLerpTag( orientation_t *tag, qhandle_t handle,
+                      int startFrame, int endFrame,
+                      float frac, const char *tagName );
 
 /* Load an xanim binary file.  Path may omit the "xanim/" prefix.
  * Returns a non-zero handle on success, 0 on failure. */

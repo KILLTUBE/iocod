@@ -156,6 +156,33 @@ void R_StoreXModelBindPose( qhandle_t modelHandle,
     s_bindCount[idx] = numBones;
 }
 
+/*
+====================
+R_XModelLerpTag
+====================
+*/
+int R_XModelLerpTag( orientation_t *tag, qhandle_t handle,
+                      int startFrame, int endFrame,
+                      float frac, const char *tagName )
+{
+    int idx = (int)handle;
+    int i;
+
+    if ( idx < 0 || idx >= BIND_TABLE_SIZE || !s_bindPose[idx] ) {
+        return 0;
+    }
+
+    for ( i = 0; i < s_bindCount[idx]; i++ ) {
+        if ( !Q_stricmp( s_bindPose[idx][i].name, tagName ) ) {
+            VectorCopy( s_bindPose[idx][i].wTrans, tag->origin );
+            Quat_ToAxis( s_bindPose[idx][i].wRot, tag->axis );
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 /* ===========================================================================
    Track helpers
    =========================================================================== */

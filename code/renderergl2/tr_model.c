@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // tr_models.c -- model loading and caching
 
 #include "tr_local.h"
+#include "tr_xmodel.h"
 
 #define	LL(x) x=LittleLong(x)
 
@@ -1336,6 +1337,11 @@ int R_LerpTag( orientation_t *tag, qhandle_t handle, int startFrame, int endFram
 	model_t		*model;
 
 	model = R_GetModelByHandle( handle );
+
+	if ( R_XModelLerpTag( tag, handle, startFrame, endFrame, frac, tagName ) ) {
+		return qtrue;
+	}
+
 	if ( !model->mdv[0] )
 	{
 		if(model->type == MOD_MDR)
