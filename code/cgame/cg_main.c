@@ -1930,7 +1930,7 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 
 	trap_CM_LoadMap( cgs.mapname );
 
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || defined(STANDALONE)
 	String_Init();
 #endif
 
