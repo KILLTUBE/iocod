@@ -902,6 +902,21 @@ float CG_GetValue(int ownerDraw) {
   cent = &cg_entities[cg.snap->ps.clientNum];
 	ps = &cg.snap->ps;
 
+#ifdef STANDALONE
+	/* CoD1 ownerdraw IDs differ from Q3 for these values. */
+	switch ( ownerDraw ) {
+		case 5:   /* CG_PLAYER_AMMO_VALUE in CoD1 */
+			if ( cent->currentState.weapon ) {
+				return ps->ammo[cent->currentState.weapon];
+			}
+			break;
+		case 21:  /* CG_PLAYER_SCORE in CoD1 */
+			return cg.snap->ps.persistant[PERS_SCORE];
+		default:
+			break;
+	}
+#endif
+
   switch (ownerDraw) {
   case CG_SELECTEDPLAYER_ARMOR:
     ci = cgs.clientinfo + sortedTeamPlayers[CG_GetSelectedPlayer()];
@@ -1512,6 +1527,45 @@ void CG_OwnerDraw(float x, float y, float w, float h, float text_x, float text_y
   rect.y = y;
   rect.w = w;
   rect.h = h;
+
+#ifdef STANDALONE
+	/*
+	 * CoD1 HUD ownerdraw IDs differ from Q3 for a few slots:
+	 * 5(ammo value), 6(ammo backdrop), 20(stance), 21(score).
+	 * Handle those before the Q3 switch so CoD1 menus render correctly.
+	 */
+	switch ( ownerDraw ) {
+		case 5:
+			CG_DrawPlayerAmmoValue(&rect, scale, color, shader, textStyle);
+			return;
+		case 6:
+			if ( shader ) {
+				trap_R_SetColor( color );
+				CG_DrawPic( x, y, w, h, shader );
+				trap_R_SetColor( NULL );
+			}
+			return;
+		case 20: {
+			qhandle_t stanceShader = 0;
+			if ( cgs.cod1StanceCrouch && ( cg.snap->ps.pm_flags & PMF_DUCKED ) ) {
+				stanceShader = cgs.cod1StanceCrouch;
+			} else if ( cgs.cod1StanceStand ) {
+				stanceShader = cgs.cod1StanceStand;
+			}
+			if ( stanceShader ) {
+				trap_R_SetColor( color );
+				CG_DrawPic( x, y, w, h, stanceShader );
+				trap_R_SetColor( NULL );
+			}
+			return;
+		}
+		case 21:
+			CG_DrawPlayerScore(&rect, scale, color, shader, textStyle);
+			return;
+		default:
+			break;
+	}
+#endif
 
   switch (ownerDraw) {
   case CG_PLAYER_ARMOR_ICON:
