@@ -652,5 +652,6 @@ void CL_DrawViewModel( stereoFrame_t stereo );
 /* cl_character_cod1.c */
 void CL_CharacterCod1_Init( void );
 void CL_CharacterCod1_Shutdown( void );
+void CL_AddCharacterCod1Entities( const refdef_t *fd );
 void CL_AddThirdPersonCharacter( const refdef_t *fd );
 #endif

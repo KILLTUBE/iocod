@@ -1,8 +1,9 @@
 /*
 ===========================================================================
-cl_character_cod1.c  --  Client-side CoD1 third-person character rendering
+cl_character_cod1.c  --  Client-side CoD1 character model integration
 
-Draws a CoD-style xmodel for the local player when cg_thirdPerson is enabled.
+Builds/animates CoD-style character xmodels (local player test path currently
+routes through cg_thirdPerson for visualization).
 Model source:
   1) cl_thirdPersonModel (explicit xmodel path or short name)
   2) character script (cl_thirdPersonCharacter, parsed for setModel/attach)
@@ -125,7 +126,7 @@ static cvar_t *cl_thirdPersonAutoGround;
 static cvar_t *cl_thirdPersonYawLerpSpeed;
 static cvar_t *cl_thirdPersonDebug;
 
-static qhandle_t CL_TP_RegisterModelWithFallback( const char *requestedPath,
+static qhandle_t CL_Character_RegisterModelWithFallback( const char *requestedPath,
                                                   char *resolvedPath,
                                                   int resolvedPathSize )
 {
@@ -175,7 +176,7 @@ static qhandle_t CL_TP_RegisterModelWithFallback( const char *requestedPath,
     return 0;
 }
 
-static void CL_TP_NormalizeModelPath( const char *input, char *out, int outSize )
+static void CL_Character_NormalizeModelPath( const char *input, char *out, int outSize )
 {
     if ( !input || !input[0] ) {
         out[0] = '\0';
@@ -189,7 +190,7 @@ static void CL_TP_NormalizeModelPath( const char *input, char *out, int outSize 
     }
 }
 
-static void CL_TP_BuildCharacterScriptPath( const char *name, char *outPath, int outSize )
+static void CL_Character_BuildCharacterScriptPath( const char *name, char *outPath, int outSize )
 {
     const char *base;
 
@@ -206,7 +207,7 @@ static void CL_TP_BuildCharacterScriptPath( const char *name, char *outPath, int
     }
 }
 
-static qboolean CL_TP_ParseQuoted( const char *start, const char **after, char *out, int outSize )
+static qboolean CL_Character_ParseQuoted( const char *start, const char **after, char *out, int outSize )
 {
     const char *open;
     const char *close;
@@ -239,7 +240,7 @@ static qboolean CL_TP_ParseQuoted( const char *start, const char **after, char *
     return qtrue;
 }
 
-static qboolean CL_TP_IsAliasChar( char c )
+static qboolean CL_Character_IsAliasChar( char c )
 {
     return ( ( c >= 'a' && c <= 'z' ) ||
              ( c >= 'A' && c <= 'Z' ) ||
@@ -247,7 +248,7 @@ static qboolean CL_TP_IsAliasChar( char c )
              c == '_' );
 }
 
-static qboolean CL_TP_ParseAliasName( const char *text, char *outAlias, int outAliasSize )
+static qboolean CL_Character_ParseAliasName( const char *text, char *outAlias, int outAliasSize )
 {
     const char *marker;
     int i;
@@ -262,7 +263,7 @@ static qboolean CL_TP_ParseAliasName( const char *text, char *outAlias, int outA
 
     marker += 11; /* strlen("xmodelalias/") */
     i = 0;
-    while ( marker[i] && CL_TP_IsAliasChar( marker[i] ) ) {
+    while ( marker[i] && CL_Character_IsAliasChar( marker[i] ) ) {
         if ( i >= outAliasSize - 1 ) {
             break;
         }
@@ -278,7 +279,7 @@ static qboolean CL_TP_ParseAliasName( const char *text, char *outAlias, int outA
     return qtrue;
 }
 
-static qboolean CL_TP_ResolveAliasToModel( const char *text, char *outModelPath, int outModelPathSize )
+static qboolean CL_Character_ResolveAliasToModel( const char *text, char *outModelPath, int outModelPathSize )
 {
     char aliasName[MAX_QPATH];
     char aliasPath[MAX_QPATH];
@@ -288,7 +289,7 @@ static qboolean CL_TP_ResolveAliasToModel( const char *text, char *outModelPath,
 
     outModelPath[0] = '\0';
 
-    if ( !CL_TP_ParseAliasName( text, aliasName, sizeof( aliasName ) ) ) {
+    if ( !CL_Character_ParseAliasName( text, aliasName, sizeof( aliasName ) ) ) {
         return qfalse;
     }
 
@@ -300,9 +301,9 @@ static qboolean CL_TP_ResolveAliasToModel( const char *text, char *outModelPath,
     }
 
     scan = aliasText;
-    while ( CL_TP_ParseQuoted( scan, &scan, outModelPath, outModelPathSize ) ) {
+    while ( CL_Character_ParseQuoted( scan, &scan, outModelPath, outModelPathSize ) ) {
         if ( outModelPath[0] ) {
-            CL_TP_NormalizeModelPath( outModelPath, outModelPath, outModelPathSize );
+            CL_Character_NormalizeModelPath( outModelPath, outModelPath, outModelPathSize );
             FS_FreeFile( aliasText );
             return qtrue;
         }
@@ -313,7 +314,7 @@ static qboolean CL_TP_ResolveAliasToModel( const char *text, char *outModelPath,
     return qfalse;
 }
 
-static qboolean CL_TP_IsHeadLikeModel( const char *modelPath )
+static qboolean CL_Character_IsHeadLikeModel( const char *modelPath )
 {
     return modelPath && (
         Q_stristr( modelPath, "basehead" ) ||
@@ -323,7 +324,7 @@ static qboolean CL_TP_IsHeadLikeModel( const char *modelPath )
     );
 }
 
-static qboolean CL_TP_IsHelmetLikeModel( const char *modelPath )
+static qboolean CL_Character_IsHelmetLikeModel( const char *modelPath )
 {
     return modelPath && (
         Q_stristr( modelPath, "helmet" ) ||
@@ -336,20 +337,20 @@ static qboolean CL_TP_IsHelmetLikeModel( const char *modelPath )
     );
 }
 
-static const char *CL_TP_DefaultTagForAttachment( const char *modelPath )
+static const char *CL_Character_DefaultTagForAttachment( const char *modelPath )
 {
-    if ( CL_TP_IsHeadLikeModel( modelPath ) ) {
-        return "j_head";
+    if ( CL_Character_IsHeadLikeModel( modelPath ) ) {
+        return "tag_head";
     }
 
-    if ( CL_TP_IsHelmetLikeModel( modelPath ) ) {
+    if ( CL_Character_IsHelmetLikeModel( modelPath ) ) {
         return "tag_helmet";
     }
 
     return "";
 }
 
-static void CL_TP_AddAttachment( tpAttachment_t *attachments, int *numAttachments,
+static void CL_Character_AddAttachment( tpAttachment_t *attachments, int *numAttachments,
                                  const char *modelPath, const char *tagName )
 {
     int i;
@@ -390,7 +391,7 @@ typedef struct {
 
 static tpGscEvalState_t *s_tpGscEval;
 
-static void CL_TP_GscNormalizePath( const char *in, char *out, int outSize )
+static void CL_Character_GscNormalizePath( const char *in, char *out, int outSize )
 {
     int i;
 
@@ -407,21 +408,21 @@ static void CL_TP_GscNormalizePath( const char *in, char *out, int outSize )
     }
 }
 
-static void CL_TP_GscBuildSourcePath( const char *name, char *outPath, int outPathSize )
+static void CL_Character_GscBuildSourcePath( const char *name, char *outPath, int outPathSize )
 {
-    CL_TP_GscNormalizePath( name, outPath, outPathSize );
+    CL_Character_GscNormalizePath( name, outPath, outPathSize );
     if ( !COM_GetExtension( outPath )[0] ) {
         Q_strcat( outPath, outPathSize, ".gsc" );
     }
 }
 
-static void CL_TP_GscBuildNamespace( const char *name, char *outNamespace, int outNamespaceSize )
+static void CL_Character_GscBuildNamespace( const char *name, char *outNamespace, int outNamespaceSize )
 {
-    CL_TP_GscNormalizePath( name, outNamespace, outNamespaceSize );
+    CL_Character_GscNormalizePath( name, outNamespace, outNamespaceSize );
     COM_StripExtension( outNamespace, outNamespace, outNamespaceSize );
 }
 
-static unsigned int CL_TP_GscNextRand( void )
+static unsigned int CL_Character_GscNextRand( void )
 {
     if ( !s_tpGscEval ) {
         return 0;
@@ -437,7 +438,7 @@ static unsigned int CL_TP_GscNextRand( void )
     return s_tpGscEval->randState;
 }
 
-static void CL_TP_GscTrackSource( char *source )
+static void CL_Character_GscTrackSource( char *source )
 {
     if ( !s_tpGscEval || !source ) {
         return;
@@ -451,7 +452,7 @@ static void CL_TP_GscTrackSource( char *source )
     s_tpGscEval->loadedSources[s_tpGscEval->numLoadedSources++] = source;
 }
 
-static void CL_TP_GscFreeTrackedSources( tpGscEvalState_t *state )
+static void CL_Character_GscFreeTrackedSources( tpGscEvalState_t *state )
 {
     int i;
 
@@ -466,19 +467,19 @@ static void CL_TP_GscFreeTrackedSources( tpGscEvalState_t *state )
     state->numLoadedSources = 0;
 }
 
-static void *CL_TP_GscAllocMemory( void *ctx, int size )
+static void *CL_Character_GscAllocMemory( void *ctx, int size )
 {
     (void)ctx;
     return calloc( 1, (size_t)( size > 0 ? size : 1 ) );
 }
 
-static void CL_TP_GscFreeMemory( void *ctx, void *ptr )
+static void CL_Character_GscFreeMemory( void *ctx, void *ptr )
 {
     (void)ctx;
     free( ptr );
 }
 
-static const char *CL_TP_GscReadFile( void *ctx, const char *filename, int *status )
+static const char *CL_Character_GscReadFile( void *ctx, const char *filename, int *status )
 {
     char sourcePath[MAX_QPATH];
     char *fileText;
@@ -487,7 +488,7 @@ static const char *CL_TP_GscReadFile( void *ctx, const char *filename, int *stat
 
     (void)ctx;
 
-    CL_TP_GscBuildSourcePath( filename, sourcePath, sizeof( sourcePath ) );
+    CL_Character_GscBuildSourcePath( filename, sourcePath, sizeof( sourcePath ) );
 
     fileText = NULL;
     fileLen = FS_ReadFile( sourcePath, (void **)&fileText );
@@ -509,18 +510,18 @@ static const char *CL_TP_GscReadFile( void *ctx, const char *filename, int *stat
     copy[fileLen] = '\0';
 
     FS_FreeFile( fileText );
-    CL_TP_GscTrackSource( copy );
+    CL_Character_GscTrackSource( copy );
     *status = GSC_OK;
     return copy;
 }
 
-static int CL_TP_GscFn_IsDefined( gsc_Context *ctx )
+static int CL_Character_GscFn_IsDefined( gsc_Context *ctx )
 {
     gsc_add_bool( ctx, gsc_get_type( ctx, 0 ) != GSC_TYPE_UNDEFINED );
     return 1;
 }
 
-static int CL_TP_GscFn_RandomInt( gsc_Context *ctx )
+static int CL_Character_GscFn_RandomInt( gsc_Context *ctx )
 {
     int maxVal;
     unsigned int r;
@@ -531,12 +532,12 @@ static int CL_TP_GscFn_RandomInt( gsc_Context *ctx )
         return 1;
     }
 
-    r = CL_TP_GscNextRand();
+    r = CL_Character_GscNextRand();
     gsc_add_int( ctx, (int)( r % (unsigned int)maxVal ) );
     return 1;
 }
 
-static int CL_TP_GscFn_RandomFloat( gsc_Context *ctx )
+static int CL_Character_GscFn_RandomFloat( gsc_Context *ctx )
 {
     float maxVal;
     float scale;
@@ -547,33 +548,33 @@ static int CL_TP_GscFn_RandomFloat( gsc_Context *ctx )
         return 1;
     }
 
-    scale = (float)CL_TP_GscNextRand() / (float)0xFFFFFFFFu;
+    scale = (float)CL_Character_GscNextRand() / (float)0xFFFFFFFFu;
     gsc_add_float( ctx, scale * maxVal );
     return 1;
 }
 
-static int CL_TP_GscFn_GetCvarInt( gsc_Context *ctx )
+static int CL_Character_GscFn_GetCvarInt( gsc_Context *ctx )
 {
     const char *name = gsc_get_string( ctx, 0 );
     gsc_add_int( ctx, Cvar_VariableIntegerValue( name ? name : "" ) );
     return 1;
 }
 
-static int CL_TP_GscFn_GetCvarFloat( gsc_Context *ctx )
+static int CL_Character_GscFn_GetCvarFloat( gsc_Context *ctx )
 {
     const char *name = gsc_get_string( ctx, 0 );
     gsc_add_float( ctx, Cvar_VariableValue( name ? name : "" ) );
     return 1;
 }
 
-static int CL_TP_GscFn_GetCvar( gsc_Context *ctx )
+static int CL_Character_GscFn_GetCvar( gsc_Context *ctx )
 {
     const char *name = gsc_get_string( ctx, 0 );
     gsc_add_string( ctx, Cvar_VariableString( name ? name : "" ) );
     return 1;
 }
 
-static int CL_TP_GscFn_Println( gsc_Context *ctx )
+static int CL_Character_GscFn_Println( gsc_Context *ctx )
 {
     int i;
 
@@ -589,7 +590,7 @@ static int CL_TP_GscFn_Println( gsc_Context *ctx )
     return 0;
 }
 
-static int CL_TP_GscMeth_SetModel( gsc_Context *ctx )
+static int CL_Character_GscMeth_SetModel( gsc_Context *ctx )
 {
     const char *modelRaw;
 
@@ -599,13 +600,13 @@ static int CL_TP_GscMeth_SetModel( gsc_Context *ctx )
 
     modelRaw = gsc_get_string( ctx, 0 );
     if ( modelRaw && modelRaw[0] ) {
-        CL_TP_NormalizeModelPath( modelRaw, s_tpGscEval->baseModel, sizeof( s_tpGscEval->baseModel ) );
+        CL_Character_NormalizeModelPath( modelRaw, s_tpGscEval->baseModel, sizeof( s_tpGscEval->baseModel ) );
     }
 
     return 0;
 }
 
-static int CL_TP_GscMeth_SetViewModel( gsc_Context *ctx )
+static int CL_Character_GscMeth_SetViewModel( gsc_Context *ctx )
 {
     const char *modelRaw;
 
@@ -615,13 +616,13 @@ static int CL_TP_GscMeth_SetViewModel( gsc_Context *ctx )
 
     modelRaw = gsc_get_string( ctx, 0 );
     if ( modelRaw && modelRaw[0] ) {
-        CL_TP_NormalizeModelPath( modelRaw, s_tpGscEval->viewModel, sizeof( s_tpGscEval->viewModel ) );
+        CL_Character_NormalizeModelPath( modelRaw, s_tpGscEval->viewModel, sizeof( s_tpGscEval->viewModel ) );
     }
 
     return 0;
 }
 
-static int CL_TP_GscMeth_DetachAll( gsc_Context *ctx )
+static int CL_Character_GscMeth_DetachAll( gsc_Context *ctx )
 {
     (void)ctx;
 
@@ -634,7 +635,7 @@ static int CL_TP_GscMeth_DetachAll( gsc_Context *ctx )
     return 0;
 }
 
-static int CL_TP_GscMeth_Attach( gsc_Context *ctx )
+static int CL_Character_GscMeth_Attach( gsc_Context *ctx )
 {
     const char *modelRaw;
     char modelPath[MAX_QPATH];
@@ -649,7 +650,7 @@ static int CL_TP_GscMeth_Attach( gsc_Context *ctx )
         return 0;
     }
 
-    CL_TP_NormalizeModelPath( modelRaw, modelPath, sizeof( modelPath ) );
+    CL_Character_NormalizeModelPath( modelRaw, modelPath, sizeof( modelPath ) );
     tagName[0] = '\0';
 
     if ( gsc_numargs( ctx ) > 1 && gsc_get_type( ctx, 1 ) != GSC_TYPE_UNDEFINED ) {
@@ -660,7 +661,7 @@ static int CL_TP_GscMeth_Attach( gsc_Context *ctx )
     }
 
     if ( !tagName[0] ) {
-        const char *defaultTag = CL_TP_DefaultTagForAttachment( modelPath );
+        const char *defaultTag = CL_Character_DefaultTagForAttachment( modelPath );
         if ( defaultTag[0] ) {
             Q_strncpyz( tagName, defaultTag, sizeof( tagName ) );
         } else {
@@ -668,11 +669,11 @@ static int CL_TP_GscMeth_Attach( gsc_Context *ctx )
         }
     }
 
-    CL_TP_AddAttachment( s_tpGscEval->attachments, &s_tpGscEval->numAttachments, modelPath, tagName );
+    CL_Character_AddAttachment( s_tpGscEval->attachments, &s_tpGscEval->numAttachments, modelPath, tagName );
     return 0;
 }
 
-static int CL_TP_GscMeth_GetViewModel( gsc_Context *ctx )
+static int CL_Character_GscMeth_GetViewModel( gsc_Context *ctx )
 {
     if ( !s_tpGscEval ) {
         gsc_add_string( ctx, "" );
@@ -683,7 +684,7 @@ static int CL_TP_GscMeth_GetViewModel( gsc_Context *ctx )
     return 1;
 }
 
-static int CL_TP_GscMeth_GetAttachSize( gsc_Context *ctx )
+static int CL_Character_GscMeth_GetAttachSize( gsc_Context *ctx )
 {
     if ( !s_tpGscEval ) {
         gsc_add_int( ctx, 0 );
@@ -694,7 +695,7 @@ static int CL_TP_GscMeth_GetAttachSize( gsc_Context *ctx )
     return 1;
 }
 
-static int CL_TP_GscMeth_GetAttachModelName( gsc_Context *ctx )
+static int CL_Character_GscMeth_GetAttachModelName( gsc_Context *ctx )
 {
     int index;
 
@@ -713,7 +714,7 @@ static int CL_TP_GscMeth_GetAttachModelName( gsc_Context *ctx )
     return 1;
 }
 
-static int CL_TP_GscMeth_GetAttachTagName( gsc_Context *ctx )
+static int CL_Character_GscMeth_GetAttachTagName( gsc_Context *ctx )
 {
     int index;
 
@@ -732,36 +733,36 @@ static int CL_TP_GscMeth_GetAttachTagName( gsc_Context *ctx )
     return 1;
 }
 
-static int CL_TP_GscMeth_GetAttachIgnoreCollision( gsc_Context *ctx )
+static int CL_Character_GscMeth_GetAttachIgnoreCollision( gsc_Context *ctx )
 {
     (void)ctx;
     gsc_add_bool( ctx, qfalse );
     return 1;
 }
 
-static void CL_TP_GscRegisterFunctions( gsc_Context *ctx )
+static void CL_Character_GscRegisterFunctions( gsc_Context *ctx )
 {
-    gsc_register_function( ctx, NULL, "isdefined", CL_TP_GscFn_IsDefined );
+    gsc_register_function( ctx, NULL, "isdefined", CL_Character_GscFn_IsDefined );
 
-    gsc_register_function( ctx, NULL, "randomint", CL_TP_GscFn_RandomInt );
-    gsc_register_function( ctx, NULL, "randomInt", CL_TP_GscFn_RandomInt );
+    gsc_register_function( ctx, NULL, "randomint", CL_Character_GscFn_RandomInt );
+    gsc_register_function( ctx, NULL, "randomInt", CL_Character_GscFn_RandomInt );
 
-    gsc_register_function( ctx, NULL, "randomfloat", CL_TP_GscFn_RandomFloat );
-    gsc_register_function( ctx, NULL, "randomFloat", CL_TP_GscFn_RandomFloat );
+    gsc_register_function( ctx, NULL, "randomfloat", CL_Character_GscFn_RandomFloat );
+    gsc_register_function( ctx, NULL, "randomFloat", CL_Character_GscFn_RandomFloat );
 
-    gsc_register_function( ctx, NULL, "getcvarint", CL_TP_GscFn_GetCvarInt );
-    gsc_register_function( ctx, NULL, "getCvarInt", CL_TP_GscFn_GetCvarInt );
+    gsc_register_function( ctx, NULL, "getcvarint", CL_Character_GscFn_GetCvarInt );
+    gsc_register_function( ctx, NULL, "getCvarInt", CL_Character_GscFn_GetCvarInt );
 
-    gsc_register_function( ctx, NULL, "getcvarfloat", CL_TP_GscFn_GetCvarFloat );
-    gsc_register_function( ctx, NULL, "getCvarFloat", CL_TP_GscFn_GetCvarFloat );
+    gsc_register_function( ctx, NULL, "getcvarfloat", CL_Character_GscFn_GetCvarFloat );
+    gsc_register_function( ctx, NULL, "getCvarFloat", CL_Character_GscFn_GetCvarFloat );
 
-    gsc_register_function( ctx, NULL, "getcvar", CL_TP_GscFn_GetCvar );
-    gsc_register_function( ctx, NULL, "getCvar", CL_TP_GscFn_GetCvar );
+    gsc_register_function( ctx, NULL, "getcvar", CL_Character_GscFn_GetCvar );
+    gsc_register_function( ctx, NULL, "getCvar", CL_Character_GscFn_GetCvar );
 
-    gsc_register_function( ctx, NULL, "println", CL_TP_GscFn_Println );
+    gsc_register_function( ctx, NULL, "println", CL_Character_GscFn_Println );
 }
 
-static void CL_TP_GscCreateSelfObject( gsc_Context *ctx )
+static void CL_Character_GscCreateSelfObject( gsc_Context *ctx )
 {
     int proxyObj;
     int methodsObj;
@@ -770,31 +771,31 @@ static void CL_TP_GscCreateSelfObject( gsc_Context *ctx )
     proxyObj = gsc_add_tagged_object( ctx, "#entity_proxy" );
     methodsObj = gsc_add_object( ctx );
 
-    gsc_add_function( ctx, CL_TP_GscMeth_SetModel );
+    gsc_add_function( ctx, CL_Character_GscMeth_SetModel );
     gsc_object_set_field( ctx, methodsObj, "setModel" );
 
-    gsc_add_function( ctx, CL_TP_GscMeth_SetViewModel );
+    gsc_add_function( ctx, CL_Character_GscMeth_SetViewModel );
     gsc_object_set_field( ctx, methodsObj, "setViewModel" );
 
-    gsc_add_function( ctx, CL_TP_GscMeth_DetachAll );
+    gsc_add_function( ctx, CL_Character_GscMeth_DetachAll );
     gsc_object_set_field( ctx, methodsObj, "detachAll" );
 
-    gsc_add_function( ctx, CL_TP_GscMeth_Attach );
+    gsc_add_function( ctx, CL_Character_GscMeth_Attach );
     gsc_object_set_field( ctx, methodsObj, "attach" );
 
-    gsc_add_function( ctx, CL_TP_GscMeth_GetViewModel );
+    gsc_add_function( ctx, CL_Character_GscMeth_GetViewModel );
     gsc_object_set_field( ctx, methodsObj, "getViewModel" );
 
-    gsc_add_function( ctx, CL_TP_GscMeth_GetAttachSize );
+    gsc_add_function( ctx, CL_Character_GscMeth_GetAttachSize );
     gsc_object_set_field( ctx, methodsObj, "getAttachSize" );
 
-    gsc_add_function( ctx, CL_TP_GscMeth_GetAttachModelName );
+    gsc_add_function( ctx, CL_Character_GscMeth_GetAttachModelName );
     gsc_object_set_field( ctx, methodsObj, "getAttachModelName" );
 
-    gsc_add_function( ctx, CL_TP_GscMeth_GetAttachTagName );
+    gsc_add_function( ctx, CL_Character_GscMeth_GetAttachTagName );
     gsc_object_set_field( ctx, methodsObj, "getAttachTagName" );
 
-    gsc_add_function( ctx, CL_TP_GscMeth_GetAttachIgnoreCollision );
+    gsc_add_function( ctx, CL_Character_GscMeth_GetAttachIgnoreCollision );
     gsc_object_set_field( ctx, methodsObj, "getAttachIgnoreCollision" );
 
     gsc_object_set_field( ctx, proxyObj, "__call" );
@@ -815,7 +816,7 @@ static void CL_TP_GscCreateSelfObject( gsc_Context *ctx )
     gsc_pop( ctx, 1 ); /* proxyObj */
 }
 
-static qboolean CL_TP_ParseCharacterScriptGsc( const char *scriptPath,
+static qboolean CL_Character_ParseCharacterScriptGsc( const char *scriptPath,
                                                char *outBaseModel,
                                                tpAttachment_t *outAttachments,
                                                int *outNumAttachments )
@@ -842,9 +843,9 @@ static qboolean CL_TP_ParseCharacterScriptGsc( const char *scriptPath,
     s_tpGscEval = &evalState;
 
     Com_Memset( &options, 0, sizeof( options ) );
-    options.allocate_memory = CL_TP_GscAllocMemory;
-    options.free_memory = CL_TP_GscFreeMemory;
-    options.read_file = CL_TP_GscReadFile;
+    options.allocate_memory = CL_Character_GscAllocMemory;
+    options.free_memory = CL_Character_GscFreeMemory;
+    options.read_file = CL_Character_GscReadFile;
     options.userdata = NULL;
     options.verbose = ( cl_thirdPersonDebug && cl_thirdPersonDebug->integer ) ? 1 : 0;
     options.main_memory_size = 16 * 1024 * 1024;
@@ -858,10 +859,10 @@ static qboolean CL_TP_ParseCharacterScriptGsc( const char *scriptPath,
         goto cleanup;
     }
 
-    CL_TP_GscRegisterFunctions( ctx );
-    CL_TP_GscCreateSelfObject( ctx );
+    CL_Character_GscRegisterFunctions( ctx );
+    CL_Character_GscCreateSelfObject( ctx );
 
-    CL_TP_GscBuildNamespace( scriptPath, scriptNamespace, sizeof( scriptNamespace ) );
+    CL_Character_GscBuildNamespace( scriptPath, scriptNamespace, sizeof( scriptNamespace ) );
 
     status = gsc_compile( ctx, scriptNamespace, 0 );
     while ( status == GSC_OK && ( nextDep = gsc_next_compile_dependency( ctx ) ) != NULL ) {
@@ -922,12 +923,12 @@ static qboolean CL_TP_ParseCharacterScriptGsc( const char *scriptPath,
     ctx = NULL;
 
 cleanup:
-    CL_TP_GscFreeTrackedSources( &evalState );
+    CL_Character_GscFreeTrackedSources( &evalState );
     s_tpGscEval = NULL;
     return ok;
 }
 
-static qboolean CL_TP_ParseCharacterScript( const char *scriptPath,
+static qboolean CL_Character_ParseCharacterScript( const char *scriptPath,
                                             char *outBaseModel,
                                             tpAttachment_t *outAttachments,
                                             int *outNumAttachments )
@@ -954,8 +955,8 @@ static qboolean CL_TP_ParseCharacterScript( const char *scriptPath,
         char modelRaw[MAX_QPATH];
         char modelPath[MAX_QPATH];
 
-        if ( CL_TP_ParseQuoted( scan, NULL, modelRaw, sizeof( modelRaw ) ) ) {
-            CL_TP_NormalizeModelPath( modelRaw, modelPath, sizeof( modelPath ) );
+        if ( CL_Character_ParseQuoted( scan, NULL, modelRaw, sizeof( modelRaw ) ) ) {
+            CL_Character_NormalizeModelPath( modelRaw, modelPath, sizeof( modelPath ) );
             Q_strncpyz( outBaseModel, modelPath, MAX_QPATH );
             foundBaseModel = qtrue;
             break;
@@ -988,7 +989,7 @@ static qboolean CL_TP_ParseCharacterScript( const char *scriptPath,
             memcpy( args, open + 1, argsLen );
             args[argsLen] = '\0';
 
-            if ( CL_TP_ResolveAliasToModel( args, modelPath, sizeof( modelPath ) ) ) {
+            if ( CL_Character_ResolveAliasToModel( args, modelPath, sizeof( modelPath ) ) ) {
                 Q_strncpyz( outBaseModel, modelPath, MAX_QPATH );
                 foundBaseModel = qtrue;
                 break;
@@ -1014,8 +1015,8 @@ static qboolean CL_TP_ParseCharacterScript( const char *scriptPath,
             continue;
         }
 
-        if ( CL_TP_ParseQuoted( eq + 1, NULL, modelRaw, sizeof( modelRaw ) ) ) {
-            CL_TP_NormalizeModelPath( modelRaw, modelPath, sizeof( modelPath ) );
+        if ( CL_Character_ParseQuoted( eq + 1, NULL, modelRaw, sizeof( modelRaw ) ) ) {
+            CL_Character_NormalizeModelPath( modelRaw, modelPath, sizeof( modelPath ) );
             Q_strncpyz( hatModel, modelPath, sizeof( hatModel ) );
             break;
         }
@@ -1028,7 +1029,7 @@ static qboolean CL_TP_ParseCharacterScript( const char *scriptPath,
             memcpy( expr, eq + 1, exprLen );
         }
         expr[exprLen] = '\0';
-        if ( CL_TP_ResolveAliasToModel( expr, modelPath, sizeof( modelPath ) ) ) {
+        if ( CL_Character_ResolveAliasToModel( expr, modelPath, sizeof( modelPath ) ) ) {
             Q_strncpyz( hatModel, modelPath, sizeof( hatModel ) );
             break;
         }
@@ -1061,10 +1062,10 @@ static qboolean CL_TP_ParseCharacterScript( const char *scriptPath,
         memcpy( args, open + 1, argsLen );
         args[argsLen] = '\0';
 
-        if ( CL_TP_ResolveAliasToModel( args, attachModelPath, sizeof( attachModelPath ) ) ) {
-            defaultTag = CL_TP_DefaultTagForAttachment( attachModelPath );
+        if ( CL_Character_ResolveAliasToModel( args, attachModelPath, sizeof( attachModelPath ) ) ) {
+            defaultTag = CL_Character_DefaultTagForAttachment( attachModelPath );
             if ( defaultTag[0] ) {
-                CL_TP_AddAttachment( outAttachments, outNumAttachments,
+                CL_Character_AddAttachment( outAttachments, outNumAttachments,
                                      attachModelPath, defaultTag );
             }
         }
@@ -1104,19 +1105,19 @@ static qboolean CL_TP_ParseCharacterScript( const char *scriptPath,
 
         if ( Q_stristr( args, "self.hatModel" ) && hatModel[0] ) {
             Q_strncpyz( attachModelPath, hatModel, sizeof( attachModelPath ) );
-        } else if ( CL_TP_ParseQuoted( args, &afterFirst, attachModelRaw,
+        } else if ( CL_Character_ParseQuoted( args, &afterFirst, attachModelRaw,
                                         sizeof( attachModelRaw ) ) ) {
-            CL_TP_NormalizeModelPath( attachModelRaw, attachModelPath,
+            CL_Character_NormalizeModelPath( attachModelRaw, attachModelPath,
                                       sizeof( attachModelPath ) );
 
-            if ( CL_TP_ParseQuoted( afterFirst, NULL, attachTag,
+            if ( CL_Character_ParseQuoted( afterFirst, NULL, attachTag,
                                     sizeof( attachTag ) ) ) {
                 /* Keep explicit tag if present, including TAG_* bones. */
             }
         }
 
         if ( attachModelPath[0] && !attachTag[0] ) {
-            const char *defaultTag = CL_TP_DefaultTagForAttachment( attachModelPath );
+            const char *defaultTag = CL_Character_DefaultTagForAttachment( attachModelPath );
             if ( defaultTag[0] ) {
                 Q_strncpyz( attachTag, defaultTag, sizeof( attachTag ) );
             } else {
@@ -1127,7 +1128,7 @@ static qboolean CL_TP_ParseCharacterScript( const char *scriptPath,
             }
         }
 
-        CL_TP_AddAttachment( outAttachments, outNumAttachments,
+        CL_Character_AddAttachment( outAttachments, outNumAttachments,
                              attachModelPath, attachTag );
         scan = close + 1;
     }
@@ -1136,7 +1137,7 @@ static qboolean CL_TP_ParseCharacterScript( const char *scriptPath,
     return foundBaseModel;
 }
 
-static void CL_TP_LoadAnimations( void )
+static void CL_Character_LoadAnimations( void )
 {
     int i;
 
@@ -1180,7 +1181,7 @@ static void CL_TP_LoadAnimations( void )
     s_tpChar.torsoAnimStartTime = cl.serverTime;
 }
 
-static qboolean CL_TP_AttachmentListsEqual( const tpAttachment_t *a, int aCount,
+static qboolean CL_Character_AttachmentListsEqual( const tpAttachment_t *a, int aCount,
                                             const tpAttachment_t *b, int bCount )
 {
     int i;
@@ -1199,7 +1200,7 @@ static qboolean CL_TP_AttachmentListsEqual( const tpAttachment_t *a, int aCount,
     return qtrue;
 }
 
-static void CL_TP_LoadCharacterAssets( void )
+static void CL_Character_LoadCharacterAssets( void )
 {
     char desiredModelPath[MAX_QPATH];
     char desiredScriptPath[MAX_QPATH];
@@ -1216,14 +1217,14 @@ static void CL_TP_LoadCharacterAssets( void )
     hasHeadAttachment = qfalse;
 
     if ( cl_thirdPersonModel && cl_thirdPersonModel->string[0] ) {
-        CL_TP_NormalizeModelPath( cl_thirdPersonModel->string,
+        CL_Character_NormalizeModelPath( cl_thirdPersonModel->string,
                                   desiredModelPath, sizeof( desiredModelPath ) );
     } else {
-        CL_TP_BuildCharacterScriptPath( cl_thirdPersonCharacter ? cl_thirdPersonCharacter->string : "",
+        CL_Character_BuildCharacterScriptPath( cl_thirdPersonCharacter ? cl_thirdPersonCharacter->string : "",
                                         desiredScriptPath, sizeof( desiredScriptPath ) );
 
         if ( cl_thirdPersonUseGsc && cl_thirdPersonUseGsc->integer ) {
-            fromScript = CL_TP_ParseCharacterScriptGsc( desiredScriptPath,
+            fromScript = CL_Character_ParseCharacterScriptGsc( desiredScriptPath,
                                                         desiredModelPath,
                                                         desiredAttachments,
                                                         &desiredAttachmentCount );
@@ -1233,7 +1234,7 @@ static void CL_TP_LoadCharacterAssets( void )
         }
 
         if ( !fromScript ) {
-            fromScript = CL_TP_ParseCharacterScript( desiredScriptPath,
+            fromScript = CL_Character_ParseCharacterScript( desiredScriptPath,
                                                      desiredModelPath,
                                                      desiredAttachments,
                                                      &desiredAttachmentCount );
@@ -1241,7 +1242,7 @@ static void CL_TP_LoadCharacterAssets( void )
     }
 
     if ( !desiredModelPath[0] ) {
-        CL_TP_NormalizeModelPath( "axis_default", desiredModelPath,
+        CL_Character_NormalizeModelPath( "axis_default", desiredModelPath,
                                   sizeof( desiredModelPath ) );
     }
 
@@ -1250,7 +1251,7 @@ static void CL_TP_LoadCharacterAssets( void )
          !Q_stricmp( s_tpChar.loadedScriptPath, desiredScriptPath ) &&
          !Q_stricmp( s_tpChar.loadedModelOverride,
                     cl_thirdPersonModel ? cl_thirdPersonModel->string : "" ) &&
-         CL_TP_AttachmentListsEqual( s_tpChar.attachments, s_tpChar.numAttachments,
+         CL_Character_AttachmentListsEqual( s_tpChar.attachments, s_tpChar.numAttachments,
                                      desiredAttachments, desiredAttachmentCount ) ) {
         return;
     }
@@ -1259,7 +1260,7 @@ static void CL_TP_LoadCharacterAssets( void )
     s_tpChar.numAttachments = 0;
     s_tpChar.baseFootOffset = 0.0f;
 
-    s_tpChar.baseModel = CL_TP_RegisterModelWithFallback( desiredModelPath,
+    s_tpChar.baseModel = CL_Character_RegisterModelWithFallback( desiredModelPath,
                                                           desiredModelPath,
                                                           sizeof( desiredModelPath ) );
 
@@ -1270,7 +1271,7 @@ static void CL_TP_LoadCharacterAssets( void )
         vec3_t mins, maxs;
         re.ModelBounds( s_tpChar.baseModel, mins, maxs );
         s_tpChar.baseFootOffset = -mins[2];
-        if ( s_tpChar.baseFootOffset < 0.0f || s_tpChar.baseFootOffset > 64.0f ) {
+        if ( s_tpChar.baseFootOffset < 0.0f || s_tpChar.baseFootOffset > 256.0f ) {
             s_tpChar.baseFootOffset = 0.0f;
         }
     }
@@ -1286,7 +1287,7 @@ static void CL_TP_LoadCharacterAssets( void )
                         s_tpChar.attachments[s_tpChar.numAttachments].modelPath );
         }
 
-        if ( CL_TP_IsHeadLikeModel( s_tpChar.attachments[s_tpChar.numAttachments].modelPath ) &&
+        if ( CL_Character_IsHeadLikeModel( s_tpChar.attachments[s_tpChar.numAttachments].modelPath ) &&
              s_tpChar.attachments[s_tpChar.numAttachments].hModel ) {
             hasHeadAttachment = qtrue;
         }
@@ -1324,7 +1325,7 @@ static void CL_TP_LoadCharacterAssets( void )
     }
 }
 
-static float CL_TP_GetSnapshotLerpFrac( const clSnapshot_t **outPrevSnap )
+static float CL_Character_GetSnapshotLerpFrac( const clSnapshot_t **outPrevSnap )
 {
     const clSnapshot_t *prevSnap;
     int prevMsgNum;
@@ -1359,13 +1360,13 @@ static float CL_TP_GetSnapshotLerpFrac( const clSnapshot_t **outPrevSnap )
     return frac;
 }
 
-static void CL_TP_GetInterpolatedState( vec3_t outOrigin, vec3_t outVelocity, int *outViewHeight )
+static void CL_Character_GetInterpolatedState( vec3_t outOrigin, vec3_t outVelocity, int *outViewHeight )
 {
     const clSnapshot_t *prevSnap;
     float frac;
     int i;
 
-    frac = CL_TP_GetSnapshotLerpFrac( &prevSnap );
+    frac = CL_Character_GetSnapshotLerpFrac( &prevSnap );
     if ( !prevSnap ) {
         VectorCopy( cl.snap.ps.origin, outOrigin );
         VectorCopy( cl.snap.ps.velocity, outVelocity );
@@ -1384,7 +1385,7 @@ static void CL_TP_GetInterpolatedState( vec3_t outOrigin, vec3_t outVelocity, in
                             frac * (float)( cl.snap.ps.viewheight - prevSnap->ps.viewheight ) );
 }
 
-static float CL_TP_StepYawToward( float currentYaw, float desiredYaw, float maxStep )
+static float CL_Character_StepYawToward( float currentYaw, float desiredYaw, float maxStep )
 {
     float delta;
 
@@ -1398,7 +1399,7 @@ static float CL_TP_StepYawToward( float currentYaw, float desiredYaw, float maxS
     return AngleNormalize360( currentYaw + delta );
 }
 
-static void CL_TP_DeriveStanceFlags( const playerState_t *ps,
+static void CL_Character_DeriveStanceFlags( const playerState_t *ps,
                                      qboolean *outCrouched, qboolean *outProne )
 {
     int legsAnim;
@@ -1418,7 +1419,7 @@ static void CL_TP_DeriveStanceFlags( const playerState_t *ps,
     }
 }
 
-static tpLegAnimSlot_t CL_TP_LegIdleAnimForStance( qboolean crouched, qboolean prone )
+static tpLegAnimSlot_t CL_Character_LegIdleAnimForStance( qboolean crouched, qboolean prone )
 {
     if ( prone ) {
         return TP_LEG_ANIM_PRONE_IDLE;
@@ -1429,7 +1430,7 @@ static tpLegAnimSlot_t CL_TP_LegIdleAnimForStance( qboolean crouched, qboolean p
     return TP_LEG_ANIM_STAND_IDLE;
 }
 
-static tpTorsoAnimSlot_t CL_TP_TorsoIdleAnimForStance( qboolean crouched, qboolean prone )
+static tpTorsoAnimSlot_t CL_Character_TorsoIdleAnimForStance( qboolean crouched, qboolean prone )
 {
     if ( prone ) {
         return TP_TORSO_ANIM_PRONE_IDLE;
@@ -1440,7 +1441,7 @@ static tpTorsoAnimSlot_t CL_TP_TorsoIdleAnimForStance( qboolean crouched, qboole
     return TP_TORSO_ANIM_STAND_IDLE;
 }
 
-static tpTorsoAnimSlot_t CL_TP_TorsoFireAnimForStance( qboolean crouched, qboolean prone )
+static tpTorsoAnimSlot_t CL_Character_TorsoFireAnimForStance( qboolean crouched, qboolean prone )
 {
     if ( prone ) {
         return TP_TORSO_ANIM_PRONE_FIRE;
@@ -1451,7 +1452,7 @@ static tpTorsoAnimSlot_t CL_TP_TorsoFireAnimForStance( qboolean crouched, qboole
     return TP_TORSO_ANIM_STAND_FIRE;
 }
 
-static tpLegAnimSlot_t CL_TP_MoveAnimForDir( int dir, qboolean crouched, qboolean prone, qboolean forceBack )
+static tpLegAnimSlot_t CL_Character_MoveAnimForDir( int dir, qboolean crouched, qboolean prone, qboolean forceBack )
 {
     if ( forceBack ) {
         dir = 4;
@@ -1501,14 +1502,14 @@ static tpLegAnimSlot_t CL_TP_MoveAnimForDir( int dir, qboolean crouched, qboolea
     }
 }
 
-static qboolean CL_TP_IsMoveLegAnim( tpLegAnimSlot_t slot )
+static qboolean CL_Character_IsMoveLegAnim( tpLegAnimSlot_t slot )
 {
     return ( slot != TP_LEG_ANIM_STAND_IDLE &&
              slot != TP_LEG_ANIM_CROUCH_IDLE &&
              slot != TP_LEG_ANIM_PRONE_IDLE );
 }
 
-static int CL_TP_ComputeMoveDirFromVelocity( const vec3_t velocity, float yaw )
+static int CL_Character_ComputeMoveDirFromVelocity( const vec3_t velocity, float yaw )
 {
     vec3_t angles;
     vec3_t axis[3];
@@ -1533,7 +1534,7 @@ static int CL_TP_ComputeMoveDirFromVelocity( const vec3_t velocity, float yaw )
     return ( left >= 0.0f ) ? 2 : 6;
 }
 
-static tpLegAnimSlot_t CL_TP_ChooseLegAnimForPlayerState( const playerState_t *ps )
+static tpLegAnimSlot_t CL_Character_ChooseLegAnimForPlayerState( const playerState_t *ps )
 {
     int legsAnim;
     float xyspeed;
@@ -1551,10 +1552,10 @@ static tpLegAnimSlot_t CL_TP_ChooseLegAnimForPlayerState( const playerState_t *p
     xyspeed = sqrtf( ps->velocity[0] * ps->velocity[0] +
                      ps->velocity[1] * ps->velocity[1] );
     moving = qfalse;
-    CL_TP_DeriveStanceFlags( ps, &crouched, &prone );
+    CL_Character_DeriveStanceFlags( ps, &crouched, &prone );
     forceBack = qfalse;
     dir = ps->movementDir & 7;
-    currentlyMoving = CL_TP_IsMoveLegAnim( s_tpChar.currentLegAnim );
+    currentlyMoving = CL_Character_IsMoveLegAnim( s_tpChar.currentLegAnim );
     moveThreshold = cl_thirdPersonMoveThreshold ? cl_thirdPersonMoveThreshold->value : 20.0f;
     if ( moveThreshold < 1.0f ) {
         moveThreshold = 1.0f;
@@ -1565,7 +1566,7 @@ static tpLegAnimSlot_t CL_TP_ChooseLegAnimForPlayerState( const playerState_t *p
     }
 
     if ( ps->pm_type != PM_NORMAL && ps->pm_type != PM_DEAD ) {
-        return CL_TP_LegIdleAnimForStance( crouched, prone );
+        return CL_Character_LegIdleAnimForStance( crouched, prone );
     }
 
     switch ( legsAnim ) {
@@ -1606,17 +1607,17 @@ static tpLegAnimSlot_t CL_TP_ChooseLegAnimForPlayerState( const playerState_t *p
     }
 
     if ( !moving || ps->groundEntityNum == ENTITYNUM_NONE ) {
-        return CL_TP_LegIdleAnimForStance( crouched, prone );
+        return CL_Character_LegIdleAnimForStance( crouched, prone );
     }
 
     if ( !forceBack ) {
-        dir = CL_TP_ComputeMoveDirFromVelocity( ps->velocity, cl.viewangles[YAW] );
+        dir = CL_Character_ComputeMoveDirFromVelocity( ps->velocity, cl.viewangles[YAW] );
     }
 
-    return CL_TP_MoveAnimForDir( dir, crouched, prone, forceBack );
+    return CL_Character_MoveAnimForDir( dir, crouched, prone, forceBack );
 }
 
-static tpTorsoAnimSlot_t CL_TP_ChooseTorsoAnimForPlayerState( const playerState_t *ps )
+static tpTorsoAnimSlot_t CL_Character_ChooseTorsoAnimForPlayerState( const playerState_t *ps )
 {
     int torsoAnim;
     qboolean crouched;
@@ -1624,7 +1625,7 @@ static tpTorsoAnimSlot_t CL_TP_ChooseTorsoAnimForPlayerState( const playerState_
     qboolean firing;
 
     torsoAnim = ps->torsoAnim & ~ANIM_TOGGLEBIT;
-    CL_TP_DeriveStanceFlags( ps, &crouched, &prone );
+    CL_Character_DeriveStanceFlags( ps, &crouched, &prone );
 
     firing = ( torsoAnim == TORSO_ATTACK || torsoAnim == TORSO_ATTACK2 ) ? qtrue : qfalse;
     if ( ps->pm_type != PM_NORMAL && ps->pm_type != PM_DEAD ) {
@@ -1632,13 +1633,13 @@ static tpTorsoAnimSlot_t CL_TP_ChooseTorsoAnimForPlayerState( const playerState_
     }
 
     if ( firing ) {
-        return CL_TP_TorsoFireAnimForStance( crouched, prone );
+        return CL_Character_TorsoFireAnimForStance( crouched, prone );
     }
 
-    return CL_TP_TorsoIdleAnimForStance( crouched, prone );
+    return CL_Character_TorsoIdleAnimForStance( crouched, prone );
 }
 
-static qhandle_t CL_TP_GetLegAnimHandleForState( tpLegAnimSlot_t slot )
+static qhandle_t CL_Character_GetLegAnimHandleForState( tpLegAnimSlot_t slot )
 {
     if ( slot < 0 || slot >= TP_LEG_ANIM_COUNT ) {
         slot = TP_LEG_ANIM_STAND_IDLE;
@@ -1651,7 +1652,7 @@ static qhandle_t CL_TP_GetLegAnimHandleForState( tpLegAnimSlot_t slot )
     return s_tpChar.legAnims[TP_LEG_ANIM_STAND_IDLE];
 }
 
-static qhandle_t CL_TP_GetTorsoAnimHandleForState( tpTorsoAnimSlot_t slot )
+static qhandle_t CL_Character_GetTorsoAnimHandleForState( tpTorsoAnimSlot_t slot )
 {
     if ( slot < 0 || slot >= TP_TORSO_ANIM_COUNT ) {
         slot = TP_TORSO_ANIM_STAND_IDLE;
@@ -1668,7 +1669,7 @@ static qhandle_t CL_TP_GetTorsoAnimHandleForState( tpTorsoAnimSlot_t slot )
     return 0;
 }
 
-static float CL_TP_ComputeAnimFrame( qhandle_t animHandle, int animStartTime )
+static float CL_Character_ComputeAnimFrame( qhandle_t animHandle, int animStartTime )
 {
     int fps;
     int numFrames;
@@ -1707,7 +1708,7 @@ static float CL_TP_ComputeAnimFrame( qhandle_t animHandle, int animStartTime )
     return frame;
 }
 
-static qboolean CL_TP_PositionOnTag( refEntity_t *ent, const refEntity_t *parent,
+static qboolean CL_Character_PositionOnTag( refEntity_t *ent, const refEntity_t *parent,
                                      const char *tagName )
 {
     orientation_t tag;
@@ -1738,31 +1739,31 @@ static qboolean CL_TP_PositionOnTag( refEntity_t *ent, const refEntity_t *parent
     return qtrue;
 }
 
-static qboolean CL_TP_PositionAttachment( refEntity_t *ent, const refEntity_t *parent,
+static qboolean CL_Character_PositionAttachment( refEntity_t *ent, const refEntity_t *parent,
                                           const tpAttachment_t *attachment )
 {
     static const char *headFallbackTags[] = {
-        "j_head", "tag_head", "bip01 head", "head", "bip01 neck", "neck", "bip01 spine2", "tag_helmet"
+        "tag_head", "bip01 head", "head", "bip01 neck", "neck", "bip01 spine2", "tag_helmet"
     };
     static const char *helmetFallbackTags[] = {
-        "tag_helmet", "tag_head", "j_head", "bip01 head", "head"
+        "tag_helmet", "tag_head", "bip01 head", "head"
     };
     int i;
 
     if ( attachment->tagName[0] &&
-         CL_TP_PositionOnTag( ent, parent, attachment->tagName ) ) {
+         CL_Character_PositionOnTag( ent, parent, attachment->tagName ) ) {
         return qtrue;
     }
 
-    if ( CL_TP_IsHeadLikeModel( attachment->modelPath ) ) {
+    if ( CL_Character_IsHeadLikeModel( attachment->modelPath ) ) {
         for ( i = 0; i < (int)ARRAY_LEN( headFallbackTags ); ++i ) {
-            if ( CL_TP_PositionOnTag( ent, parent, headFallbackTags[i] ) ) {
+            if ( CL_Character_PositionOnTag( ent, parent, headFallbackTags[i] ) ) {
                 return qtrue;
             }
         }
-    } else if ( CL_TP_IsHelmetLikeModel( attachment->modelPath ) ) {
+    } else if ( CL_Character_IsHelmetLikeModel( attachment->modelPath ) ) {
         for ( i = 0; i < (int)ARRAY_LEN( helmetFallbackTags ); ++i ) {
-            if ( CL_TP_PositionOnTag( ent, parent, helmetFallbackTags[i] ) ) {
+            if ( CL_Character_PositionOnTag( ent, parent, helmetFallbackTags[i] ) ) {
                 return qtrue;
             }
         }
@@ -1771,7 +1772,7 @@ static qboolean CL_TP_PositionAttachment( refEntity_t *ent, const refEntity_t *p
     return qfalse;
 }
 
-static qboolean CL_TP_PositionAttachmentBySharedTag( refEntity_t *ent,
+static qboolean CL_Character_PositionAttachmentBySharedTag( refEntity_t *ent,
                                                      const refEntity_t *parent,
                                                      qhandle_t childModel,
                                                      const char *tagName )
@@ -1827,7 +1828,7 @@ static qboolean CL_TP_PositionAttachmentBySharedTag( refEntity_t *ent,
     return qtrue;
 }
 
-static void CL_TP_CopyEntityTransform( refEntity_t *dst, const refEntity_t *src )
+static void CL_Character_CopyEntityTransform( refEntity_t *dst, const refEntity_t *src )
 {
     VectorCopy( src->origin, dst->origin );
     VectorCopy( src->origin, dst->oldorigin );
@@ -1836,13 +1837,13 @@ static void CL_TP_CopyEntityTransform( refEntity_t *dst, const refEntity_t *src 
     VectorCopy( src->axis[2], dst->axis[2] );
 }
 
-static void CL_TP_AddAttachments( const refEntity_t *baseEnt,
+static void CL_Character_AddAttachments( const refEntity_t *baseEnt,
                                   qhandle_t legsAnimHandle, float legsAnimFrame,
                                   qhandle_t torsoAnimHandle, float torsoAnimFrame,
                                   qboolean useTorsoBlend, const char *torsoRootBone )
 {
     static const char *headSharedTags[] = {
-        "j_head", "tag_head", "bip01 head", "head", "bip01 neck", "bip01 spine2"
+        "tag_head", "bip01 head", "head", "bip01 neck", "bip01 spine2"
     };
     int i;
 
@@ -1867,7 +1868,7 @@ static void CL_TP_AddAttachments( const refEntity_t *baseEnt,
         VectorCopy( baseEnt->axis[1], att.axis[1] );
         VectorCopy( baseEnt->axis[2], att.axis[2] );
 
-        if ( CL_TP_IsHeadLikeModel( s_tpChar.attachments[i].modelPath ) ) {
+        if ( CL_Character_IsHeadLikeModel( s_tpChar.attachments[i].modelPath ) ) {
             if ( useTorsoBlend && re.UpdateXModelPoseBlend && legsAnimHandle ) {
                 re.UpdateXModelPoseBlend( att.hModel,
                                           legsAnimHandle, legsAnimFrame,
@@ -1881,14 +1882,14 @@ static void CL_TP_AddAttachments( const refEntity_t *baseEnt,
         }
 
         positioned = qfalse;
-        if ( CL_TP_IsHeadLikeModel( s_tpChar.attachments[i].modelPath ) ) {
+        if ( CL_Character_IsHeadLikeModel( s_tpChar.attachments[i].modelPath ) ) {
             if ( s_tpChar.attachments[i].tagName[0] ) {
-                positioned = CL_TP_PositionAttachmentBySharedTag(
+                positioned = CL_Character_PositionAttachmentBySharedTag(
                     &att, baseEnt, att.hModel, s_tpChar.attachments[i].tagName );
             }
             if ( !positioned ) {
                 for ( t = 0; t < (int)ARRAY_LEN( headSharedTags ); ++t ) {
-                    if ( CL_TP_PositionAttachmentBySharedTag( &att, baseEnt, att.hModel, headSharedTags[t] ) ) {
+                    if ( CL_Character_PositionAttachmentBySharedTag( &att, baseEnt, att.hModel, headSharedTags[t] ) ) {
                         positioned = qtrue;
                         break;
                     }
@@ -1898,30 +1899,30 @@ static void CL_TP_AddAttachments( const refEntity_t *baseEnt,
             if ( !positioned ) {
                 /* Head/body parts are authored to the character rig.
                  * If no shared tag resolves, keep base pose alignment. */
-                CL_TP_CopyEntityTransform( &att, baseEnt );
+                CL_Character_CopyEntityTransform( &att, baseEnt );
                 positioned = qtrue;
             }
         }
 
         if ( !positioned ) {
-            positioned = CL_TP_PositionAttachment( &att, baseEnt, &s_tpChar.attachments[i] );
+            positioned = CL_Character_PositionAttachment( &att, baseEnt, &s_tpChar.attachments[i] );
         }
 
         re.AddRefEntityToScene( &att );
     }
 }
 
-static void CL_TP_EnsureAssets( void )
+static void CL_Character_EnsureAssets( void )
 {
     if ( !s_tpChar.legAnims[TP_LEG_ANIM_STAND_IDLE] ) {
-        CL_TP_LoadAnimations();
+        CL_Character_LoadAnimations();
     }
 
     if ( !s_tpChar.baseModel ||
          ( cl_thirdPersonModel && cl_thirdPersonModel->modified ) ||
          ( cl_thirdPersonCharacter && cl_thirdPersonCharacter->modified ) ||
          ( cl_thirdPersonUseGsc && cl_thirdPersonUseGsc->modified ) ) {
-        CL_TP_LoadCharacterAssets();
+        CL_Character_LoadCharacterAssets();
 
         if ( cl_thirdPersonModel ) {
             cl_thirdPersonModel->modified = qfalse;
@@ -1935,7 +1936,7 @@ static void CL_TP_EnsureAssets( void )
     }
 }
 
-void CL_AddThirdPersonCharacter( const refdef_t *fd )
+void CL_AddCharacterCod1Entities( const refdef_t *fd )
 {
     refEntity_t ent;
     vec3_t angles;
@@ -1976,19 +1977,19 @@ void CL_AddThirdPersonCharacter( const refdef_t *fd )
         return;
     }
 
-    CL_TP_EnsureAssets();
+    CL_Character_EnsureAssets();
 
     if ( !s_tpChar.baseModel ) {
         return;
     }
 
-    CL_TP_GetInterpolatedState( interpOrigin, interpVelocity, &interpViewHeight );
+    CL_Character_GetInterpolatedState( interpOrigin, interpVelocity, &interpViewHeight );
     interpPs = cl.snap.ps;
     VectorCopy( interpVelocity, interpPs.velocity );
     interpPs.viewheight = interpViewHeight;
 
-    desiredLegAnim = CL_TP_ChooseLegAnimForPlayerState( &interpPs );
-    desiredTorsoAnim = CL_TP_ChooseTorsoAnimForPlayerState( &interpPs );
+    desiredLegAnim = CL_Character_ChooseLegAnimForPlayerState( &interpPs );
+    desiredTorsoAnim = CL_Character_ChooseTorsoAnimForPlayerState( &interpPs );
 
     if ( desiredLegAnim != s_tpChar.currentLegAnim ) {
         s_tpChar.currentLegAnim = desiredLegAnim;
@@ -1999,10 +2000,10 @@ void CL_AddThirdPersonCharacter( const refdef_t *fd )
         s_tpChar.torsoAnimStartTime = cl.serverTime;
     }
 
-    legsAnimHandle = CL_TP_GetLegAnimHandleForState( s_tpChar.currentLegAnim );
-    torsoAnimHandle = CL_TP_GetTorsoAnimHandleForState( s_tpChar.currentTorsoAnim );
-    legsAnimFrame = CL_TP_ComputeAnimFrame( legsAnimHandle, s_tpChar.legAnimStartTime );
-    torsoAnimFrame = CL_TP_ComputeAnimFrame( torsoAnimHandle, s_tpChar.torsoAnimStartTime );
+    legsAnimHandle = CL_Character_GetLegAnimHandleForState( s_tpChar.currentLegAnim );
+    torsoAnimHandle = CL_Character_GetTorsoAnimHandleForState( s_tpChar.currentTorsoAnim );
+    legsAnimFrame = CL_Character_ComputeAnimFrame( legsAnimHandle, s_tpChar.legAnimStartTime );
+    torsoAnimFrame = CL_Character_ComputeAnimFrame( torsoAnimHandle, s_tpChar.torsoAnimStartTime );
     useTorsoBlend = ( cl_thirdPersonBlendTorso && cl_thirdPersonBlendTorso->integer &&
                       torsoAnimHandle ) ? qtrue : qfalse;
     torsoRootBone = ( cl_thirdPersonTorsoRoot && cl_thirdPersonTorsoRoot->string[0] ) ?
@@ -2059,7 +2060,7 @@ void CL_AddThirdPersonCharacter( const refdef_t *fd )
         if ( maxYawStep < 0.0f ) {
             maxYawStep = 0.0f;
         }
-        s_tpChar.renderYaw = CL_TP_StepYawToward( s_tpChar.renderYaw, desiredYaw, maxYawStep );
+        s_tpChar.renderYaw = CL_Character_StepYawToward( s_tpChar.renderYaw, desiredYaw, maxYawStep );
     }
 
     VectorClear( angles );
@@ -2068,10 +2069,15 @@ void CL_AddThirdPersonCharacter( const refdef_t *fd )
     AnglesToAxis( angles, ent.axis );
 
     re.AddRefEntityToScene( &ent );
-    CL_TP_AddAttachments( &ent,
+    CL_Character_AddAttachments( &ent,
                           legsAnimHandle, legsAnimFrame,
                           torsoAnimHandle, torsoAnimFrame,
                           useTorsoBlend, torsoRootBone );
+}
+
+void CL_AddThirdPersonCharacter( const refdef_t *fd )
+{
+    CL_AddCharacterCod1Entities( fd );
 }
 
 void CL_CharacterCod1_Init( void )
@@ -2089,7 +2095,7 @@ void CL_CharacterCod1_Init( void )
     cl_thirdPersonUseGsc        = Cvar_Get( "cl_thirdPersonUseGsc", "1", CVAR_ARCHIVE );
     cl_thirdPersonBlendTorso    = Cvar_Get( "cl_thirdPersonBlendTorso", "1", CVAR_ARCHIVE );
     cl_thirdPersonTorsoRoot     = Cvar_Get( "cl_thirdPersonTorsoRoot", "bip01 spine2", CVAR_ARCHIVE );
-    cl_thirdPersonAutoGround    = Cvar_Get( "cl_thirdPersonAutoGround", "0", CVAR_ARCHIVE );
+    cl_thirdPersonAutoGround    = Cvar_Get( "cl_thirdPersonAutoGround", "1", CVAR_ARCHIVE );
     cl_thirdPersonYawLerpSpeed  = Cvar_Get( "cl_thirdPersonYawLerpSpeed", "540", CVAR_ARCHIVE );
     cl_thirdPersonDebug         = Cvar_Get( "cl_thirdPersonDebug", "0", CVAR_TEMP );
 

@@ -566,7 +566,7 @@ intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 	{
 		refdef_t *refdef = VMA(1);
 #ifdef STANDALONE
-		CL_AddThirdPersonCharacter( refdef );
+		CL_AddCharacterCod1Entities( refdef );
 #endif
 		re.RenderScene( refdef );
 		return 0;

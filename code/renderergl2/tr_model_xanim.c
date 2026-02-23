@@ -741,68 +741,15 @@ static int R_FindBoneByNames( const xmBone_t *bones, int numBones,
     return -1;
 }
 
-static qboolean R_ModelLooksCharacterRig( const xmBone_t *bones, int numBones )
-{
-    int i;
-
-    if ( !bones || numBones <= 0 ) {
-        return qfalse;
-    }
-
-    for ( i = 0; i < numBones; ++i ) {
-        const char *name = bones[i].name;
-        if ( !name || !name[0] ) {
-            continue;
-        }
-
-        if ( Q_stristr( name, "bip01" ) ||
-             Q_stristr( name, "spine" ) ||
-             Q_stristr( name, "neck" ) ||
-             !Q_stricmp( name, "j_head" ) ||
-             !Q_stricmp( name, "tag_head" ) ) {
-            return qtrue;
-        }
-    }
-
-    return qfalse;
-}
-
-static int R_SelectDObjAttachParent( const xmBone_t *handBones, int numH,
-                                     const xmBone_t *secondBones, int numSecond )
+static int R_SelectDObjAttachParent( const xmBone_t *handBones, int numH )
 {
     static const char *weaponAttachTags[] = {
         "tag_weapon",
         "tag_weapon_right",
         "tag_weapon_left",
-        "tag_head",
-        "j_head",
-        "bip01 head",
-        "bip01 neck",
-        "bip01 spine4",
-        "bip01 spine3",
-        "bip01 spine2",
-        "tag_helmet",
-        "head"
+        "tag_flash",
+        "tag_barrel"
     };
-    static const char *characterAttachTags[] = {
-        "tag_head",
-        "j_head",
-        "bip01 head",
-        "bip01 neck",
-        "bip01 spine4",
-        "bip01 spine3",
-        "bip01 spine2",
-        "tag_helmet",
-        "head",
-        "tag_weapon",
-        "tag_weapon_right",
-        "tag_weapon_left"
-    };
-
-    if ( R_ModelLooksCharacterRig( secondBones, numSecond ) ) {
-        return R_FindBoneByNames( handBones, numH,
-                                  characterAttachTags, (int)ARRAY_LEN( characterAttachTags ) );
-    }
 
     return R_FindBoneByNames( handBones, numH,
                               weaponAttachTags, (int)ARRAY_LEN( weaponAttachTags ) );
@@ -842,7 +789,7 @@ void R_UpdateDObjPose( qhandle_t handModel, qhandle_t gunModel,
         Com_Memcpy( s_dobjWork + numH, s_bindPose[gunIdx], sizeof(xmBone_t) * numG );
     }
 
-    tagWeapon = R_SelectDObjAttachParent( s_dobjWork, numH, s_dobjWork + numH, numG );
+    tagWeapon = R_SelectDObjAttachParent( s_dobjWork, numH );
 
     for ( i = numH; i < total; i++ ) {
         if ( s_dobjWork[i].parent < 0 ) {
@@ -905,7 +852,7 @@ void R_UpdateDObjPoseBlend( qhandle_t handModel, qhandle_t gunModel,
         Com_Memcpy( s_dobjWork + numH, s_bindPose[gunIdx], sizeof(xmBone_t) * numG );
     }
 
-    tagWeapon = R_SelectDObjAttachParent( s_dobjWork, numH, s_dobjWork + numH, numG );
+    tagWeapon = R_SelectDObjAttachParent( s_dobjWork, numH );
 
     for ( i = numH; i < total; i++ ) {
         if ( s_dobjWork[i].parent < 0 ) {
