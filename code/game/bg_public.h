@@ -47,14 +47,18 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	VOTE_TIME			30000	// 30 seconds before vote times out
 
 #define PLAYER_WIDTH		15
-#define	MINS_Z				-24
-#define DEFAULT_HEIGHT		32
-#define	DEFAULT_VIEWHEIGHT	26
-#define CROUCH_HEIGHT		16
-#define CROUCH_VIEWHEIGHT	12
+#define	MINS_Z				0			/* CoD1: origin at feet */
+#define DEFAULT_HEIGHT		72			/* CoD1: 72 units tall */
+#define	DEFAULT_VIEWHEIGHT	60			/* CoD1: eyes at 60/72 */
+#define CROUCH_HEIGHT		18			/* CoD1 crouch height */
+#define CROUCH_VIEWHEIGHT	16			/* CoD1 crouch viewheight */
 #define DEAD_HEIGHT			-8
 #define	DEAD_VIEWHEIGHT		-16
 #define INVUL_RADIUS		42
+
+/* CoD1 additional values */
+#define PRONE_HEIGHT			4			/* CoD1: prone height */
+#define PRONE_VIEWHEIGHT		4			/* CoD1: prone viewheight */
 
 //
 // config strings are a general means of communicating variable length strings
