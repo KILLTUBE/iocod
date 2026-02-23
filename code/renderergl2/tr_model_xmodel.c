@@ -382,8 +382,6 @@ static qboolean XModel_LoadSurfs(
 			 * two-sided rendering so inner surfaces are visible. */
 			sh->cullType = CT_TWO_SIDED;
 			shaderIdx[0] = sh->defaultShader ? 0 : sh->index;
-			ri.Printf( PRINT_ALL, "  Surf %d: mat='%s' shader=%d (default=%d)\n",
-			           i, matName, shaderIdx[0], sh->defaultShader );
 		} else {
 			shaderIdx[0] = 0;
 		}
@@ -435,10 +433,7 @@ static qboolean XModel_LoadSurfs(
 
 			xmR_vec3( &r, localNormal );	/* normal (no negation in V14) */
 			st[j].st[0] = xmR_float( &r );
-			st[j].st[1] = xmR_float( &r );	/* V14: no flip (D3D matches GL for xmodel) */
-			if ( j == 0 && i == 0 ) {
-				ri.Printf( PRINT_ALL, "  First vertex UV: %.3f, %.3f\n", st[j].st[0], st[j].st[1] );
-			}
+			st[j].st[1] = xmR_float( &r );	/* V14: no flip */
 
 			if ( rigged ) {
 				weightCount = xmR_u16( &r );	/* u16 in V14 */
