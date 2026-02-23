@@ -107,6 +107,8 @@ typedef struct {
     float             baseFootOffset;
     float          renderYaw;
     qboolean       renderYawValid;
+    char           loadedPlayerAnimTypeName[64];
+    int            loadedPlayerAnimType;
 } tpCharacterState_t;
 
 static tpCharacterState_t s_tpChar;
@@ -1154,12 +1156,56 @@ static qboolean CL_Character_IsJumpLegToken( const char *token )
     return qtrue;
 }
 
-static qhandle_t CL_Character_RegisterJumpAnimFromPlayerScript( void )
+static qhandle_t CL_Character_RegisterXAnimForPlayerAnimType( const char *baseName,
+                                                       const char *playerAnimTypeName )
+{
+    char typedName[MAX_QPATH];
+    qhandle_t h;
+
+    if ( !re.RegisterXAnim || !baseName || !baseName[0] ) {
+        return 0;
+    }
+
+    if ( playerAnimTypeName && playerAnimTypeName[0] ) {
+        Com_sprintf( typedName, sizeof( typedName ), "%s_%s", baseName, playerAnimTypeName );
+        h = re.RegisterXAnim( typedName );
+        if ( h ) {
+            return h;
+        }
+    }
+
+    return re.RegisterXAnim( baseName );
+}
+
+static int CL_Character_CurrentPlayerAnimType( char *outName, int outNameSize )
+{
+    const char *name;
+    int animType;
+
+    animType = CL_WeaponCurrentPlayerAnimType();
+    name = CL_WeaponCurrentPlayerAnimTypeName();
+    if ( !name ) {
+        name = "";
+    }
+    if ( !name[0] && animType >= 0 ) {
+        name = BG_GetPlayerAnimTypeName( animType );
+    }
+
+    if ( outName && outNameSize > 0 ) {
+        Q_strncpyz( outName, name, outNameSize );
+    }
+
+    return animType;
+}
+
+static qhandle_t CL_Character_RegisterJumpAnimFromPlayerScript( const char *playerAnimTypeName )
 {
     char *scriptText = NULL;
     char *scan;
     char seen[64][64];
     int seenCount;
+    int passCount;
+    int pass;
 
     if ( !re.RegisterXAnim ) {
         return 0;
@@ -1171,41 +1217,50 @@ static qhandle_t CL_Character_RegisterJumpAnimFromPlayerScript( void )
     }
 
     COM_BeginParseSession( "CL_Character_RegisterJumpAnimFromPlayerScript" );
-    scan = scriptText;
     seenCount = 0;
-    while ( 1 ) {
-        char *token = COM_Parse( &scan );
-        int i;
-        qhandle_t h;
+    passCount = ( playerAnimTypeName && playerAnimTypeName[0] ) ? 2 : 1;
+    for ( pass = 0; pass < passCount; ++pass ) {
+        qboolean requireType = ( pass == 0 && playerAnimTypeName && playerAnimTypeName[0] ) ? qtrue : qfalse;
 
-        if ( !token || !token[0] ) {
-            break;
-        }
+        scan = scriptText;
+        while ( 1 ) {
+            char *token = COM_Parse( &scan );
+            int i;
+            qhandle_t h;
 
-        if ( !CL_Character_IsJumpLegToken( token ) ) {
-            continue;
-        }
-
-        for ( i = 0; i < seenCount; ++i ) {
-            if ( !Q_stricmp( seen[i], token ) ) {
+            if ( !token || !token[0] ) {
                 break;
             }
-        }
-        if ( i < seenCount ) {
-            continue;
-        }
-        if ( seenCount < (int)ARRAY_LEN( seen ) ) {
-            Q_strncpyz( seen[seenCount], token, sizeof( seen[0] ) );
-            seenCount++;
-        }
 
-        h = re.RegisterXAnim( token );
-        if ( h ) {
-            if ( cl_thirdPersonDebug && cl_thirdPersonDebug->integer ) {
-                Com_Printf( "thirdperson: jump legs xanim from script -> '%s'\n", token );
+            if ( !CL_Character_IsJumpLegToken( token ) ) {
+                continue;
             }
-            FS_FreeFile( scriptText );
-            return h;
+
+            if ( requireType && !Q_stristr( token, playerAnimTypeName ) ) {
+                continue;
+            }
+
+            for ( i = 0; i < seenCount; ++i ) {
+                if ( !Q_stricmp( seen[i], token ) ) {
+                    break;
+                }
+            }
+            if ( i < seenCount ) {
+                continue;
+            }
+            if ( seenCount < (int)ARRAY_LEN( seen ) ) {
+                Q_strncpyz( seen[seenCount], token, sizeof( seen[0] ) );
+                seenCount++;
+            }
+
+            h = re.RegisterXAnim( token );
+            if ( h ) {
+                if ( cl_thirdPersonDebug && cl_thirdPersonDebug->integer ) {
+                    Com_Printf( "thirdperson: jump legs xanim from script -> '%s'\n", token );
+                }
+                FS_FreeFile( scriptText );
+                return h;
+            }
         }
     }
 
@@ -1220,23 +1275,26 @@ static void CL_Character_LoadAnimations( void )
         "pb_stand_jump_start",
         "pb_jump_start"
     };
+    char playerAnimTypeName[64];
+    int playerAnimType;
     int i;
 
     // CoD2 reference: player anim types are loaded before anim scripts are
     // resolved (BG_LoadPlayerAnimTypes -> BG_LoadAnim).
     BG_LoadPlayerAnimTypes();
+    playerAnimType = CL_Character_CurrentPlayerAnimType( playerAnimTypeName, sizeof( playerAnimTypeName ) );
 
     for ( i = 0; i < TP_LEG_ANIM_COUNT; ++i ) {
         int j;
         s_tpChar.legAnims[i] = 0;
-        if ( re.RegisterXAnim ) {
-            s_tpChar.legAnims[i] = re.RegisterXAnim( s_tpLegAnimNames[i] );
-            if ( !s_tpChar.legAnims[i] && i == TP_LEG_ANIM_JUMP ) {
-                for ( j = 0; j < (int)ARRAY_LEN( jumpLegFallbacks ); ++j ) {
-                    s_tpChar.legAnims[i] = re.RegisterXAnim( jumpLegFallbacks[j] );
-                    if ( s_tpChar.legAnims[i] ) {
-                        break;
-                    }
+        s_tpChar.legAnims[i] = CL_Character_RegisterXAnimForPlayerAnimType(
+            s_tpLegAnimNames[i], playerAnimTypeName );
+        if ( !s_tpChar.legAnims[i] && i == TP_LEG_ANIM_JUMP ) {
+            for ( j = 0; j < (int)ARRAY_LEN( jumpLegFallbacks ); ++j ) {
+                s_tpChar.legAnims[i] = CL_Character_RegisterXAnimForPlayerAnimType(
+                    jumpLegFallbacks[j], playerAnimTypeName );
+                if ( s_tpChar.legAnims[i] ) {
+                    break;
                 }
             }
         }
@@ -1252,7 +1310,8 @@ static void CL_Character_LoadAnimations( void )
     // primitive xanim file. Keep jump state valid by falling back to an
     // available stand locomotion clip.
     if ( !s_tpChar.legAnims[TP_LEG_ANIM_JUMP] ) {
-        s_tpChar.legAnims[TP_LEG_ANIM_JUMP] = CL_Character_RegisterJumpAnimFromPlayerScript();
+        s_tpChar.legAnims[TP_LEG_ANIM_JUMP] = CL_Character_RegisterJumpAnimFromPlayerScript(
+            playerAnimTypeName );
     }
 
     if ( !s_tpChar.legAnims[TP_LEG_ANIM_JUMP] ) {
@@ -1286,7 +1345,8 @@ static void CL_Character_LoadAnimations( void )
                 break;
             }
 
-            s_tpChar.torsoAnims[i] = re.RegisterXAnim( name );
+            s_tpChar.torsoAnims[i] = CL_Character_RegisterXAnimForPlayerAnimType(
+                name, playerAnimTypeName );
             if ( s_tpChar.torsoAnims[i] ) {
                 break;
             }
@@ -1301,6 +1361,20 @@ static void CL_Character_LoadAnimations( void )
     s_tpChar.currentTorsoAnim = TP_TORSO_ANIM_STAND_IDLE;
     s_tpChar.legAnimStartTime = cl.serverTime;
     s_tpChar.torsoAnimStartTime = cl.serverTime;
+    s_tpChar.loadedPlayerAnimType = -1;
+    s_tpChar.loadedPlayerAnimType = playerAnimType;
+    Q_strncpyz( s_tpChar.loadedPlayerAnimTypeName, playerAnimTypeName,
+                sizeof( s_tpChar.loadedPlayerAnimTypeName ) );
+
+    if ( cl_thirdPersonDebug && cl_thirdPersonDebug->integer ) {
+        if ( s_tpChar.loadedPlayerAnimTypeName[0] ) {
+            Com_Printf( "thirdperson: playerAnimType '%s' (%d)\n",
+                        s_tpChar.loadedPlayerAnimTypeName,
+                        s_tpChar.loadedPlayerAnimType );
+        } else {
+            Com_Printf( "thirdperson: playerAnimType '(none)'\n" );
+        }
+    }
 }
 
 static qboolean CL_Character_AttachmentListsEqual( const tpAttachment_t *a, int aCount,
@@ -2175,7 +2249,15 @@ static void CL_Character_AddAttachments( const refEntity_t *baseEnt,
 
 static void CL_Character_EnsureAssets( void )
 {
-    if ( !s_tpChar.legAnims[TP_LEG_ANIM_STAND_IDLE] ) {
+    char currentPlayerAnimTypeName[64];
+    int currentPlayerAnimType;
+
+    currentPlayerAnimType = CL_Character_CurrentPlayerAnimType(
+        currentPlayerAnimTypeName, sizeof( currentPlayerAnimTypeName ) );
+
+    if ( !s_tpChar.legAnims[TP_LEG_ANIM_STAND_IDLE] ||
+         currentPlayerAnimType != s_tpChar.loadedPlayerAnimType ||
+         Q_stricmp( currentPlayerAnimTypeName, s_tpChar.loadedPlayerAnimTypeName ) ) {
         CL_Character_LoadAnimations();
     }
 
@@ -2214,7 +2296,6 @@ void CL_AddCharacterCod1Entities( const refdef_t *fd )
     vec3_t interpOrigin;
     vec3_t interpVelocity;
     int interpViewHeight;
-    float xyspeed;
     float desiredYaw;
     float maxYawStep;
     playerState_t interpPs;
@@ -2324,19 +2405,8 @@ void CL_AddCharacterCod1Entities( const refdef_t *fd )
     VectorCopy( ent.origin, ent.oldorigin );
     VectorCopy( ent.origin, ent.lightingOrigin );
 
-    xyspeed = sqrtf( interpVelocity[0] * interpVelocity[0] +
-                     interpVelocity[1] * interpVelocity[1] );
-    if ( cl_thirdPersonFaceView && cl_thirdPersonFaceView->integer ) {
-        desiredYaw = cl.viewangles[YAW];
-    } else if ( cl_thirdPersonFaceMove && cl_thirdPersonFaceMove->integer &&
-                xyspeed > ( cl_thirdPersonMoveThreshold ? cl_thirdPersonMoveThreshold->value : 20.0f ) &&
-                interpPs.groundEntityNum != ENTITYNUM_NONE ) {
-        desiredYaw = RAD2DEG( atan2f( interpVelocity[1], interpVelocity[0] ) );
-    } else if ( s_tpChar.renderYawValid ) {
-        desiredYaw = s_tpChar.renderYaw;
-    } else {
-        desiredYaw = cl.viewangles[YAW];
-    }
+    /* Always follow current view yaw to avoid free-rotate behavior from stale cvars. */
+    desiredYaw = cl.viewangles[YAW];
 
     if ( !s_tpChar.renderYawValid ) {
         s_tpChar.renderYaw = desiredYaw;

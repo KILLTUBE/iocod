@@ -52,16 +52,21 @@ void BG_LoadPlayerAnimTypes( void )
 
     scan = raw;
     count = 0;
-    while ( count < COD_PLAYER_ANIM_TYPE_MAX ) {
+    COM_BeginParseSession( "BG_LoadPlayerAnimTypes" );
+    while ( 1 ) {
         char *token = COM_Parse( &scan );
         if ( !token || !token[0] ) {
+            break;
+        }
+
+        if ( count >= COD_PLAYER_ANIM_TYPE_MAX ) {
+            Com_Printf( "BG_LoadPlayerAnimTypes: player anim type array size exceeded\n" );
             break;
         }
 
         Q_strncpyz( s_playerAnimTypeNames[count], token, sizeof( s_playerAnimTypeNames[count] ) );
         count++;
     }
-
     s_playerAnimTypeCount = count;
     FS_FreeFile( raw );
 }

@@ -648,6 +648,8 @@ void CL_WeaponCod1_Init( void );
 void CL_WeaponCod1_Shutdown( void );
 void CL_GiveWeapon( const char *name );
 void CL_DrawViewModel( stereoFrame_t stereo );
+const char *CL_WeaponCurrentPlayerAnimTypeName( void );
+int CL_WeaponCurrentPlayerAnimType( void );
 
 /* cl_character_cod1.c */
 void CL_CharacterCod1_Init( void );

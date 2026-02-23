@@ -455,6 +455,31 @@ void CL_WeaponCod1_Shutdown( void )
     s_prevPmType = -1;
 }
 
+const char *CL_WeaponCurrentPlayerAnimTypeName( void )
+{
+    if ( !cl_weapon.active ) {
+        return "";
+    }
+
+    if ( cl_weapon.def.playerAnimTypeName[0] ) {
+        return cl_weapon.def.playerAnimTypeName;
+    }
+
+    if ( cl_weapon.def.playerAnimType >= 0 ) {
+        return BG_GetPlayerAnimTypeName( cl_weapon.def.playerAnimType );
+    }
+
+    return "";
+}
+
+int CL_WeaponCurrentPlayerAnimType( void )
+{
+    if ( !cl_weapon.active ) {
+        return -1;
+    }
+    return cl_weapon.def.playerAnimType;
+}
+
 /*
  * CL_WeaponCurrentAnimFrame -- exposes the animation evaluator for future
  * per-frame bone skinning integration (unused until runtime skinning is added).
