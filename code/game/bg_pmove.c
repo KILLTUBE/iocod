@@ -373,6 +373,12 @@ static qboolean PM_CheckJump( void ) {
 		return qfalse;
 	}
 
+	// first jump press while prone transitions out of prone stance
+	if ( pm->ps->pm_flags & PMF_PRONE ) {
+		pm->ps->pm_flags &= ~PMF_PRONE;
+		return qfalse;
+	}
+
 	// must wait for jump to be released
 	if ( pm->ps->pm_flags & PMF_JUMP_HELD ) {
 		// clear upmove so cmdscale doesn't lower running speed
@@ -1351,6 +1357,8 @@ Sets mins, maxs, and pm->ps->viewheight
 static void PM_CheckDuck (void)
 {
 	trace_t	trace;
+	qboolean wantsProne;
+	qboolean wantsCrouch;
 
 	if ( pm->ps->powerups[PW_INVULNERABILITY] ) {
 		if ( pm->ps->pm_flags & PMF_INVULEXPAND ) {
@@ -1363,6 +1371,7 @@ static void PM_CheckDuck (void)
 			VectorSet( pm->maxs, PLAYER_WIDTH, PLAYER_WIDTH, 16 );
 		}
 		pm->ps->pm_flags |= PMF_DUCKED;
+		pm->ps->pm_flags &= ~PMF_PRONE;
 		pm->ps->viewheight = CROUCH_VIEWHEIGHT;
 		return;
 	}
@@ -1378,34 +1387,55 @@ static void PM_CheckDuck (void)
 
 	if (pm->ps->pm_type == PM_DEAD)
 	{
+		pm->ps->pm_flags &= ~PMF_PRONE;
 		pm->maxs[2] = DEAD_HEIGHT;
 		pm->ps->viewheight = DEAD_VIEWHEIGHT;
 		return;
 	}
 
-	if (pm->cmd.upmove < 0)
-	{	// duck
-		pm->ps->pm_flags |= PMF_DUCKED;
+	// explicit stance buttons are sticky in CoD-style controls
+	if ( pm->cmd.buttons & BUTTON_PRONE ) {
+		pm->ps->pm_flags |= PMF_PRONE;
+	} else if ( pm->cmd.buttons & BUTTON_CROUCH ) {
+		pm->ps->pm_flags &= ~PMF_PRONE;
+	} else if ( pm->cmd.buttons & BUTTON_STAND ) {
+		pm->ps->pm_flags &= ~PMF_PRONE;
 	}
-	else
-	{	// stand up if possible
-		if (pm->ps->pm_flags & PMF_DUCKED)
-		{
-			// try to stand up
-			pm->maxs[2] = DEFAULT_HEIGHT;
-			pm->trace (&trace, pm->ps->origin, pm->mins, pm->maxs, pm->ps->origin, pm->ps->clientNum, pm->tracemask );
-			if (!trace.allsolid)
-				pm->ps->pm_flags &= ~PMF_DUCKED;
+
+	// jump/up input exits prone first
+	if ( pm->cmd.upmove > 10 ) {
+		pm->ps->pm_flags &= ~PMF_PRONE;
+	}
+
+	wantsProne = ( pm->ps->pm_flags & PMF_PRONE ) ? qtrue : qfalse;
+	wantsCrouch = qfalse;
+
+	if ( wantsProne ) {
+		pm->ps->pm_flags |= PMF_DUCKED;
+		pm->maxs[2] = PRONE_HEIGHT;
+		pm->ps->viewheight = PRONE_VIEWHEIGHT;
+		return;
+	}
+
+	if ( pm->cmd.upmove < 0 || ( pm->cmd.buttons & BUTTON_CROUCH ) ) {
+		wantsCrouch = qtrue;
+	}
+
+	if ( wantsCrouch ) {
+		pm->ps->pm_flags |= PMF_DUCKED;
+	} else if ( pm->ps->pm_flags & PMF_DUCKED ) {
+		// try to stand up
+		pm->maxs[2] = DEFAULT_HEIGHT;
+		pm->trace( &trace, pm->ps->origin, pm->mins, pm->maxs, pm->ps->origin, pm->ps->clientNum, pm->tracemask );
+		if ( !trace.allsolid ) {
+			pm->ps->pm_flags &= ~PMF_DUCKED;
 		}
 	}
 
-	if (pm->ps->pm_flags & PMF_DUCKED)
-	{
+	if ( pm->ps->pm_flags & PMF_DUCKED ) {
 		pm->maxs[2] = CROUCH_HEIGHT;
 		pm->ps->viewheight = CROUCH_VIEWHEIGHT;
-	}
-	else
-	{
+	} else {
 		pm->maxs[2] = DEFAULT_HEIGHT;
 		pm->ps->viewheight = DEFAULT_VIEWHEIGHT;
 	}
@@ -2173,4 +2203,3 @@ void Pmove (pmove_t *pmove) {
 	//PM_CheckStuck();
 
 }
-

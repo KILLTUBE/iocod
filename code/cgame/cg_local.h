@@ -1077,6 +1077,7 @@ typedef struct {
 	fontInfo_t	hudFont;		/* CoD1 font used for HUD text */
 	qhandle_t	cod1StanceStand;	/* gfx/hud/stance_stand  */
 	qhandle_t	cod1StanceCrouch;	/* gfx/hud/stance_crouch */
+	qhandle_t	cod1StanceProne;	/* gfx/hud/stance_prone  */
 #endif
 
 } cgs_t;

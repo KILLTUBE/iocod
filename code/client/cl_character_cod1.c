@@ -40,6 +40,7 @@ typedef enum {
     TP_LEG_ANIM_PRONE_BACK,
     TP_LEG_ANIM_PRONE_LEFT,
     TP_LEG_ANIM_PRONE_RIGHT,
+    TP_LEG_ANIM_JUMP,
     TP_LEG_ANIM_COUNT
 } tpLegAnimSlot_t;
 
@@ -68,7 +69,8 @@ static const char *s_tpLegAnimNames[TP_LEG_ANIM_COUNT] = {
     "pb_prone_crawl",
     "pb_prone_crawl_back",
     "pb_prone_crawl_left",
-    "pb_prone_crawl_right"
+    "pb_prone_crawl_right",
+    "pb_stand_jump"
 };
 
 static const char *s_tpTorsoAnimCandidates[TP_TORSO_ANIM_COUNT][4] = {
@@ -1139,12 +1141,26 @@ static qboolean CL_Character_ParseCharacterScript( const char *scriptPath,
 
 static void CL_Character_LoadAnimations( void )
 {
+    static const char *jumpLegFallbacks[] = {
+        "pb_jump",
+        "pb_stand_jump_start",
+        "pb_jump_start"
+    };
     int i;
 
     for ( i = 0; i < TP_LEG_ANIM_COUNT; ++i ) {
+        int j;
         s_tpChar.legAnims[i] = 0;
         if ( re.RegisterXAnim ) {
             s_tpChar.legAnims[i] = re.RegisterXAnim( s_tpLegAnimNames[i] );
+            if ( !s_tpChar.legAnims[i] && i == TP_LEG_ANIM_JUMP ) {
+                for ( j = 0; j < (int)ARRAY_LEN( jumpLegFallbacks ); ++j ) {
+                    s_tpChar.legAnims[i] = re.RegisterXAnim( jumpLegFallbacks[j] );
+                    if ( s_tpChar.legAnims[i] ) {
+                        break;
+                    }
+                }
+            }
         }
 
         if ( !s_tpChar.legAnims[i] && cl_thirdPersonDebug && cl_thirdPersonDebug->integer ) {
@@ -1492,15 +1508,20 @@ static void CL_Character_DeriveStanceFlags( const playerState_t *ps,
 {
     int legsAnim;
 
-    *outCrouched = ( ps->pm_flags & PMF_DUCKED ) ? qtrue : qfalse;
-    *outProne = ( ps->viewheight <= ( PRONE_VIEWHEIGHT + 1 ) );
+    *outProne = ( ps->pm_flags & PMF_PRONE ) ? qtrue : qfalse;
+    if ( !*outProne ) {
+        *outProne = ( ps->viewheight <= ( PRONE_VIEWHEIGHT + 1 ) );
+    }
+    *outCrouched = ( ( ps->pm_flags & PMF_DUCKED ) && !*outProne ) ? qtrue : qfalse;
 
     legsAnim = ps->legsAnim & ~ANIM_TOGGLEBIT;
     switch ( legsAnim ) {
         case LEGS_WALKCR:
         case LEGS_IDLECR:
         case LEGS_BACKCR:
-            *outCrouched = qtrue;
+            if ( !*outProne ) {
+                *outCrouched = qtrue;
+            }
             break;
         default:
             break;
@@ -1657,6 +1678,17 @@ static tpLegAnimSlot_t CL_Character_ChooseLegAnimForPlayerState( const playerSta
         return CL_Character_LegIdleAnimForStance( crouched, prone );
     }
 
+    if ( ps->pm_type == PM_NORMAL ) {
+        if ( legsAnim == LEGS_JUMP || legsAnim == LEGS_LAND ||
+             legsAnim == LEGS_JUMPB || legsAnim == LEGS_LANDB ) {
+            return TP_LEG_ANIM_JUMP;
+        }
+
+        if ( ps->groundEntityNum == ENTITYNUM_NONE && legsAnim != LEGS_SWIM ) {
+            return TP_LEG_ANIM_JUMP;
+        }
+    }
+
     switch ( legsAnim ) {
         case LEGS_WALKCR:
             crouched = qtrue;
@@ -1674,10 +1706,6 @@ static tpLegAnimSlot_t CL_Character_ChooseLegAnimForPlayerState( const playerSta
         case LEGS_WALK:
         case LEGS_RUN:
         case LEGS_SWIM:
-        case LEGS_JUMP:
-        case LEGS_LAND:
-        case LEGS_JUMPB:
-        case LEGS_LANDB:
             moving = qtrue;
             break;
         case LEGS_BACK:
@@ -2192,12 +2220,12 @@ void CL_AddCharacterCod1Entities( const refdef_t *fd )
 
     xyspeed = sqrtf( interpVelocity[0] * interpVelocity[0] +
                      interpVelocity[1] * interpVelocity[1] );
-    if ( cl_thirdPersonFaceMove && cl_thirdPersonFaceMove->integer &&
-         xyspeed > ( cl_thirdPersonMoveThreshold ? cl_thirdPersonMoveThreshold->value : 20.0f ) &&
-         interpPs.groundEntityNum != ENTITYNUM_NONE ) {
-        desiredYaw = RAD2DEG( atan2f( interpVelocity[1], interpVelocity[0] ) );
-    } else if ( cl_thirdPersonFaceView && cl_thirdPersonFaceView->integer ) {
+    if ( cl_thirdPersonFaceView && cl_thirdPersonFaceView->integer ) {
         desiredYaw = cl.viewangles[YAW];
+    } else if ( cl_thirdPersonFaceMove && cl_thirdPersonFaceMove->integer &&
+                xyspeed > ( cl_thirdPersonMoveThreshold ? cl_thirdPersonMoveThreshold->value : 20.0f ) &&
+                interpPs.groundEntityNum != ENTITYNUM_NONE ) {
+        desiredYaw = RAD2DEG( atan2f( interpVelocity[1], interpVelocity[0] ) );
     } else if ( s_tpChar.renderYawValid ) {
         desiredYaw = s_tpChar.renderYaw;
     } else {
@@ -2243,7 +2271,7 @@ void CL_CharacterCod1_Init( void )
     cl_thirdPersonZOffset       = Cvar_Get( "cl_thirdPersonZOffset", "0", CVAR_ARCHIVE );
     cl_thirdPersonAnimRate      = Cvar_Get( "cl_thirdPersonAnimRate", "1", CVAR_ARCHIVE );
     cl_thirdPersonMoveThreshold = Cvar_Get( "cl_thirdPersonMoveThreshold", "20", CVAR_ARCHIVE );
-    cl_thirdPersonFaceView      = Cvar_Get( "cl_thirdPersonFaceView", "0", CVAR_ARCHIVE );
+    cl_thirdPersonFaceView      = Cvar_Get( "cl_thirdPersonFaceView", "1", CVAR_ARCHIVE );
     cl_thirdPersonFaceMove      = Cvar_Get( "cl_thirdPersonFaceMove", "1", CVAR_ARCHIVE );
     cl_thirdPersonUseGsc        = Cvar_Get( "cl_thirdPersonUseGsc", "1", CVAR_ARCHIVE );
     cl_thirdPersonBlendTorso    = Cvar_Get( "cl_thirdPersonBlendTorso", "1", CVAR_ARCHIVE );

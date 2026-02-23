@@ -271,10 +271,26 @@ void IN_Button14Up(void) {IN_KeyUp(&in_buttons[14]);}
 void IN_Button15Down(void) {IN_KeyDown(&in_buttons[15]);}
 void IN_Button15Up(void) {IN_KeyUp(&in_buttons[15]);}
 
+void IN_GoCrouch( void ) {
+	IN_KeyUp( &in_buttons[12] );  // clear prone latch
+	IN_KeyUp( &in_buttons[13] );  // clear stand latch
+	IN_KeyDown( &in_buttons[11] );
+}
+
+void IN_GoProne( void ) {
+	IN_KeyUp( &in_buttons[11] );  // clear crouch latch
+	IN_KeyUp( &in_buttons[13] );  // clear stand latch
+	IN_KeyDown( &in_buttons[12] );
+}
+
 // CoD1: +gostand - stand up if crouching, jump if already standing.
 // Uses DEFAULT_VIEWHEIGHT from bg_public.h.
 
 void IN_GoStandDown(void) {
+	// clear crouch / prone latches before standing/jumping
+	IN_KeyUp(&in_buttons[11]);
+	IN_KeyUp(&in_buttons[12]);
+
 	// If already standing (or close to standing height), trigger jump instead
 	if (cl.snap.ps.viewheight >= DEFAULT_VIEWHEIGHT - 2) {
 		IN_UpDown();  // Jump
@@ -1025,8 +1041,12 @@ void CL_InitInput( void ) {
 	// CoD1 stance commands
 	Cmd_AddCommand ("+gostand", IN_GoStandDown);
 	Cmd_AddCommand ("-gostand", IN_GoStandUp);
-	Cmd_AddCommand ("gocrouch", IN_Button11Down);  // Toggle/hold for crouch
-	Cmd_AddCommand ("goprone", IN_Button12Down);    // Toggle/hold for prone
+	Cmd_AddCommand ("+gocrouch", IN_Button11Down);
+	Cmd_AddCommand ("-gocrouch", IN_Button11Up);
+	Cmd_AddCommand ("+goprone", IN_Button12Down);
+	Cmd_AddCommand ("-goprone", IN_Button12Up);
+	Cmd_AddCommand ("gocrouch", IN_GoCrouch);  // sticky crouch stance
+	Cmd_AddCommand ("goprone", IN_GoProne);    // sticky prone stance
 
 #ifdef USE_VOIP
 	Cmd_AddCommand ("+voiprecord", IN_VoipRecordDown);
@@ -1110,6 +1130,10 @@ void CL_ShutdownInput(void)
 	// CoD1 stance commands
 	Cmd_RemoveCommand("+gostand");
 	Cmd_RemoveCommand("-gostand");
+	Cmd_RemoveCommand("+gocrouch");
+	Cmd_RemoveCommand("-gocrouch");
+	Cmd_RemoveCommand("+goprone");
+	Cmd_RemoveCommand("-goprone");
 	Cmd_RemoveCommand("gocrouch");
 	Cmd_RemoveCommand("goprone");
 

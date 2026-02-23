@@ -1897,6 +1897,7 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 	// Stance shaders needed by CG_OwnerDraw stance handler
 	cgs.cod1StanceStand  = trap_R_RegisterShaderNoMip( "gfx/hud/stance_stand" );
 	cgs.cod1StanceCrouch = trap_R_RegisterShaderNoMip( "gfx/hud/stance_crouch" );
+	cgs.cod1StanceProne  = trap_R_RegisterShaderNoMip( "gfx/hud/stance_prone" );
 #endif
 
 	CG_RegisterCvars();

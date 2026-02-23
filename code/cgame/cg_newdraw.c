@@ -1564,7 +1564,9 @@ void CG_OwnerDraw(float x, float y, float w, float h, float text_x, float text_y
 			return;
 		case 20: {
 			qhandle_t stanceShader = 0;
-			if ( cgs.cod1StanceCrouch && ( cg.snap->ps.pm_flags & PMF_DUCKED ) ) {
+			if ( cgs.cod1StanceProne && ( cg.snap->ps.pm_flags & PMF_PRONE ) ) {
+				stanceShader = cgs.cod1StanceProne;
+			} else if ( cgs.cod1StanceCrouch && ( cg.snap->ps.pm_flags & PMF_DUCKED ) ) {
 				stanceShader = cgs.cod1StanceCrouch;
 			} else if ( cgs.cod1StanceStand ) {
 				stanceShader = cgs.cod1StanceStand;

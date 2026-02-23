@@ -289,7 +289,8 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     /* ---- Camera / view setup ---- */
     vec3_t cameraOrigin, modelOrigin;
     vec3_t entityAxis[3];
-    int    stance;
+    qboolean prone;
+    qboolean ducked;
     float  ofsF = 0.0f, ofsR = 0.0f, ofsU = 0.0f;
 
     VectorCopy( cl.snap.ps.viewangles, viewAngles );
@@ -299,17 +300,21 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     VectorCopy( cl.snap.ps.origin, cameraOrigin );
     cameraOrigin[2] += cl.snap.ps.viewheight;
 
-    /* PMF_DUCKED = 1 (bg_public.h) - same in CoD1 */
-    stance = cl.snap.ps.pm_flags & PMF_DUCKED;
+    prone = ( cl.snap.ps.pm_flags & PMF_PRONE ) ? qtrue : qfalse;
+    ducked = ( cl.snap.ps.pm_flags & PMF_DUCKED ) ? qtrue : qfalse;
 
     /* Apply weapon file offsets */
     if ( cl_weapon.active ) {
         weaponDef_t *def = &cl_weapon.def;
-        if ( stance == PMF_DUCKED ) {   /* Ducked */
+        if ( prone ) {
+            ofsF = def->proneOfsF;
+            ofsR = def->proneOfsR;
+            ofsU = def->proneOfsU;
+        } else if ( ducked ) {
             ofsF = def->duckedOfsF;
             ofsR = def->duckedOfsR;
             ofsU = def->duckedOfsU;
-        } else {               /* Standing */
+        } else {
             ofsF = def->standMoveF;
             ofsR = def->standMoveR;
             ofsU = def->standMoveU;
