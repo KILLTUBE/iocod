@@ -111,8 +111,13 @@ static int       s_numAnims = 0;
 /* Bind-pose table: indexed by (model->index), same size as MAX_MOD_KNOWN */
 #define BIND_TABLE_SIZE     1024
 
-static xmBone_t *s_bindPose[  BIND_TABLE_SIZE ];
-static int       s_bindCount[ BIND_TABLE_SIZE ];
+static xmBone_t    *s_bindPose[  BIND_TABLE_SIZE ];
+static int          s_bindCount[ BIND_TABLE_SIZE ];
+
+/* CPU skinning data (local vertex positions) and current animated pose */
+static xmSkinData_t *s_skinData[  BIND_TABLE_SIZE ];
+static xmBone_t     *s_curPose[   BIND_TABLE_SIZE ];
+static int           s_curCount[  BIND_TABLE_SIZE ];
 
 /* ===========================================================================
    XModel_ComputeWorldBones
@@ -156,6 +161,93 @@ void R_StoreXModelBindPose( qhandle_t modelHandle,
     s_bindCount[idx] = numBones;
 }
 
+/* ===========================================================================
+   CPU skinning data storage
+   =========================================================================== */
+
+void R_StoreXModelSkinData( qhandle_t modelHandle, xmSkinData_t *data )
+{
+    int idx = (int)modelHandle;
+    if ( idx < 0 || idx >= BIND_TABLE_SIZE ) return;
+    s_skinData[idx] = data;
+}
+
+/* ===========================================================================
+   R_UpdateXModelPose
+   Evaluates the animation at 'frame', re-skins all vertices in-place, and
+   updates the mdvTag array so re.LerpTag returns animated positions.
+   =========================================================================== */
+
+void R_UpdateXModelPose( qhandle_t modelHandle, qhandle_t animHandle, float frame )
+{
+    int          idx = (int)modelHandle;
+    int          i, j, numBones;
+    xmBone_t     workBones[XMODEL_MAX_BONES];
+    xmSkinData_t *sd;
+    mdvModel_t   *mdvModel;
+
+    if ( idx < 0 || idx >= BIND_TABLE_SIZE ) return;
+    if ( !s_bindPose[idx] || s_bindCount[idx] <= 0 ) return;
+
+    numBones = s_bindCount[idx];
+
+    /* Start from bind pose */
+    Com_Memcpy( workBones, s_bindPose[idx], sizeof(xmBone_t) * numBones );
+
+    /* Overlay animation keyframes (by bone name matching) */
+    if ( animHandle > 0 )
+        R_EvalXAnimBones( animHandle, frame, workBones, numBones );
+    else
+        XModel_ComputeWorldBones( workBones, numBones );
+
+    /* Cache the evaluated pose for R_XModelLerpTag */
+    if ( !s_curPose[idx] || s_curCount[idx] < numBones ) {
+        if ( s_curPose[idx] ) ri.Free( s_curPose[idx] );
+        s_curPose[idx]  = (xmBone_t *)ri.Malloc( sizeof(xmBone_t) * numBones );
+        s_curCount[idx] = numBones;
+    }
+    Com_Memcpy( s_curPose[idx], workBones, sizeof(xmBone_t) * numBones );
+
+    /* Re-skin all vertices in-place */
+    sd = s_skinData[idx];
+    if ( sd ) {
+        for ( i = 0; i < sd->numSurfaces; i++ ) {
+            xmSkinSurf_t *surf = &sd->surfs[i];
+            for ( j = 0; j < surf->numVerts; j++ ) {
+                vec3_t worldPos, worldNormal;
+                int    bi = surf->verts[j].boneIdx;
+
+                if ( bi >= 0 && bi < numBones ) {
+                    const xmBone_t *b = &workBones[bi];
+                    Quat_RotVec( b->wRot, surf->verts[j].localPos,    worldPos    );
+                    VectorAdd  ( b->wTrans, worldPos,                  worldPos    );
+                    Quat_RotVec( b->wRot, surf->verts[j].localNormal,  worldNormal );
+                } else {
+                    VectorCopy( surf->verts[j].localPos,    worldPos    );
+                    VectorCopy( surf->verts[j].localNormal, worldNormal );
+                }
+
+                VectorNormalize( worldNormal );
+                VectorCopy( worldPos, surf->mdvVerts[j].xyz );
+                R_VaoPackNormal( surf->mdvVerts[j].normal, worldNormal );
+            }
+        }
+
+        /* Update mdvTag entries so re.LerpTag returns animated positions */
+        mdvModel = sd->mdvModel;
+        if ( mdvModel && mdvModel->numTags > 0 ) {
+            int tagIdx = 0;
+            for ( i = 0; i < numBones && tagIdx < mdvModel->numTags; i++ ) {
+                if ( Q_strncmp( workBones[i].name, "tag_", 4 ) == 0 ) {
+                    VectorCopy( workBones[i].wTrans, mdvModel->tags[tagIdx].origin );
+                    Quat_ToAxis( workBones[i].wRot,  mdvModel->tags[tagIdx].axis   );
+                    tagIdx++;
+                }
+            }
+        }
+    }
+}
+
 /*
 ====================
 R_XModelLerpTag
@@ -165,17 +257,28 @@ int R_XModelLerpTag( orientation_t *tag, qhandle_t handle,
                       int startFrame, int endFrame,
                       float frac, const char *tagName )
 {
-    int idx = (int)handle;
-    int i;
+    int      idx = (int)handle;
+    int      i;
+    xmBone_t *pose;
+    int      count;
 
-    if ( idx < 0 || idx >= BIND_TABLE_SIZE || !s_bindPose[idx] ) {
+    if ( idx < 0 || idx >= BIND_TABLE_SIZE ) return 0;
+
+    /* Prefer the current animated pose if available */
+    if ( s_curPose[idx] && s_curCount[idx] > 0 ) {
+        pose  = s_curPose[idx];
+        count = s_curCount[idx];
+    } else if ( s_bindPose[idx] && s_bindCount[idx] > 0 ) {
+        pose  = s_bindPose[idx];
+        count = s_bindCount[idx];
+    } else {
         return 0;
     }
 
-    for ( i = 0; i < s_bindCount[idx]; i++ ) {
-        if ( !Q_stricmp( s_bindPose[idx][i].name, tagName ) ) {
-            VectorCopy( s_bindPose[idx][i].wTrans, tag->origin );
-            Quat_ToAxis( s_bindPose[idx][i].wRot, tag->axis );
+    for ( i = 0; i < count; i++ ) {
+        if ( !Q_stricmp( pose[i].name, tagName ) ) {
+            VectorCopy( pose[i].wTrans, tag->origin );
+            Quat_ToAxis( pose[i].wRot,  tag->axis   );
             return 1;
         }
     }

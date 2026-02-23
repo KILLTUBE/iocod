@@ -1712,14 +1712,16 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 
 	re.TakeVideoFrame = RE_TakeVideoFrame;
 
-	/* CoD1 xanim (defined in tr_model_xanim.c) */
+	/* CoD1 xanim + CPU skinning (defined in tr_model_xanim.c) */
 	{
-		extern qhandle_t R_RegisterXAnim ( const char *name );
-		extern int       R_XAnimNumFrames( qhandle_t h );
-		extern int       R_XAnimFramerate ( qhandle_t h );
-		re.RegisterXAnim  = R_RegisterXAnim;
-		re.XAnimNumFrames = R_XAnimNumFrames;
-		re.XAnimFramerate = R_XAnimFramerate;
+		extern qhandle_t R_RegisterXAnim   ( const char *name );
+		extern int       R_XAnimNumFrames  ( qhandle_t h );
+		extern int       R_XAnimFramerate  ( qhandle_t h );
+		extern void      R_UpdateXModelPose( qhandle_t model, qhandle_t anim, float frame );
+		re.RegisterXAnim    = R_RegisterXAnim;
+		re.XAnimNumFrames   = R_XAnimNumFrames;
+		re.XAnimFramerate   = R_XAnimFramerate;
+		re.UpdateXModelPose = R_UpdateXModelPose;
 	}
 
 	return &re;

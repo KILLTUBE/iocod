@@ -104,6 +104,9 @@ typedef struct {
 	qhandle_t (*RegisterXAnim)( const char *name );
 	int       (*XAnimNumFrames)( qhandle_t anim );
 	int       (*XAnimFramerate)( qhandle_t anim );
+
+	/* CoD1 xmodel CPU skinning: evaluate anim, re-skin verts, update tags */
+	void      (*UpdateXModelPose)( qhandle_t model, qhandle_t anim, float frame );
 } refexport_t;
 
 //

@@ -28,6 +28,7 @@ static cvar_t *cl_drawGun;      /* 0 = hide viewmodel                   */
 static cvar_t *cg_gunX;
 static cvar_t *cg_gunY;
 static cvar_t *cg_gunZ;
+static cvar_t *cl_animDebug;    /* print current anim frame each frame  */
 
 /* ===========================================================================
    Weapon state
@@ -210,6 +211,9 @@ static void CL_WeaponThink( void )
    Viewmodel rendering
    =========================================================================== */
 
+/* Forward declaration — defined later in this file */
+float CL_WeaponCurrentAnimFrame( void );
+
 static void AddViewmodelEnt( qhandle_t hModel,
                               const vec3_t origin, vec3_t axis[3] )
 {
@@ -232,11 +236,13 @@ static void AddViewmodelEnt( qhandle_t hModel,
 
 void CL_DrawViewModel( stereoFrame_t stereo )
 {
-    refdef_t refdef;
-    vec3_t   viewOrigin;
-    vec3_t   viewAngles;
-    vec3_t   axis[3];
-    float    gunFov;
+    refdef_t      refdef;
+    vec3_t        viewOrigin;
+    vec3_t        viewAngles;
+    vec3_t        axis[3];
+    float         gunFov;
+    float         animFrame;
+    qhandle_t     curAnim;
 
     /* Run per-frame logic (spawn detection, anim state machine) */
     CL_WeaponThink();
@@ -247,6 +253,25 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     if ( !cl.snap.valid ) return;
     /* Only draw when player is alive (PM_NORMAL == 0) */
     if ( cl.snap.ps.pm_type != 0 ) return;
+
+    /* Compute current animation frame */
+    animFrame = CL_WeaponCurrentAnimFrame();
+    curAnim   = cl_weapon.anims[ cl_weapon.currentAnim ];
+
+    /* CPU-skin hands and gun using the current animation.
+     * This evaluates bones at 'animFrame', re-skins all vertices in-place,
+     * and updates mdvTag entries (so re.LerpTag returns animated positions).
+     * Must be done before AddRefEntityToScene / RenderScene. */
+    if ( re.UpdateXModelPose ) {
+        if ( cl_weapon.handModel )
+            re.UpdateXModelPose( cl_weapon.handModel, curAnim, animFrame );
+        if ( cl_weapon.gunModel )
+            re.UpdateXModelPose( cl_weapon.gunModel, curAnim, animFrame );
+    }
+
+    /* Debug output */
+    if ( cl_animDebug && cl_animDebug->integer )
+        Com_Printf( "anim=%d frame=%.1f\n", cl_weapon.currentAnim, animFrame );
 
     /* Build eye position from player state */
     VectorCopy( cl.snap.ps.origin,    viewOrigin );
@@ -282,17 +307,19 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     re.ClearScene();
 
     if ( cl_weapon.handModel ) {
+        /* The hands model's tag_view bone is at the model origin (0,0,0),
+         * so placing the model at viewOrigin aligns it with the camera eye. */
         AddViewmodelEnt( cl_weapon.handModel, viewOrigin, axis );
 
         if ( cl_weapon.gunModel ) {
             orientation_t tag;
-            /* Use re.LerpTag to find tag_weapon on the hands model.
-               Since we don't have skeletal animation integrated into refEntity_t yet,
-               this will use the bind-pose position. */
+            /* re.LerpTag now returns the ANIMATED tag_weapon position because
+             * R_UpdateXModelPose updated the mdvTag entries above. */
             if ( re.LerpTag( &tag, cl_weapon.handModel, 0, 0, 0, "tag_weapon" ) ) {
                 vec3_t gunOrigin;
                 vec3_t gunAxis[3];
 
+                /* Transform tag_weapon from model-local space to world space */
                 VectorCopy( viewOrigin, gunOrigin );
                 VectorMA( gunOrigin, tag.origin[0], axis[0], gunOrigin );
                 VectorMA( gunOrigin, tag.origin[1], axis[1], gunOrigin );
@@ -302,7 +329,7 @@ void CL_DrawViewModel( stereoFrame_t stereo )
 
                 AddViewmodelEnt( cl_weapon.gunModel, gunOrigin, gunAxis );
             } else {
-                /* fallback to old behavior if tag not found */
+                /* tag_weapon not found (no animation or static model): put gun at eye */
                 AddViewmodelEnt( cl_weapon.gunModel, viewOrigin, axis );
             }
         }
@@ -376,6 +403,7 @@ void CL_WeaponCod1_Init( void )
     cg_gunX        = Cvar_Get( "cg_gunX",        "0",       CVAR_CHEAT );
     cg_gunY        = Cvar_Get( "cg_gunY",        "0",       CVAR_CHEAT );
     cg_gunZ        = Cvar_Get( "cg_gunZ",        "0",       CVAR_CHEAT );
+    cl_animDebug   = Cvar_Get( "cl_animDebug",   "0",       CVAR_TEMP  );
 
     Cmd_AddCommand( "give",        CL_Give_f        );
     Cmd_AddCommand( "dropweapon",  CL_DropWeapon_f  );

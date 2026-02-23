@@ -274,7 +274,8 @@ static qboolean XModel_LoadSurfs(
 	const xmBone_t	*bones,
 	int				 numBones,
 	mdvModel_t		*mdvModel,
-	const xmLod_t	*lod )
+	const xmLod_t	*lod,
+	xmSkinData_t	*skinOut )
 {
 	void			*buf;
 	int				 fSize;
@@ -320,6 +321,12 @@ static qboolean XModel_LoadSurfs(
 	mdvModel->vaoSurfaces    = NULL;
 	mdvModel->numSkins       = 0;
 
+	/* Initialise the skin output structure */
+	skinOut->numSurfaces = numSurfs;
+	skinOut->surfs       = (xmSkinSurf_t *)ri.Malloc( sizeof(xmSkinSurf_t) * numSurfs );
+	skinOut->mdvModel    = mdvModel;
+	Com_Memset( skinOut->surfs, 0, sizeof(xmSkinSurf_t) * numSurfs );
+
 	ClearBounds( modelMins, modelMaxs );
 
 	for ( i = 0; i < numSurfs; i++, surf++ ) {
@@ -343,15 +350,15 @@ static qboolean XModel_LoadSurfs(
 		surf->shaderIndexes = shaderIdx = (int *)ri.Hunk_Alloc( sizeof(int), h_low );
 		if ( lod->numMats > 0 ) {
 			/*
-			 * CoD1 material names look like "metal@weapon_colt45.dds".
-			 * The actual texture lives at "skins/<materialname>" in the paks.
-			 * Prefix with "skins/" so R_FindShader falls back to loading it
-			 * as a DDS image via the registered DDS image loader.
+			 * CoD1 material names include the extension, e.g. "viewhands@default.jpg".
+			 * Prefix with "skins/" to form the full VFS path.
+			 * Use LIGHTMAP_WHITEIMAGE so the surface renders fullbright (unlit),
+			 * avoiding the over-bright ambient that RDF_NOWORLDMODEL sets.
 			 */
 			char skinPath[MAX_QPATH];
 			shader_t *sh;
 			Com_sprintf( skinPath, sizeof(skinPath), "skins/%s", lod->matNames[matIdx] );
-			sh = R_FindShader( skinPath, LIGHTMAP_NONE, qtrue );
+			sh = R_FindShader( skinPath, LIGHTMAP_WHITEIMAGE, qtrue );
 			shaderIdx[0] = sh->defaultShader ? 0 : sh->index;
 		} else {
 			shaderIdx[0] = 0;
@@ -373,6 +380,11 @@ static qboolean XModel_LoadSurfs(
 		surf->indexes = indexes = (glIndex_t  *)ri.Hunk_Alloc( sizeof(glIndex_t)   * triCount * 3, h_low );
 		surf->verts   = verts   = (mdvVertex_t *)ri.Hunk_Alloc( sizeof(mdvVertex_t) * vertCount,    h_low );
 		surf->st      = st      = (mdvSt_t     *)ri.Hunk_Alloc( sizeof(mdvSt_t)     * vertCount,    h_low );
+
+		/* Initialise skinning surface entry */
+		skinOut->surfs[i].numVerts  = vertCount;
+		skinOut->surfs[i].verts     = (xmSkinVert_t *)ri.Malloc( sizeof(xmSkinVert_t) * vertCount );
+		skinOut->surfs[i].mdvVerts  = verts;   /* points into Hunk — updated in-place each frame */
 
 		/* Triangles (fan-encoded, come BEFORE vertices in V14) */
 		{
@@ -415,6 +427,11 @@ static qboolean XModel_LoadSurfs(
 
 			boneWeightCounts[j] = weightCount;
 			boneIdxPerVert[j]   = (unsigned short)boneIdx;
+
+			/* Save bone-local data for CPU re-skinning */
+			VectorCopy( localPos,    skinOut->surfs[i].verts[j].localPos    );
+			VectorCopy( localNormal, skinOut->surfs[i].verts[j].localNormal );
+			skinOut->surfs[i].verts[j].boneIdx = boneIdx;
 
 			if ( boneIdx >= 0 && boneIdx < numBones ) {
 				const xmBone_t *b = &bones[boneIdx];
@@ -508,21 +525,60 @@ qhandle_t R_RegisterXModel( const char *name, model_t *mod )
 	mod->numLods = 1;
 	mdvModel     = mod->mdv[0] = (mdvModel_t *)ri.Hunk_Alloc( sizeof(mdvModel_t), h_low );
 
-	if ( !XModel_LoadSurfs( lods[0].name, bones, numBones, mdvModel, &lods[0] ) ) {
-		ri.Free( bones );
-		mod->type = MOD_BAD;
-		return 0;
+	{
+		xmSkinData_t *skinData = (xmSkinData_t *)ri.Malloc( sizeof(xmSkinData_t) );
+		Com_Memset( skinData, 0, sizeof(xmSkinData_t) );
 
+		if ( !XModel_LoadSurfs( lods[0].name, bones, numBones, mdvModel, &lods[0], skinData ) ) {
+			ri.Free( skinData );
+			ri.Free( bones );
+			mod->type = MOD_BAD;
+			return 0;
+		}
+
+		/* Allocate mdvTag entries for every bone whose name begins with "tag_"
+		 * so that re.LerpTag works on xmodel handles (R_GetTag → mdvTag lookup).
+		 * R_UpdateXModelPose updates these in-place each frame. */
+		{
+			int          numTagBones = 0, tagIdx = 0, bi;
+			mdvTag_t     *tags;
+			mdvTagName_t *tagNames;
+
+			for ( bi = 0; bi < numBones; bi++ )
+				if ( Q_strncmp( bones[bi].name, "tag_", 4 ) == 0 )
+					numTagBones++;
+
+			if ( numTagBones > 0 ) {
+				tags     = (mdvTag_t     *)ri.Hunk_Alloc( sizeof(mdvTag_t)     * numTagBones, h_low );
+				tagNames = (mdvTagName_t *)ri.Hunk_Alloc( sizeof(mdvTagName_t) * numTagBones, h_low );
+
+				for ( bi = 0; bi < numBones; bi++ ) {
+					if ( Q_strncmp( bones[bi].name, "tag_", 4 ) == 0 ) {
+						VectorCopy( bones[bi].wTrans, tags[tagIdx].origin );
+						Quat_ToAxis( bones[bi].wRot,  tags[tagIdx].axis   );
+						Q_strncpyz( tagNames[tagIdx].name, bones[bi].name, MAX_QPATH );
+						tagIdx++;
+					}
+				}
+
+				mdvModel->numTags  = numTagBones;
+				mdvModel->tags     = tags;
+				mdvModel->tagNames = tagNames;
+				/* Also point skinData so R_UpdateXModelPose can update tags */
+				skinData->mdvModel = mdvModel;
+			}
+		}
+
+		/* Cache bind pose and skin data for per-frame evaluation */
+		R_StoreXModelBindPose( (qhandle_t)mod->index, bones, numBones );
+		R_StoreXModelSkinData( (qhandle_t)mod->index, skinData );
 	}
-
-	/* Cache bind pose for animation evaluation (R_EvalXAnimBones) */
-	R_StoreXModelBindPose( (qhandle_t)mod->index, bones, numBones );
 
 	ri.Free( bones );
 
 	ri.Printf( PRINT_DEVELOPER,
-	           "R_RegisterXModel: '%s'  surfs=%d bones=%d\n",
-	           name, mdvModel->numSurfaces, numBones );
+	           "R_RegisterXModel: '%s'  surfs=%d bones=%d tags=%d\n",
+	           name, mdvModel->numSurfaces, numBones, mdvModel->numTags );
 
 	return mod->index;
 }

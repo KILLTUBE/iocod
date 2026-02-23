@@ -211,6 +211,28 @@ static inline void Quat_ToAxis( const vec4_t q, vec3_t axis[3] )
 }
 
 /* ===========================================================================
+   CPU skinning data  (per-vertex local position for re-skinning each frame)
+   =========================================================================== */
+
+typedef struct {
+    vec3_t  localPos;      /* vertex position in bone-local space */
+    vec3_t  localNormal;   /* normal in bone-local space */
+    int     boneIdx;       /* which bone this vertex is weighted to */
+} xmSkinVert_t;
+
+typedef struct {
+    int          numVerts;
+    xmSkinVert_t *verts;      /* ri.Malloc'd */
+    mdvVertex_t  *mdvVerts;   /* into mdvModel Hunk -- updated in-place each frame */
+} xmSkinSurf_t;
+
+typedef struct {
+    int           numSurfaces;
+    xmSkinSurf_t *surfs;      /* ri.Malloc'd */
+    mdvModel_t   *mdvModel;   /* pointer into Hunk -- tags updated in-place */
+} xmSkinData_t;
+
+/* ===========================================================================
    Shared function declarations (defined in tr_model_xanim.c)
    =========================================================================== */
 
@@ -223,8 +245,16 @@ void XModel_ComputeWorldBones( xmBone_t *bones, int numBones );
 void R_StoreXModelBindPose( qhandle_t modelHandle,
                              const xmBone_t *bones, int numBones );
 
-/* Look up a bone by name in the bind-pose (or cached pose) and return its
- * world-space orientation (tag).  Returns 1 if found, 0 otherwise. */
+/* Store per-vertex local skinning data for CPU re-skinning.
+ * Called by R_RegisterXModel after XModel_LoadSurfs. */
+void R_StoreXModelSkinData( qhandle_t modelHandle, xmSkinData_t *data );
+
+/* Evaluate animation at 'frame', CPU-skin all vertices and update mdvTags.
+ * Safe to call every frame before AddRefEntityToScene. */
+void R_UpdateXModelPose( qhandle_t modelHandle, qhandle_t animHandle, float frame );
+
+/* Look up a bone by name in the current animated pose (or bind-pose fallback)
+ * and return its world-space orientation.  Returns 1 if found, 0 otherwise. */
 int R_XModelLerpTag( orientation_t *tag, qhandle_t handle,
                       int startFrame, int endFrame,
                       float frac, const char *tagName );
