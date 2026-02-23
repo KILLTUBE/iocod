@@ -158,7 +158,7 @@ vmCvar_t	cg_drawTeamOverlay;
 vmCvar_t	cg_teamOverlayUserinfo;
 vmCvar_t	cg_drawFriend;
 vmCvar_t	cg_teamChatsOnly;
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || defined(STANDALONE)
 vmCvar_t	cg_noVoiceChats;
 vmCvar_t	cg_noVoiceText;
 #endif
@@ -175,7 +175,7 @@ vmCvar_t	cg_cameraOrbitDelay;
 vmCvar_t	cg_timescaleFadeEnd;
 vmCvar_t	cg_timescaleFadeSpeed;
 vmCvar_t	cg_timescale;
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || defined(STANDALONE)
 vmCvar_t	cg_smallFont;
 vmCvar_t	cg_bigFont;
 vmCvar_t	cg_noTaunt;
@@ -186,7 +186,7 @@ vmCvar_t	cg_oldRocket;
 vmCvar_t	cg_oldPlasma;
 vmCvar_t	cg_trueLightning;
 
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || defined(STANDALONE)
 vmCvar_t 	cg_redTeamName;
 vmCvar_t 	cg_blueTeamName;
 vmCvar_t	cg_currentSelectedPlayer;
@@ -276,7 +276,7 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_stats, "cg_stats", "0", 0 },
 	{ &cg_drawFriend, "cg_drawFriend", "1", CVAR_ARCHIVE },
 	{ &cg_teamChatsOnly, "cg_teamChatsOnly", "0", CVAR_ARCHIVE },
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || defined(STANDALONE)
 	{ &cg_noVoiceChats, "cg_noVoiceChats", "0", CVAR_ARCHIVE },
 	{ &cg_noVoiceText, "cg_noVoiceText", "0", CVAR_ARCHIVE },
 #endif
@@ -286,7 +286,7 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_paused, "cl_paused", "0", CVAR_ROM },
 	{ &cg_blood, "com_blood", "1", CVAR_ARCHIVE },
 	{ &cg_synchronousClients, "g_synchronousClients", "0", CVAR_SYSTEMINFO },
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || defined(STANDALONE)
 	{ &cg_redTeamName, "g_redteam", DEFAULT_REDTEAM_NAME, CVAR_ARCHIVE | CVAR_SERVERINFO | CVAR_USERINFO },
 	{ &cg_blueTeamName, "g_blueteam", DEFAULT_BLUETEAM_NAME, CVAR_ARCHIVE | CVAR_SERVERINFO | CVAR_USERINFO },
 	{ &cg_currentSelectedPlayer, "cg_currentSelectedPlayer", "0", CVAR_ARCHIVE},
@@ -311,7 +311,7 @@ static cvarTable_t cvarTable[] = {
 
 	{ &pmove_fixed, "pmove_fixed", "0", CVAR_SYSTEMINFO},
 	{ &pmove_msec, "pmove_msec", "8", CVAR_SYSTEMINFO},
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || defined(STANDALONE)
 	{ &cg_smallFont, "ui_smallFont", "0.25", CVAR_ARCHIVE},
 	{ &cg_bigFont, "ui_bigFont", "0.4", CVAR_ARCHIVE},
 	{ &cg_noTaunt, "cg_noTaunt", "0", CVAR_ARCHIVE},
@@ -881,7 +881,7 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.regenShader = trap_R_RegisterShader("powerups/regen" );
 	cgs.media.hastePuffShader = trap_R_RegisterShader("hasteSmokePuff" );
 
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || defined(STANDALONE)
 	if ( cgs.gametype == GT_HARVESTER || cg_buildScript.integer ) {
 		cgs.media.redCubeModel = trap_R_RegisterModel( "models/powerups/orb/r_orb.md3" );
 		cgs.media.blueCubeModel = trap_R_RegisterModel( "models/powerups/orb/b_orb.md3" );
@@ -984,7 +984,7 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.teleportEffectModel = trap_R_RegisterModel( "models/misc/telep.md3" );
 	cgs.media.teleportEffectShader = trap_R_RegisterShader( "teleportEffect" );
 #endif
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || defined(STANDALONE)
 	cgs.media.kamikazeEffectModel = trap_R_RegisterModel( "models/weaphits/kamboom2.md3" );
 	cgs.media.kamikazeShockWave = trap_R_RegisterModel( "models/weaphits/kamwave.md3" );
 	cgs.media.kamikazeHeadModel = trap_R_RegisterModel( "models/powerups/kamikazi.md3" );
@@ -1056,7 +1056,7 @@ static void CG_RegisterGraphics( void ) {
 		cgs.gameModels[i] = trap_R_RegisterModel( modelName );
 	}
 
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || defined(STANDALONE)
 	// new stuff
 	cgs.media.patrolShader = trap_R_RegisterShaderNoMip("ui/assets/statusbar/patrol.tga");
 	cgs.media.assaultShader = trap_R_RegisterShaderNoMip("ui/assets/statusbar/assault.tga");
@@ -1982,7 +1982,7 @@ CG_EventHandling
       2 - hud editor
 
 */
-#ifndef MISSIONPACK
+#if !defined(MISSIONPACK) && !defined(STANDALONE)
 void CG_EventHandling(int type) {
 }
 
@@ -1994,4 +1994,3 @@ void CG_KeyEvent(int key, qboolean down) {
 void CG_MouseEvent(int x, int y) {
 }
 #endif
-

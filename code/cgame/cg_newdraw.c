@@ -790,7 +790,11 @@ static void CG_DrawCTFPowerUp(rectDef_t *rect) {
 	if (cgs.gametype < GT_CTF) {
 		return;
 	}
+#ifdef MISSIONPACK
 	value = cg.snap->ps.stats[STAT_PERSISTANT_POWERUP];
+#else
+	value = cg.snap->ps.stats[STAT_HOLDABLE_ITEM];
+#endif
 	if ( value ) {
 		CG_RegisterItemVisuals( value );
 		CG_DrawPic( rect->x, rect->y, rect->w, rect->h, cg_items[ value ].icon );
@@ -1705,16 +1709,7 @@ void CG_OwnerDraw(float x, float y, float w, float h, float text_x, float text_y
     break;
   }
 
-  /* CG_PLAYER_AMMO_BACKDROP (6) — ammo counter backdrop: just draw the shader */
-  case 6:
-    if ( shader ) {
-      trap_R_SetColor( color );
-      CG_DrawPic( x, y, w, h, shader );
-      trap_R_SetColor( NULL );
-    }
-    break;
-
-  /* CG_PLAYER_AMMO_VALUE (5) is already handled above for Q3; CoD1 uses same logic */
+  /* CoD1 ownerdraw 6 collides with Q3 CG_PLAYER_AMMO_VALUE; keep Q3 handler above. */
 
   /* CG_PLAYER_WEAPON_NAME_BACK (82): weapon name backdrop */
   case 82:
@@ -1745,20 +1740,7 @@ void CG_OwnerDraw(float x, float y, float w, float h, float text_x, float text_y
     }
     break;
 
-  /* CG_PLAYER_STANCE (20): stand / crouch icon */
-  case 20: {
-    qhandle_t stanceShader = 0;
-    if ( cgs.cod1StanceCrouch && ( cg.snap->ps.pm_flags & PMF_DUCKED ) )
-      stanceShader = cgs.cod1StanceCrouch;
-    else if ( cgs.cod1StanceStand )
-      stanceShader = cgs.cod1StanceStand;
-    if ( stanceShader ) {
-      trap_R_SetColor( color );
-      CG_DrawPic( x, y, w, h, stanceShader );
-      trap_R_SetColor( NULL );
-    }
-    break;
-  }
+  /* CoD1 ownerdraw 20 collides with Q3 CG_PLAYER_SCORE; keep Q3 handler above. */
 
   /* CG_PLAYER_COMPASS (84): compass face — rotates with yaw */
   case 84:
@@ -1952,4 +1934,3 @@ void CG_GetTeamColor(vec4_t *color) {
     (*color)[3] = 0.25f;
 	}
 }
-

@@ -654,7 +654,7 @@ typedef struct {
 	qhandle_t	charsetPropB;
 	qhandle_t	whiteShader;
 
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || defined(STANDALONE)
 	qhandle_t	redCubeModel;
 	qhandle_t	blueCubeModel;
 	qhandle_t	redCubeIcon;
@@ -789,7 +789,7 @@ typedef struct {
 	// special effects models
 	qhandle_t	teleportEffectModel;
 	qhandle_t	teleportEffectShader;
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || defined(STANDALONE)
 	qhandle_t	kamikazeEffectModel;
 	qhandle_t	kamikazeShockWave;
 	qhandle_t	kamikazeHeadModel;
@@ -950,7 +950,7 @@ typedef struct {
 	sfxHandle_t	countFightSound;
 	sfxHandle_t	countPrepareSound;
 
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || defined(STANDALONE)
 	// new stuff
 	qhandle_t patrolShader;
 	qhandle_t assaultShader;
@@ -1159,7 +1159,7 @@ extern	vmCvar_t		cg_predictItems;
 extern	vmCvar_t		cg_deferPlayers;
 extern	vmCvar_t		cg_drawFriend;
 extern	vmCvar_t		cg_teamChatsOnly;
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || defined(STANDALONE)
 extern	vmCvar_t		cg_noVoiceChats;
 extern	vmCvar_t		cg_noVoiceText;
 #endif
@@ -1174,7 +1174,7 @@ extern	vmCvar_t		cg_timescaleFadeEnd;
 extern	vmCvar_t		cg_timescaleFadeSpeed;
 extern	vmCvar_t		cg_timescale;
 extern	vmCvar_t		cg_cameraMode;
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || defined(STANDALONE)
 extern  vmCvar_t		cg_smallFont;
 extern  vmCvar_t		cg_bigFont;
 extern	vmCvar_t		cg_noTaunt;
@@ -1184,7 +1184,7 @@ extern	vmCvar_t		cg_oldRail;
 extern	vmCvar_t		cg_oldRocket;
 extern	vmCvar_t		cg_oldPlasma;
 extern	vmCvar_t		cg_trueLightning;
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || defined(STANDALONE)
 extern	vmCvar_t		cg_redTeamName;
 extern	vmCvar_t		cg_blueTeamName;
 extern	vmCvar_t		cg_currentSelectedPlayer;
@@ -1694,5 +1694,3 @@ void	CG_ParticleMisc (qhandle_t pshader, vec3_t origin, int size, int duration, 
 void	CG_ParticleExplosion (char *animStr, vec3_t origin, vec3_t vel, int duration, int sizeStart, int sizeEnd);
 extern qboolean		initparticles;
 int CG_NewParticleArea ( int num );
-
-

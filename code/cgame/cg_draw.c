@@ -2498,7 +2498,7 @@ static void CG_DrawWarmup( void ) {
 }
 
 //==================================================================================
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || defined(STANDALONE)
 /* 
 =================
 CG_DrawTimedMenus
@@ -2659,6 +2659,5 @@ void CG_DrawActive( stereoFrame_t stereoView ) {
 	// draw status bar and other floating elements
  	CG_Draw2D(stereoView);
 }
-
 
 
