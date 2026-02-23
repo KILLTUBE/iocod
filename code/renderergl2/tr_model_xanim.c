@@ -575,6 +575,7 @@ void R_EvalXAnimBones( qhandle_t animHandle, float fframe,
     xaAnim_t *anim;
     int       i, j, frame;
     float     t;
+    int       matchedBones = 0;
 
     if ( animHandle <= 0 || animHandle > s_numAnims ) return;
     anim = s_animTable[ (int)animHandle - 1 ];
@@ -594,10 +595,17 @@ void R_EvalXAnimBones( qhandle_t animHandle, float fframe,
         for ( j = 0; j < numBones; j++ ) {
             if ( !Q_stricmp( inOutBones[j].name, part->partName ) ) {
                 boneIdx = j;
+                matchedBones++;
                 break;
             }
         }
-        if ( boneIdx < 0 ) continue;
+        if ( boneIdx < 0 ) {
+            /* Bone in animation but not in model - log it */
+            if ( ri.Cvar_Get( "xanim_debug", "0", 0 )->integer >= 2 ) {
+                ri.Printf( PRINT_ALL, "  unmatched anim bone: %s\n", part->partName );
+            }
+            continue;
+        }
 
         /* ---- Rotation ---- */
         if ( part->rotTrack.numKeys > 0 ) {
@@ -648,4 +656,9 @@ void R_EvalXAnimBones( qhandle_t animHandle, float fframe,
 
     /* Recompute world transforms */
     XModel_ComputeWorldBones( inOutBones, numBones );
+
+    if ( ri.Cvar_Get( "xanim_debug", "0", 0 )->integer ) {
+        ri.Printf( PRINT_ALL, "R_EvalXAnimBones: anim=%d frame=%d matched=%d/%d\n",
+                 animHandle, (int)fframe, matchedBones, anim->numParts );
+    }
 }

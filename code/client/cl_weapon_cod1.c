@@ -157,6 +157,10 @@ void CL_GiveWeapon( const char *name )
     cl_weapon.anims[WA_LAST_SHOT]    = LoadAnim( d->anims.lastShotAnim      );
     cl_weapon.anims[WA_EMPTY_IDLE]   = LoadAnim( d->anims.emptyIdleAnim     );
 
+    /* Debug: print loaded animations */
+    Com_Printf( "  Animations: idle=%s fire=%s\n",
+                d->anims.idleAnim, d->anims.fireAnim );
+
     cl_weapon.currentAnim   = cl_weapon.anims[WA_RAISE] ? WA_RAISE : WA_IDLE;
     cl_weapon.animStartTime = cls.realtime;
     cl_weapon.active        = qtrue;
@@ -266,15 +270,17 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     animFrame = CL_WeaponCurrentAnimFrame();
     curAnim   = cl_weapon.anims[ cl_weapon.currentAnim ];
 
-    /* CPU-skin hands and gun using the current animation.
-     * This evaluates bones at 'animFrame', re-skins all vertices in-place,
-     * and updates mdvTag entries (so re.LerpTag returns animated positions).
-     * Must be done before AddRefEntityToScene / RenderScene. */
-    if ( re.UpdateXModelPose ) {
-        if ( cl_weapon.handModel )
+    /* CPU-skin hands using the current animation.
+     * The gun model attaches to tag_weapon on the hands model - it doesn't
+     * get animated separately. The animation drives tag_weapon position. */
+    if ( re.UpdateXModelPose && cl_weapon.handModel ) {
+        if ( !curAnim ) {
+            /* No animation loaded - model will be in bind pose */
+            if ( cl_animDebug && cl_animDebug->integer )
+                Com_Printf( "WARNING: No animation loaded for hand model!\n" );
+        } else {
             re.UpdateXModelPose( cl_weapon.handModel, curAnim, animFrame );
-        if ( cl_weapon.gunModel )
-            re.UpdateXModelPose( cl_weapon.gunModel, curAnim, animFrame );
+        }
     }
 
     /* Debug output */
@@ -386,12 +392,29 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     if ( cl_weapon.handModel ) {
         AddViewmodelEnt( cl_weapon.handModel, modelOrigin, entityAxis );
     }
-    if ( cl_weapon.gunModel ) {
-        /* Place gun at the same root origin as the hands.  In CoD, the hand
-         * and gun models share a skeleton via DObj — both are rendered from
-         * viewOrigin and the shared animation drives all bones (including
-         * tag_weapon) relative to that root.  Placing the gun at the hand's
-         * tag_weapon would double-count the tag_weapon bone offset. */
+
+    /* Gun model attaches to tag_weapon on the animated hands model */
+    if ( cl_weapon.gunModel && cl_weapon.handModel && re.LerpTag ) {
+        orientation_t tag;
+        if ( re.LerpTag( &tag, cl_weapon.handModel, 0, 0, 0, "tag_weapon" ) ) {
+            vec3_t gunOrigin, gunAxis[3];
+
+            /* Transform tag from hand model space to world space */
+            VectorCopy( modelOrigin, gunOrigin );
+            VectorMA( gunOrigin, tag.origin[0], entityAxis[0], gunOrigin );
+            VectorMA( gunOrigin, tag.origin[1], entityAxis[1], gunOrigin );
+            VectorMA( gunOrigin, tag.origin[2], entityAxis[2], gunOrigin );
+
+            /* Combine hand rotation with tag rotation */
+            MatrixMultiply( tag.axis, entityAxis, gunAxis );
+
+            AddViewmodelEnt( cl_weapon.gunModel, gunOrigin, gunAxis );
+        } else {
+            /* tag_weapon not found - put gun at hands origin */
+            AddViewmodelEnt( cl_weapon.gunModel, modelOrigin, entityAxis );
+        }
+    } else if ( cl_weapon.gunModel ) {
+        /* No hands model, just render gun at origin */
         AddViewmodelEnt( cl_weapon.gunModel, modelOrigin, entityAxis );
     }
 
