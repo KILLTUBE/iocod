@@ -1073,6 +1073,10 @@ typedef struct {
 	// media
 	cgMedia_t		media;
 
+#ifdef STANDALONE
+	fontInfo_t	hudFont;		/* CoD1 font used for HUD text */
+#endif
+
 } cgs_t;
 
 //==============================================================================

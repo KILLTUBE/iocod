@@ -1865,6 +1865,12 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 	cgs.media.charsetPropGlow	= trap_R_RegisterShaderNoMip( "menu/art/font1_prop_glo.tga" );
 	cgs.media.charsetPropB		= trap_R_RegisterShaderNoMip( "menu/art/font2_prop.tga" );
 
+#ifdef STANDALONE
+	// Load CoD1 font for HUD text
+	Com_Memset( &cgs.hudFont, 0, sizeof( cgs.hudFont ) );
+	trap_R_RegisterFont( "fonts/fontImage", 16, &cgs.hudFont );
+#endif
+
 	CG_RegisterCvars();
 
 	CG_InitConsoleCommands();

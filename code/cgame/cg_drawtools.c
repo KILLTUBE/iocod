@@ -137,6 +137,30 @@ void CG_DrawChar( int x, int y, int width, int height, int ch ) {
 	ah = height;
 	CG_AdjustFrom640( &ax, &ay, &aw, &ah );
 
+#ifdef STANDALONE
+	// Use CoD1 font system when available (same logic as console font)
+	glyphInfo_t *glyph = &cgs.hudFont.glyphs[ch];
+	if ( cgs.hudFont.glyphScale > 0 && glyph->glyph && glyph->imageHeight > 0 ) {
+#define HUD_FONT_ASCENDER  12   /* max glyph->top for 16pt font  */
+#define HUD_FONT_LINE_H    16   /* ascender(12) + descender(4)   */
+		// Scale height so the line fits the cell
+		float scale_h = (float)height / HUD_FONT_LINE_H;
+		// Cap rendered width to the cell - wide glyphs are squished
+		float w = glyph->imageWidth  * scale_h;
+		float h = glyph->imageHeight * scale_h;
+		if ( w > width )
+			w = width;
+		// Baseline alignment: shift each glyph down by the difference
+		// between the max ascender and this glyph's ascender
+		float y_off = (HUD_FONT_ASCENDER - glyph->top) * scale_h;
+		trap_R_DrawStretchPic( ax, ay + y_off, w, h,
+		                       glyph->s, glyph->t, glyph->s2, glyph->t2,
+		                       glyph->glyph );
+		return;
+	}
+#endif
+
+	// Fallback: Q3 charset grid
 	row = ch>>4;
 	col = ch&15;
 
@@ -145,8 +169,8 @@ void CG_DrawChar( int x, int y, int width, int height, int ch ) {
 	size = 0.0625;
 
 	trap_R_DrawStretchPic( ax, ay, aw, ah,
-					   fcol, frow, 
-					   fcol + size, frow + size, 
+					   fcol, frow,
+					   fcol + size, frow + size,
 					   cgs.media.charsetShader );
 }
 
