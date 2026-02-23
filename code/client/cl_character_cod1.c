@@ -75,6 +75,8 @@ typedef struct {
 
     tpAnimSlot_t   currentAnim;
     int            animStartTime;
+    float          renderYaw;
+    qboolean       renderYawValid;
 } tpCharacterState_t;
 
 static tpCharacterState_t s_tpChar;
@@ -88,6 +90,8 @@ static cvar_t *cl_thirdPersonPitchScale;
 static cvar_t *cl_thirdPersonZOffset;
 static cvar_t *cl_thirdPersonAnimRate;
 static cvar_t *cl_thirdPersonMoveThreshold;
+static cvar_t *cl_thirdPersonFaceView;
+static cvar_t *cl_thirdPersonYawLerpSpeed;
 static cvar_t *cl_thirdPersonDebug;
 
 static qhandle_t CL_TP_RegisterModelWithFallback( const char *requestedPath,
@@ -204,6 +208,116 @@ static qboolean CL_TP_ParseQuoted( const char *start, const char **after, char *
     return qtrue;
 }
 
+static qboolean CL_TP_IsAliasChar( char c )
+{
+    return ( ( c >= 'a' && c <= 'z' ) ||
+             ( c >= 'A' && c <= 'Z' ) ||
+             ( c >= '0' && c <= '9' ) ||
+             c == '_' );
+}
+
+static qboolean CL_TP_ParseAliasName( const char *text, char *outAlias, int outAliasSize )
+{
+    const char *marker;
+    int i;
+
+    marker = Q_stristr( text, "xmodelalias\\" );
+    if ( !marker ) {
+        marker = Q_stristr( text, "xmodelalias/" );
+    }
+    if ( !marker ) {
+        return qfalse;
+    }
+
+    marker += 11; /* strlen("xmodelalias/") */
+    i = 0;
+    while ( marker[i] && CL_TP_IsAliasChar( marker[i] ) ) {
+        if ( i >= outAliasSize - 1 ) {
+            break;
+        }
+        outAlias[i] = marker[i];
+        i++;
+    }
+
+    if ( i <= 0 ) {
+        return qfalse;
+    }
+
+    outAlias[i] = '\0';
+    return qtrue;
+}
+
+static qboolean CL_TP_ResolveAliasToModel( const char *text, char *outModelPath, int outModelPathSize )
+{
+    char aliasName[MAX_QPATH];
+    char aliasPath[MAX_QPATH];
+    char *aliasText;
+    long aliasLen;
+    const char *scan;
+
+    outModelPath[0] = '\0';
+
+    if ( !CL_TP_ParseAliasName( text, aliasName, sizeof( aliasName ) ) ) {
+        return qfalse;
+    }
+
+    Com_sprintf( aliasPath, sizeof( aliasPath ), "xmodelalias/%s.gsc", aliasName );
+    aliasText = NULL;
+    aliasLen = FS_ReadFile( aliasPath, (void **)&aliasText );
+    if ( aliasLen <= 0 || !aliasText ) {
+        return qfalse;
+    }
+
+    scan = aliasText;
+    while ( CL_TP_ParseQuoted( scan, &scan, outModelPath, outModelPathSize ) ) {
+        if ( outModelPath[0] ) {
+            CL_TP_NormalizeModelPath( outModelPath, outModelPath, outModelPathSize );
+            FS_FreeFile( aliasText );
+            return qtrue;
+        }
+    }
+
+    FS_FreeFile( aliasText );
+    outModelPath[0] = '\0';
+    return qfalse;
+}
+
+static qboolean CL_TP_IsHeadLikeModel( const char *modelPath )
+{
+    return modelPath && (
+        Q_stristr( modelPath, "basehead" ) ||
+        Q_stristr( modelPath, "head_" ) ||
+        Q_stristr( modelPath, "/head" ) ||
+        Q_stristr( modelPath, "headaxis" )
+    );
+}
+
+static qboolean CL_TP_IsHelmetLikeModel( const char *modelPath )
+{
+    return modelPath && (
+        Q_stristr( modelPath, "helmet" ) ||
+        Q_stristr( modelPath, "_hat" ) ||
+        Q_stristr( modelPath, "hat_" ) ||
+        Q_stristr( modelPath, "sidecap" ) ||
+        Q_stristr( modelPath, "officercap" ) ||
+        Q_stristr( modelPath, "_cap" ) ||
+        Q_stristr( modelPath, "cap_" )
+    );
+}
+
+static const char *CL_TP_DefaultTagForAttachment( const char *modelPath )
+{
+    if ( CL_TP_IsHeadLikeModel( modelPath ) ) {
+        return "bip01 spine2";
+    }
+
+    if ( CL_TP_IsHelmetLikeModel( modelPath ) ) {
+        return "tag_helmet";
+    }
+
+    return "";
+}
+
 static void CL_TP_AddAttachment( tpAttachment_t *attachments, int *numAttachments,
                                  const char *modelPath, const char *tagName )
 {
@@ -270,12 +384,48 @@ static qboolean CL_TP_ParseCharacterScript( const char *scriptPath,
         scan += 9;
     }
 
+    if ( !foundBaseModel ) {
+        scan = fileText;
+        while ( ( scan = Q_stristr( scan, "setModelFromArray(" ) ) != NULL ) {
+            const char *open;
+            const char *close;
+            char args[512];
+            int argsLen;
+            char modelPath[MAX_QPATH];
+
+            open = strchr( scan, '(' );
+            close = open ? strchr( open, ')' ) : NULL;
+            if ( !open || !close || close <= open + 1 ) {
+                scan += 17;
+                continue;
+            }
+
+            argsLen = (int)( close - ( open + 1 ) );
+            if ( argsLen >= (int)sizeof( args ) ) {
+                argsLen = sizeof( args ) - 1;
+            }
+
+            memcpy( args, open + 1, argsLen );
+            args[argsLen] = '\0';
+
+            if ( CL_TP_ResolveAliasToModel( args, modelPath, sizeof( modelPath ) ) ) {
+                Q_strncpyz( outBaseModel, modelPath, MAX_QPATH );
+                foundBaseModel = qtrue;
+                break;
+            }
+
+            scan = close + 1;
+        }
+    }
+
     scan = fileText;
     while ( ( scan = Q_stristr( scan, "self.hatModel" ) ) != NULL ) {
         const char *eq;
         const char *semi;
         char modelRaw[MAX_QPATH];
         char modelPath[MAX_QPATH];
+        char expr[512];
+        int exprLen;
 
         eq = strchr( scan, '=' );
         semi = strchr( scan, ';' );
@@ -290,7 +440,56 @@ static qboolean CL_TP_ParseCharacterScript( const char *scriptPath,
             break;
         }
 
+        exprLen = semi ? (int)( semi - ( eq + 1 ) ) : (int)strlen( eq + 1 );
+        if ( exprLen >= (int)sizeof( expr ) ) {
+            exprLen = sizeof( expr ) - 1;
+        }
+        if ( exprLen > 0 ) {
+            memcpy( expr, eq + 1, exprLen );
+        }
+        expr[exprLen] = '\0';
+        if ( CL_TP_ResolveAliasToModel( expr, modelPath, sizeof( modelPath ) ) ) {
+            Q_strncpyz( hatModel, modelPath, sizeof( hatModel ) );
+            break;
+        }
+
         scan += 13;
+    }
+
+    scan = fileText;
+    while ( ( scan = Q_stristr( scan, "attachFromArray(" ) ) != NULL &&
+            *outNumAttachments < TP_MAX_ATTACHMENTS ) {
+        const char *open;
+        const char *close;
+        char args[512];
+        int argsLen;
+        char attachModelPath[MAX_QPATH];
+        const char *defaultTag;
+
+        open = strchr( scan, '(' );
+        close = open ? strchr( open, ')' ) : NULL;
+        if ( !open || !close || close <= open + 1 ) {
+            scan += 16;
+            continue;
+        }
+
+        argsLen = (int)( close - ( open + 1 ) );
+        if ( argsLen >= (int)sizeof( args ) ) {
+            argsLen = sizeof( args ) - 1;
+        }
+
+        memcpy( args, open + 1, argsLen );
+        args[argsLen] = '\0';
+
+        if ( CL_TP_ResolveAliasToModel( args, attachModelPath, sizeof( attachModelPath ) ) ) {
+            defaultTag = CL_TP_DefaultTagForAttachment( attachModelPath );
+            if ( defaultTag[0] ) {
+                CL_TP_AddAttachment( outAttachments, outNumAttachments,
+                                     attachModelPath, defaultTag );
+            }
+        }
+
+        scan = close + 1;
     }
 
     scan = fileText;
@@ -333,6 +532,18 @@ static qboolean CL_TP_ParseCharacterScript( const char *scriptPath,
             if ( CL_TP_ParseQuoted( afterFirst, NULL, attachTag,
                                     sizeof( attachTag ) ) ) {
                 /* Keep explicit tag if present, including TAG_* bones. */
+            }
+        }
+
+        if ( attachModelPath[0] && !attachTag[0] ) {
+            const char *defaultTag = CL_TP_DefaultTagForAttachment( attachModelPath );
+            if ( defaultTag[0] ) {
+                Q_strncpyz( attachTag, defaultTag, sizeof( attachTag ) );
+            } else {
+                /* Many empty-tag gear models expect full bone-merge.
+                 * Skip those for now to avoid floating gear. */
+                scan = close + 1;
+                continue;
             }
         }
 
@@ -467,6 +678,80 @@ static void CL_TP_LoadCharacterAssets( void )
     }
 }
 
+static float CL_TP_GetSnapshotLerpFrac( const clSnapshot_t **outPrevSnap )
+{
+    const clSnapshot_t *prevSnap;
+    int prevMsgNum;
+    int denom;
+    float frac;
+
+    *outPrevSnap = NULL;
+
+    prevMsgNum = cl.snap.messageNum - 1;
+    if ( prevMsgNum < 0 ) {
+        return 1.0f;
+    }
+
+    prevSnap = &cl.snapshots[prevMsgNum & PACKET_MASK];
+    if ( !prevSnap->valid || prevSnap->messageNum != prevMsgNum ) {
+        return 1.0f;
+    }
+
+    denom = cl.snap.serverTime - prevSnap->serverTime;
+    if ( denom <= 0 ) {
+        return 1.0f;
+    }
+
+    frac = (float)( cl.serverTime - prevSnap->serverTime ) / (float)denom;
+    if ( frac < 0.0f ) {
+        frac = 0.0f;
+    } else if ( frac > 1.0f ) {
+        frac = 1.0f;
+    }
+
+    *outPrevSnap = prevSnap;
+    return frac;
+}
+
+static void CL_TP_GetInterpolatedState( vec3_t outOrigin, vec3_t outVelocity, int *outViewHeight )
+{
+    const clSnapshot_t *prevSnap;
+    float frac;
+    int i;
+
+    frac = CL_TP_GetSnapshotLerpFrac( &prevSnap );
+    if ( !prevSnap ) {
+        VectorCopy( cl.snap.ps.origin, outOrigin );
+        VectorCopy( cl.snap.ps.velocity, outVelocity );
+        *outViewHeight = cl.snap.ps.viewheight;
+        return;
+    }
+
+    for ( i = 0; i < 3; ++i ) {
+        outOrigin[i] = prevSnap->ps.origin[i] +
+                       frac * ( cl.snap.ps.origin[i] - prevSnap->ps.origin[i] );
+        outVelocity[i] = prevSnap->ps.velocity[i] +
+                         frac * ( cl.snap.ps.velocity[i] - prevSnap->ps.velocity[i] );
+    }
+
+    *outViewHeight = (int)( prevSnap->ps.viewheight +
+                            frac * (float)( cl.snap.ps.viewheight - prevSnap->ps.viewheight ) );
+}
+
+static float CL_TP_StepYawToward( float currentYaw, float desiredYaw, float maxStep )
+{
+    float delta;
+
+    delta = AngleSubtract( desiredYaw, currentYaw );
+    if ( delta > maxStep ) {
+        delta = maxStep;
+    } else if ( delta < -maxStep ) {
+        delta = -maxStep;
+    }
+
+    return AngleNormalize360( currentYaw + delta );
+}
+
 static tpAnimSlot_t CL_TP_ChooseAnimForPlayerState( const playerState_t *ps )
 {
     float xyspeed;
@@ -595,19 +880,19 @@ static float CL_TP_ComputeAnimFrame( qhandle_t animHandle )
     return frame;
 }
 
-static void CL_TP_PositionOnTag( refEntity_t *ent, const refEntity_t *parent,
-                                 const char *tagName )
+static qboolean CL_TP_PositionOnTag( refEntity_t *ent, const refEntity_t *parent,
+                                     const char *tagName )
 {
     orientation_t tag;
     vec3_t origin;
     vec3_t parentAxis[3];
 
     if ( !tagName || !tagName[0] ) {
-        return;
+        return qfalse;
     }
 
     if ( !re.LerpTag( &tag, parent->hModel, 0, 0, 1.0f, tagName ) ) {
-        return;
+        return qfalse;
     }
 
     VectorCopy( parent->origin, origin );
@@ -622,6 +907,39 @@ static void CL_TP_PositionOnTag( refEntity_t *ent, const refEntity_t *parent,
     VectorCopy( parent->axis[1], parentAxis[1] );
     VectorCopy( parent->axis[2], parentAxis[2] );
     MatrixMultiply( tag.axis, parentAxis, ent->axis );
+
+    return qtrue;
+}
+
+static void CL_TP_PositionAttachment( refEntity_t *ent, const refEntity_t *parent,
+                                      const tpAttachment_t *attachment )
+{
+    static const char *headFallbackTags[] = {
+        "bip01 spine2", "bip01 neck", "neck", "bip01 head", "head", "tag_helmet"
+    };
+    static const char *helmetFallbackTags[] = {
+        "tag_helmet", "bip01 head", "head"
+    };
+    int i;
+
+    if ( attachment->tagName[0] &&
+         CL_TP_PositionOnTag( ent, parent, attachment->tagName ) ) {
+        return;
+    }
+
+    if ( CL_TP_IsHeadLikeModel( attachment->modelPath ) ) {
+        for ( i = 0; i < (int)ARRAY_LEN( headFallbackTags ); ++i ) {
+            if ( CL_TP_PositionOnTag( ent, parent, headFallbackTags[i] ) ) {
+                return;
+            }
+        }
+    } else if ( CL_TP_IsHelmetLikeModel( attachment->modelPath ) ) {
+        for ( i = 0; i < (int)ARRAY_LEN( helmetFallbackTags ); ++i ) {
+            if ( CL_TP_PositionOnTag( ent, parent, helmetFallbackTags[i] ) ) {
+                return;
+            }
+        }
+    }
 }
 
 static void CL_TP_AddAttachments( const refEntity_t *baseEnt )
@@ -647,7 +965,7 @@ static void CL_TP_AddAttachments( const refEntity_t *baseEnt )
         VectorCopy( baseEnt->axis[1], att.axis[1] );
         VectorCopy( baseEnt->axis[2], att.axis[2] );
 
-        CL_TP_PositionOnTag( &att, baseEnt, s_tpChar.attachments[i].tagName );
+        CL_TP_PositionAttachment( &att, baseEnt, &s_tpChar.attachments[i] );
 
         re.AddRefEntityToScene( &att );
     }
@@ -677,6 +995,13 @@ void CL_AddThirdPersonCharacter( const refdef_t *fd )
 {
     refEntity_t ent;
     vec3_t angles;
+    vec3_t interpOrigin;
+    vec3_t interpVelocity;
+    int interpViewHeight;
+    float xyspeed;
+    float desiredYaw;
+    float maxYawStep;
+    playerState_t interpPs;
     tpAnimSlot_t desiredAnim;
     qhandle_t animHandle;
     float animFrame;
@@ -707,7 +1032,12 @@ void CL_AddThirdPersonCharacter( const refdef_t *fd )
         return;
     }
 
-    desiredAnim = CL_TP_ChooseAnimForPlayerState( &cl.snap.ps );
+    CL_TP_GetInterpolatedState( interpOrigin, interpVelocity, &interpViewHeight );
+    interpPs = cl.snap.ps;
+    VectorCopy( interpVelocity, interpPs.velocity );
+    interpPs.viewheight = interpViewHeight;
+
+    desiredAnim = CL_TP_ChooseAnimForPlayerState( &interpPs );
     if ( desiredAnim != s_tpChar.currentAnim ) {
         s_tpChar.currentAnim = desiredAnim;
         s_tpChar.animStartTime = cl.serverTime;
@@ -725,15 +1055,40 @@ void CL_AddThirdPersonCharacter( const refdef_t *fd )
     ent.hModel = s_tpChar.baseModel;
     ent.renderfx = RF_LIGHTING_ORIGIN;
 
-    VectorCopy( cl.snap.ps.origin, ent.origin );
+    VectorCopy( interpOrigin, ent.origin );
     ent.origin[2] += cl_thirdPersonZOffset ? cl_thirdPersonZOffset->value : 0.0f;
 
     VectorCopy( ent.origin, ent.oldorigin );
     VectorCopy( ent.origin, ent.lightingOrigin );
 
+    xyspeed = sqrtf( interpVelocity[0] * interpVelocity[0] +
+                     interpVelocity[1] * interpVelocity[1] );
+    if ( xyspeed > ( cl_thirdPersonMoveThreshold ? cl_thirdPersonMoveThreshold->value : 20.0f ) &&
+         interpPs.groundEntityNum != ENTITYNUM_NONE ) {
+        desiredYaw = RAD2DEG( atan2f( interpVelocity[1], interpVelocity[0] ) );
+    } else if ( cl_thirdPersonFaceView && cl_thirdPersonFaceView->integer ) {
+        desiredYaw = cl.viewangles[YAW];
+    } else if ( s_tpChar.renderYawValid ) {
+        desiredYaw = s_tpChar.renderYaw;
+    } else {
+        desiredYaw = cl.viewangles[YAW];
+    }
+
+    if ( !s_tpChar.renderYawValid ) {
+        s_tpChar.renderYaw = desiredYaw;
+        s_tpChar.renderYawValid = qtrue;
+    } else {
+        maxYawStep = ( cl_thirdPersonYawLerpSpeed ? cl_thirdPersonYawLerpSpeed->value : 540.0f ) *
+                     ( (float)cls.frametime * 0.001f );
+        if ( maxYawStep < 0.0f ) {
+            maxYawStep = 0.0f;
+        }
+        s_tpChar.renderYaw = CL_TP_StepYawToward( s_tpChar.renderYaw, desiredYaw, maxYawStep );
+    }
+
     VectorClear( angles );
     angles[PITCH] = cl.viewangles[PITCH] * ( cl_thirdPersonPitchScale ? cl_thirdPersonPitchScale->value : 0.0f );
-    angles[YAW] = cl.viewangles[YAW] + ( cl_thirdPersonYawOffset ? cl_thirdPersonYawOffset->value : 0.0f );
+    angles[YAW] = s_tpChar.renderYaw + ( cl_thirdPersonYawOffset ? cl_thirdPersonYawOffset->value : 0.0f );
     AnglesToAxis( angles, ent.axis );
 
     re.AddRefEntityToScene( &ent );
@@ -750,6 +1105,8 @@ void CL_CharacterCod1_Init( void )
     cl_thirdPersonZOffset       = Cvar_Get( "cl_thirdPersonZOffset", "0", CVAR_ARCHIVE );
     cl_thirdPersonAnimRate      = Cvar_Get( "cl_thirdPersonAnimRate", "1", CVAR_ARCHIVE );
     cl_thirdPersonMoveThreshold = Cvar_Get( "cl_thirdPersonMoveThreshold", "20", CVAR_ARCHIVE );
+    cl_thirdPersonFaceView      = Cvar_Get( "cl_thirdPersonFaceView", "0", CVAR_ARCHIVE );
+    cl_thirdPersonYawLerpSpeed  = Cvar_Get( "cl_thirdPersonYawLerpSpeed", "540", CVAR_ARCHIVE );
     cl_thirdPersonDebug         = Cvar_Get( "cl_thirdPersonDebug", "0", CVAR_TEMP );
 
     Com_Memset( &s_tpChar, 0, sizeof( s_tpChar ) );

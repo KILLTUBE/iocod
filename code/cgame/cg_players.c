@@ -2277,6 +2277,11 @@ void CG_Player( centity_t *cent ) {
 		if (!cg.renderingThirdPerson) {
 			renderfx = RF_THIRD_PERSON;			// only draw in mirrors
 		} else {
+#ifdef STANDALONE
+			/* STANDALONE CoD path: client draws its own xmodel third-person character.
+			 * Skip cgame's local md3 player to avoid overlap/weapon duplication. */
+			return;
+#endif
 			if (cg_cameraMode.integer) {
 				return;
 			}
@@ -2632,4 +2637,3 @@ void CG_ResetPlayerEntity( centity_t *cent ) {
 		CG_Printf("%i ResetPlayerEntity yaw=%f\n", cent->currentState.number, cent->pe.torso.yawAngle );
 	}
 }
-

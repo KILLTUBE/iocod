@@ -256,6 +256,7 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     if ( !cl_weapon.active ) return;
     if ( !cl_weapon.gunModel && !cl_weapon.handModel ) return;
     if ( !cl.snap.valid ) return;
+    if ( Cvar_VariableIntegerValue( "cg_thirdPerson" ) ) return;
     /* Only draw when player is alive (PM_NORMAL == 0) */
     if ( cl.snap.ps.pm_type != 0 ) return;
 
