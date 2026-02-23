@@ -37,6 +37,8 @@ typedef struct {
 	char  weaponType[32];    /* bullet, grenade, rocket, ... */
 	char  weaponClass[32];   /* rifle, pistol, smg, mg, shotgun, ... */
 	char  weaponSlot[16];    /* primary, secondary, grenade, ... */
+	char  playerAnimTypeName[64]; /* maps via mp/playeranimtypes.txt */
+	int   playerAnimType;    /* resolved anim type index, -1 if unknown */
 	char  radiantName[64];   /* editor name, also used as weapon ID */
 
 	/* Models */
@@ -158,3 +160,12 @@ typedef struct {
  * Returns qtrue on success, qfalse if the file was not found / invalid.
  */
 qboolean BG_ParseWeaponDef( const char *name, weaponDef_t *out );
+
+/*
+ * CoD2-compatible player anim type list loader.
+ * Source: mp/playeranimtypes.txt (tokenized, max 64 entries).
+ */
+void BG_LoadPlayerAnimTypes( void );
+int BG_GetPlayerAnimTypeCount( void );
+const char *BG_GetPlayerAnimTypeName( int index );
+int BG_FindPlayerAnimType( const char *name );

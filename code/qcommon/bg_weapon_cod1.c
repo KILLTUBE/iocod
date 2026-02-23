@@ -15,6 +15,91 @@ valid and represent the empty string / zero.
 #include "qcommon.h"
 #include "bg_weapon_cod1.h"
 
+#define COD_PLAYER_ANIM_TYPE_MAX 64
+
+static qboolean s_playerAnimTypesLoaded = qfalse;
+static int      s_playerAnimTypeCount = 0;
+static char     s_playerAnimTypeNames[COD_PLAYER_ANIM_TYPE_MAX][64];
+
+void BG_LoadPlayerAnimTypes( void )
+{
+    char *raw = NULL;
+    int len;
+    char *scan;
+    int count;
+
+    if ( s_playerAnimTypesLoaded ) {
+        return;
+    }
+
+    s_playerAnimTypesLoaded = qtrue;
+    s_playerAnimTypeCount = 0;
+    Com_Memset( s_playerAnimTypeNames, 0, sizeof( s_playerAnimTypeNames ) );
+
+    len = FS_ReadFile( "mp/playeranimtypes.txt", (void **)&raw );
+    if ( !raw || len <= 0 ) {
+        if ( raw ) {
+            FS_FreeFile( raw );
+        }
+        return;
+    }
+
+    if ( len > 4095 ) {
+        Com_Printf( "BG_LoadPlayerAnimTypes: 'mp/playeranimtypes.txt' max size exceeded\n" );
+        FS_FreeFile( raw );
+        return;
+    }
+
+    scan = raw;
+    count = 0;
+    while ( count < COD_PLAYER_ANIM_TYPE_MAX ) {
+        char *token = COM_Parse( &scan );
+        if ( !token || !token[0] ) {
+            break;
+        }
+
+        Q_strncpyz( s_playerAnimTypeNames[count], token, sizeof( s_playerAnimTypeNames[count] ) );
+        count++;
+    }
+
+    s_playerAnimTypeCount = count;
+    FS_FreeFile( raw );
+}
+
+int BG_GetPlayerAnimTypeCount( void )
+{
+    BG_LoadPlayerAnimTypes();
+    return s_playerAnimTypeCount;
+}
+
+const char *BG_GetPlayerAnimTypeName( int index )
+{
+    BG_LoadPlayerAnimTypes();
+
+    if ( index < 0 || index >= s_playerAnimTypeCount ) {
+        return "";
+    }
+    return s_playerAnimTypeNames[index];
+}
+
+int BG_FindPlayerAnimType( const char *name )
+{
+    int i;
+
+    if ( !name || !name[0] ) {
+        return -1;
+    }
+
+    BG_LoadPlayerAnimTypes();
+
+    for ( i = 0; i < s_playerAnimTypeCount; ++i ) {
+        if ( !Q_stricmp( s_playerAnimTypeNames[i], name ) ) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 /* ===========================================================================
    Field-setter dispatch
    =========================================================================== */
@@ -33,6 +118,13 @@ static void SetWeaponField( weaponDef_t *out, const char *key, const char *val )
     else if ( !Q_stricmp( key, "weaponType"          ) ) WFSTR( weaponType         );
     else if ( !Q_stricmp( key, "weaponClass"         ) ) WFSTR( weaponClass        );
     else if ( !Q_stricmp( key, "weaponSlot"          ) ) WFSTR( weaponSlot         );
+    else if ( !Q_stricmp( key, "playerAnimType"      ) ) {
+        WFSTR( playerAnimTypeName );
+        out->playerAnimType = BG_FindPlayerAnimType( val );
+        if ( out->playerAnimType < 0 && val[0] ) {
+            Com_Printf( "BG_ParseWeaponDef: unknown playerAnimType '%s'\n", val );
+        }
+    }
     else if ( !Q_stricmp( key, "radiantName"         ) ) WFSTR( radiantName        );
     else if ( !Q_stricmp( key, "modeName"            ) ) WFSTR( modeName           );
 
@@ -219,6 +311,7 @@ qboolean BG_ParseWeaponDef( const char *name, weaponDef_t *out )
     }
 
     Com_Memset( out, 0, sizeof(*out) );
+    out->playerAnimType = -1;
 
     /* Walk \key\value pairs */
     p = raw + 10;   /* skip "WEAPONFILE" */

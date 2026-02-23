@@ -19,6 +19,7 @@ Animation source:
 
 #include <math.h>
 #include <stdlib.h>
+#include "../qcommon/bg_weapon_cod1.h"
 #include "../thirdparty/gsc/include/gsc.h"
 
 #define TP_MAX_ATTACHMENTS 32
@@ -1139,6 +1140,81 @@ static qboolean CL_Character_ParseCharacterScript( const char *scriptPath,
     return foundBaseModel;
 }
 
+static qboolean CL_Character_IsJumpLegToken( const char *token )
+{
+    if ( !token || !token[0] ) {
+        return qfalse;
+    }
+    if ( Q_strncmp( token, "pb_", 3 ) != 0 ) {
+        return qfalse;
+    }
+    if ( !Q_stristr( token, "jump" ) ) {
+        return qfalse;
+    }
+    return qtrue;
+}
+
+static qhandle_t CL_Character_RegisterJumpAnimFromPlayerScript( void )
+{
+    char *scriptText = NULL;
+    char *scan;
+    char seen[64][64];
+    int seenCount;
+
+    if ( !re.RegisterXAnim ) {
+        return 0;
+    }
+
+    FS_ReadFile( "mp/playeranim.script", (void **)&scriptText );
+    if ( !scriptText ) {
+        return 0;
+    }
+
+    COM_BeginParseSession( "CL_Character_RegisterJumpAnimFromPlayerScript" );
+    scan = scriptText;
+    seenCount = 0;
+    while ( 1 ) {
+        char *token = COM_Parse( &scan );
+        int i;
+        qhandle_t h;
+
+        if ( !token || !token[0] ) {
+            break;
+        }
+
+        if ( !CL_Character_IsJumpLegToken( token ) ) {
+            continue;
+        }
+
+        for ( i = 0; i < seenCount; ++i ) {
+            if ( !Q_stricmp( seen[i], token ) ) {
+                break;
+            }
+        }
+        if ( i < seenCount ) {
+            continue;
+        }
+        if ( seenCount < (int)ARRAY_LEN( seen ) ) {
+            Q_strncpyz( seen[seenCount], token, sizeof( seen[0] ) );
+            seenCount++;
+        }
+
+        h = re.RegisterXAnim( token );
+        if ( h ) {
+            if ( cl_thirdPersonDebug && cl_thirdPersonDebug->integer ) {
+                Com_Printf( "thirdperson: jump legs xanim from script -> '%s'\n", token );
+            }
+            COM_EndParseSession();
+            FS_FreeFile( scriptText );
+            return h;
+        }
+    }
+
+    COM_EndParseSession();
+    FS_FreeFile( scriptText );
+    return 0;
+}
+
 static void CL_Character_LoadAnimations( void )
 {
     static const char *jumpLegFallbacks[] = {
@@ -1147,6 +1223,10 @@ static void CL_Character_LoadAnimations( void )
         "pb_jump_start"
     };
     int i;
+
+    // CoD2 reference: player anim types are loaded before anim scripts are
+    // resolved (BG_LoadPlayerAnimTypes -> BG_LoadAnim).
+    BG_LoadPlayerAnimTypes();
 
     for ( i = 0; i < TP_LEG_ANIM_COUNT; ++i ) {
         int j;
@@ -1173,6 +1253,10 @@ static void CL_Character_LoadAnimations( void )
     // Some assets expose jump via animscript aliases instead of a dedicated
     // primitive xanim file. Keep jump state valid by falling back to an
     // available stand locomotion clip.
+    if ( !s_tpChar.legAnims[TP_LEG_ANIM_JUMP] ) {
+        s_tpChar.legAnims[TP_LEG_ANIM_JUMP] = CL_Character_RegisterJumpAnimFromPlayerScript();
+    }
+
     if ( !s_tpChar.legAnims[TP_LEG_ANIM_JUMP] ) {
         if ( s_tpChar.legAnims[TP_LEG_ANIM_STAND_FWD] ) {
             s_tpChar.legAnims[TP_LEG_ANIM_JUMP] = s_tpChar.legAnims[TP_LEG_ANIM_STAND_FWD];
