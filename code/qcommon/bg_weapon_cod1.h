@@ -84,8 +84,6 @@ typedef struct {
 	float  adsSwayYawScale;          /* ADS yaw scale */
 	float  adsSwayHorizScale;        /* ADS horizontal scale */
 	float  adsSwayVertScale;         /* ADS vertical scale */
-	float  adsIdleAmount;            /* ADS idle sway amount */
-	float  hipIdleAmount;            /* hip idle sway amount */
 	float  idleCrouchFactor;         /* crouch idle multiplier */
 	float  idleProneFactor;          /* prone idle multiplier */
 

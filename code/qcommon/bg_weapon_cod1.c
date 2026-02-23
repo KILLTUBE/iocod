@@ -96,8 +96,6 @@ static void SetWeaponField( weaponDef_t *out, const char *key, const char *val )
     else if ( !Q_stricmp( key, "adsSwayYawScale"     ) ) WFFLT( adsSwayYawScale    );
     else if ( !Q_stricmp( key, "adsSwayHorizScale"   ) ) WFFLT( adsSwayHorizScale  );
     else if ( !Q_stricmp( key, "adsSwayVertScale"    ) ) WFFLT( adsSwayVertScale   );
-    else if ( !Q_stricmp( key, "adsIdleAmount"       ) ) WFFLT( adsIdleAmount      );
-    else if ( !Q_stricmp( key, "hipIdleAmount"       ) ) WFFLT( hipIdleAmount      );
     else if ( !Q_stricmp( key, "idleCrouchFactor"    ) ) WFFLT( idleCrouchFactor  );
     else if ( !Q_stricmp( key, "idleProneFactor"     ) ) WFFLT( idleProneFactor    );
 
