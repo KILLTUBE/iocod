@@ -307,33 +307,14 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     re.ClearScene();
 
     if ( cl_weapon.handModel ) {
-        /* Place the hands model at the eye position.  The model's tag_camera
-         * bone is at the model root (origin), so viewOrigin aligns correctly. */
         AddViewmodelEnt( cl_weapon.handModel, viewOrigin, axis );
-
-        if ( cl_weapon.gunModel ) {
-            orientation_t tag;
-            /* re.LerpTag returns the ANIMATED tag_weapon position because
-             * R_UpdateXModelPose updated the mdvTag entries above. */
-            if ( re.LerpTag( &tag, cl_weapon.handModel, 0, 0, 0, "tag_weapon" ) ) {
-                vec3_t gunOrigin;
-                vec3_t gunAxis[3];
-
-                /* Transform tag_weapon from model-local space to world space */
-                VectorCopy( viewOrigin, gunOrigin );
-                VectorMA( gunOrigin, tag.origin[0], axis[0], gunOrigin );
-                VectorMA( gunOrigin, tag.origin[1], axis[1], gunOrigin );
-                VectorMA( gunOrigin, tag.origin[2], axis[2], gunOrigin );
-
-                MatrixMultiply( tag.axis, axis, gunAxis );
-
-                AddViewmodelEnt( cl_weapon.gunModel, gunOrigin, gunAxis );
-            } else {
-                /* tag_weapon not found: put gun at eye */
-                AddViewmodelEnt( cl_weapon.gunModel, viewOrigin, axis );
-            }
-        }
-    } else if ( cl_weapon.gunModel ) {
+    }
+    if ( cl_weapon.gunModel ) {
+        /* Place gun at the same root origin as the hands.  In CoD, the hand
+         * and gun models share a skeleton via DObj — both are rendered from
+         * viewOrigin and the shared animation drives all bones (including
+         * tag_weapon) relative to that root.  Placing the gun at the hand's
+         * tag_weapon would double-count the tag_weapon bone offset. */
         AddViewmodelEnt( cl_weapon.gunModel, viewOrigin, axis );
     }
 
