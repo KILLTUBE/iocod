@@ -7,6 +7,8 @@ include(utils/set_output_dirs)
 
 set(CGAME_SOURCES
     ${SOURCE_DIR}/cgame/cg_main.c
+    ${SOURCE_DIR}/cgame/cg_newdraw.c
+    ${SOURCE_DIR}/ui/ui_shared.c
     ${SOURCE_DIR}/game/bg_misc.c
     ${SOURCE_DIR}/game/bg_pmove.c
     ${SOURCE_DIR}/game/bg_slidemove.c

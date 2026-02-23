@@ -2430,6 +2430,17 @@ typedef struct {
 	float	s2, t2;
 } stretchPicCommand_t;
 
+/* Like stretchPicCommand_t but rotates around the rect centre by `angle` degrees. */
+typedef struct {
+	int		commandId;
+	shader_t	*shader;
+	float	x, y;
+	float	w, h;
+	float	s1, t1;
+	float	s2, t2;
+	float	angle;
+} rotatePicCommand_t;
+
 typedef struct {
 	int		commandId;
 	trRefdef_t	refdef;
@@ -2489,6 +2500,7 @@ typedef enum {
 	RC_END_OF_LIST,
 	RC_SET_COLOR,
 	RC_STRETCH_PIC,
+	RC_ROTATE_PIC2,
 	RC_DRAW_SURFS,
 	RC_DRAW_BUFFER,
 	RC_SWAP_BUFFERS,
@@ -2536,8 +2548,11 @@ void R_AddCapShadowmapCmd( int dlight, int cubeSide );
 void R_AddPostProcessCmd (void);
 
 void RE_SetColor( const float *rgba );
-void RE_StretchPic ( float x, float y, float w, float h, 
+void RE_StretchPic ( float x, float y, float w, float h,
 					  float s1, float t1, float s2, float t2, qhandle_t hShader );
+void RE_RotatePic2 ( float x, float y, float w, float h,
+                     float s1, float t1, float s2, float t2,
+                     float angle, qhandle_t hShader );
 void RE_BeginFrame( stereoFrame_t stereoFrame );
 void RE_EndFrame( int *frontEndMsec, int *backEndMsec );
 void RE_SaveJPG(char * filename, int quality, int image_width, int image_height,

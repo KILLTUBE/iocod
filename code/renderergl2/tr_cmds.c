@@ -280,6 +280,36 @@ void RE_StretchPic ( float x, float y, float w, float h,
 	cmd->t2 = t2;
 }
 
+/*
+=============
+RE_RotatePic2
+
+Draws a pic rotated around its centre by angle degrees.
+=============
+*/
+void RE_RotatePic2 ( float x, float y, float w, float h,
+                     float s1, float t1, float s2, float t2,
+                     float angle, qhandle_t hShader ) {
+	rotatePicCommand_t *cmd;
+
+	if ( !tr.registered )
+		return;
+	cmd = R_GetCommandBuffer( sizeof( *cmd ) );
+	if ( !cmd )
+		return;
+	cmd->commandId = RC_ROTATE_PIC2;
+	cmd->shader = R_GetShaderByHandle( hShader );
+	cmd->x     = x;
+	cmd->y     = y;
+	cmd->w     = w;
+	cmd->h     = h;
+	cmd->s1    = s1;
+	cmd->t1    = t1;
+	cmd->s2    = s2;
+	cmd->t2    = t2;
+	cmd->angle = angle;
+}
+
 #define MODE_RED_CYAN	1
 #define MODE_RED_BLUE	2
 #define MODE_RED_GREEN	3

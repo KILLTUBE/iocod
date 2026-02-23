@@ -20,8 +20,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 
-#ifndef MISSIONPACK
-#error This file not be used for classic Q3A.
+#if !defined(MISSIONPACK) && !defined(STANDALONE)
+#error This file should only be compiled in MISSIONPACK or STANDALONE mode.
 #endif
 
 #include "cg_local.h"
@@ -1675,6 +1675,124 @@ void CG_OwnerDraw(float x, float y, float w, float h, float text_x, float text_y
   case CG_2NDPLACE:
     CG_Draw2ndPlace(&rect, scale, color, shader, textStyle);
 		break;
+
+#ifdef STANDALONE
+  /* ---- CoD1 HUD ownerdraw handlers ---- */
+
+  /* CG_DRAW_SHADER (91): draw the item's background shader verbatim */
+  case 91:
+    if ( shader ) {
+      trap_R_SetColor( color );
+      CG_DrawPic( x, y, w, h, shader );
+      trap_R_SetColor( NULL );
+    }
+    break;
+
+  /* CG_PLAYER_BAR_HEALTH (89): orange health fill bar, width proportional to health */
+  case 89: {
+    int hp = cg.snap->ps.stats[STAT_HEALTH];
+    float frac;
+    if ( hp < 0 ) hp = 0;
+    if ( hp > 100 ) hp = 100;
+    frac = hp / 100.0f;
+    if ( shader && frac > 0 ) {
+      float ax = x, ay = y, aw = w * frac, ah = h;
+      CG_AdjustFrom640( &ax, &ay, &aw, &ah );
+      trap_R_SetColor( color );
+      trap_R_DrawStretchPic( ax, ay, aw, ah, 0, 0, frac, 1, shader );
+      trap_R_SetColor( NULL );
+    }
+    break;
+  }
+
+  /* CG_PLAYER_AMMO_BACKDROP (6) — ammo counter backdrop: just draw the shader */
+  case 6:
+    if ( shader ) {
+      trap_R_SetColor( color );
+      CG_DrawPic( x, y, w, h, shader );
+      trap_R_SetColor( NULL );
+    }
+    break;
+
+  /* CG_PLAYER_AMMO_VALUE (5) is already handled above for Q3; CoD1 uses same logic */
+
+  /* CG_PLAYER_WEAPON_NAME_BACK (82): weapon name backdrop */
+  case 82:
+    if ( shader ) {
+      trap_R_SetColor( color );
+      CG_DrawPic( x, y, w, h, shader );
+      trap_R_SetColor( NULL );
+    }
+    break;
+
+  /* CG_PLAYER_WEAPON_NAME (81): weapon display name (use configstring weapon name) */
+  case 81: {
+    int wp = cg.snap->ps.weapon;
+    const char *wname = "";
+    if ( wp > 0 && wp < MAX_WEAPONS && cg_weapons[wp].item )
+      wname = cg_weapons[wp].item->pickup_name;
+    if ( *wname )
+      CG_Text_Paint( x + text_x, y + text_y, scale, color, wname, 0, 0, textStyle );
+    break;
+  }
+
+  /* CG_PLAYER_WEAPON_MODE_ICON (83): fire mode icon — draw shader if available */
+  case 83:
+    if ( shader ) {
+      trap_R_SetColor( color );
+      CG_DrawPic( x, y, w, h, shader );
+      trap_R_SetColor( NULL );
+    }
+    break;
+
+  /* CG_PLAYER_STANCE (20): stand / crouch icon */
+  case 20: {
+    qhandle_t stanceShader = 0;
+    if ( cgs.cod1StanceCrouch && ( cg.snap->ps.pm_flags & PMF_DUCKED ) )
+      stanceShader = cgs.cod1StanceCrouch;
+    else if ( cgs.cod1StanceStand )
+      stanceShader = cgs.cod1StanceStand;
+    if ( stanceShader ) {
+      trap_R_SetColor( color );
+      CG_DrawPic( x, y, w, h, stanceShader );
+      trap_R_SetColor( NULL );
+    }
+    break;
+  }
+
+  /* CG_PLAYER_COMPASS (84): compass face — rotates with yaw */
+  case 84:
+    if ( shader ) {
+      float cx, cy, aw, ah;
+      trap_R_SetColor( color );
+      cx = x + w * 0.5f;  cy = y + h * 0.5f;
+      aw = w;              ah = h;
+      CG_AdjustFrom640( &cx, &cy, &aw, &ah );
+      trap_R_DrawRotatePic2( cx, cy, aw, ah, 0, 0, 1, 1,
+                              cg.snap->ps.viewangles[YAW], shader );
+      trap_R_SetColor( NULL );
+    }
+    break;
+
+  /* CG_PLAYER_COMPASS_BACK (85): compass back / needle (drawn static) */
+  case 85:
+    if ( shader ) {
+      trap_R_SetColor( color );
+      CG_DrawPic( x, y, w, h, shader );
+      trap_R_SetColor( NULL );
+    }
+    break;
+
+  /* CG_PLAYER_COMPASS_FRIENDS (88) / CG_PLAYER_COMPASS_POINTERS (86): skip for now */
+  case 86:
+  case 88:
+    break;
+
+  /* CG_CURSORHINT (72): skip — no interaction system yet */
+  case 72:
+    break;
+#endif /* STANDALONE */
+
   default:
     break;
   }

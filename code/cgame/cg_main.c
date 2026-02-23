@@ -23,7 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // cg_main.c -- initialization and primary entry point for cgame
 #include "cg_local.h"
 
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || defined(STANDALONE)
 #include "../ui/ui_shared.h"
 // display context for new ui stuff
 displayContextDef_t cgDC;
@@ -65,7 +65,7 @@ Q_EXPORT intptr_t vmMain( int command, int arg0, int arg1, int arg2, int arg3, i
 		CG_KeyEvent(arg0, arg1);
 		return 0;
 	case CG_MOUSE_EVENT:
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || defined(STANDALONE)
 		cgDC.cursorx = cgs.cursorX;
 		cgDC.cursory = cgs.cursorY;
 #endif
@@ -1182,7 +1182,7 @@ void CG_StartMusic( void ) {
 
 	trap_S_StartBackgroundTrack( parm1, parm2 );
 }
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || defined(STANDALONE)
 char *CG_GetMenuBuffer(const char *filename) {
 	int	len;
 	fileHandle_t	f;
@@ -1804,7 +1804,11 @@ void CG_LoadHudMenu( void ) {
 	trap_Cvar_VariableStringBuffer("cg_hudFiles", buff, sizeof(buff));
 	hudSet = buff;
 	if (hudSet[0] == '\0') {
+#ifdef STANDALONE
+		hudSet = "ui_mp/hud.txt";
+#else
 		hudSet = "ui/hud.txt";
+#endif
 	}
 
 	CG_LoadMenus(hudSet);
@@ -1869,20 +1873,9 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 	// Load CoD1 font for HUD text
 	Com_Memset( &cgs.hudFont, 0, sizeof( cgs.hudFont ) );
 	trap_R_RegisterFont( "fonts/fontImage", 16, &cgs.hudFont );
-
-	// CoD1 HUD image assets
-	cgs.cod1HealthBack     = trap_R_RegisterShaderNoMip( "gfx/hud/hud@health_back" );
-	cgs.cod1HealthBar      = trap_R_RegisterShaderNoMip( "gfx/hud/hud@health_bar" );
-	cgs.cod1HealthCross    = trap_R_RegisterShaderNoMip( "gfx/hud/hud@health_cross" );
-	cgs.cod1AmmoBack       = trap_R_RegisterShaderNoMip( "gfx/hud/hud@ammocounterback" );
-	cgs.cod1WeaponNameBack = trap_R_RegisterShaderNoMip( "gfx/hud/hud@weaponnameback" );
-	cgs.cod1StanceStand    = trap_R_RegisterShaderNoMip( "gfx/hud/stance_stand" );
-	cgs.cod1StanceCrouch   = trap_R_RegisterShaderNoMip( "gfx/hud/stance_crouch" );
-	cgs.cod1StanceProne    = trap_R_RegisterShaderNoMip( "gfx/hud/stance_prone" );
-	cgs.cod1CompassBack    = trap_R_RegisterShaderNoMip( "gfx/hud/hud@compassback" );
-	cgs.cod1CompassFace    = trap_R_RegisterShaderNoMip( "gfx/hud/hud@compassface" );
-	cgs.cod1CompassHL      = trap_R_RegisterShaderNoMip( "gfx/hud/hud@compasshighlight" );
-	cgs.cod1CompassArrow   = trap_R_RegisterShaderNoMip( "gfx/hud/hud@compass_arrow" );
+	// Stance shaders needed by CG_OwnerDraw stance handler
+	cgs.cod1StanceStand  = trap_R_RegisterShaderNoMip( "gfx/hud/stance_stand" );
+	cgs.cod1StanceCrouch = trap_R_RegisterShaderNoMip( "gfx/hud/stance_crouch" );
 #endif
 
 	CG_RegisterCvars();
@@ -1937,7 +1930,7 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 
 	CG_RegisterClients();		// if low on memory, some clients will be deferred
 
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || defined(STANDALONE)
 	CG_AssetCache();
 	CG_LoadHudMenu();      // load new hud stuff
 #endif

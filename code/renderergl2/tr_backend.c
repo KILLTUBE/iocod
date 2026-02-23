@@ -886,6 +886,86 @@ const void *RB_StretchPic ( const void *data ) {
 	return (const void *)(cmd + 1);
 }
 
+/*
+=============
+RB_RotatePic2
+
+Draw a pic rotated around its centre by cmd->angle degrees.
+=============
+*/
+const void *RB_RotatePic2 ( const void *data ) {
+	const rotatePicCommand_t *cmd = (const rotatePicCommand_t *)data;
+	shader_t *shader;
+	int numVerts, numIndexes;
+	float cx, cy, s, c, a;
+	float dx[4], dy[4];
+	int i;
+
+	if ( glRefConfig.framebufferObject )
+		FBO_Bind( tr.renderFbo );
+
+	RB_SetGL2D();
+
+	shader = cmd->shader;
+	if ( shader != tess.shader ) {
+		if ( tess.numIndexes )
+			RB_EndSurface();
+		backEnd.currentEntity = &backEnd.entity2D;
+		RB_BeginSurface( shader, 0, 0 );
+	}
+
+	RB_CHECKOVERFLOW( 4, 6 );
+	numVerts   = tess.numVertexes;
+	numIndexes = tess.numIndexes;
+	tess.numVertexes += 4;
+	tess.numIndexes  += 6;
+
+	tess.indexes[ numIndexes ]     = numVerts + 3;
+	tess.indexes[ numIndexes + 1 ] = numVerts + 0;
+	tess.indexes[ numIndexes + 2 ] = numVerts + 2;
+	tess.indexes[ numIndexes + 3 ] = numVerts + 2;
+	tess.indexes[ numIndexes + 4 ] = numVerts + 0;
+	tess.indexes[ numIndexes + 5 ] = numVerts + 1;
+
+	{
+		uint16_t color[4];
+		VectorScale4( backEnd.color2D, 257, color );
+		VectorCopy4( color, tess.color[ numVerts ] );
+		VectorCopy4( color, tess.color[ numVerts + 1 ] );
+		VectorCopy4( color, tess.color[ numVerts + 2 ] );
+		VectorCopy4( color, tess.color[ numVerts + 3 ] );
+	}
+
+	/* Rotate four corners around the rect centre */
+	cx = cmd->x + cmd->w * 0.5f;
+	cy = cmd->y + cmd->h * 0.5f;
+	a  = DEG2RAD( cmd->angle );
+	s  = sinf( a );
+	c  = cosf( a );
+
+	dx[0] = -cmd->w * 0.5f;  dy[0] = -cmd->h * 0.5f;
+	dx[1] =  cmd->w * 0.5f;  dy[1] = -cmd->h * 0.5f;
+	dx[2] =  cmd->w * 0.5f;  dy[2] =  cmd->h * 0.5f;
+	dx[3] = -cmd->w * 0.5f;  dy[3] =  cmd->h * 0.5f;
+
+	for ( i = 0; i < 4; i++ ) {
+		tess.xyz[ numVerts + i ][0] = cx + dx[i] * c - dy[i] * s;
+		tess.xyz[ numVerts + i ][1] = cy + dx[i] * s + dy[i] * c;
+		tess.xyz[ numVerts + i ][2] = 0;
+	}
+
+	tess.texCoords[ numVerts + 0 ][0] = cmd->s1;
+	tess.texCoords[ numVerts + 0 ][1] = cmd->t1;
+	tess.texCoords[ numVerts + 1 ][0] = cmd->s2;
+	tess.texCoords[ numVerts + 1 ][1] = cmd->t1;
+	tess.texCoords[ numVerts + 2 ][0] = cmd->s2;
+	tess.texCoords[ numVerts + 2 ][1] = cmd->t2;
+	tess.texCoords[ numVerts + 3 ][0] = cmd->s1;
+	tess.texCoords[ numVerts + 3 ][1] = cmd->t2;
+
+	return (const void *)( cmd + 1 );
+}
+
 
 /*
 =============
@@ -1837,6 +1917,9 @@ void RB_ExecuteRenderCommands( const void *data ) {
 			break;
 		case RC_STRETCH_PIC:
 			data = RB_StretchPic( data );
+			break;
+		case RC_ROTATE_PIC2:
+			data = RB_RotatePic2( data );
 			break;
 		case RC_DRAW_SURFS:
 			data = RB_DrawSurfs( data );

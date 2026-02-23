@@ -1701,7 +1701,8 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.RenderScene = RE_RenderScene;
 
 	re.SetColor = RE_SetColor;
-	re.DrawStretchPic = RE_StretchPic;
+	re.DrawStretchPic  = RE_StretchPic;
+	re.DrawRotatePic2  = RE_RotatePic2;
 	re.DrawStretchRaw = RE_StretchRaw;
 	re.UploadCinematic = RE_UploadCinematic;
 
