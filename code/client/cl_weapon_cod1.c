@@ -298,13 +298,13 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     VectorCopy( cl.snap.ps.origin, cameraOrigin );
     cameraOrigin[2] += cl.snap.ps.viewheight;
 
-    /* PMF_DUCKED = bit 0 in CoD1 pm_flags */
-    stance = ( cl.snap.ps.pm_flags & 1 ) ? 1 : 0;  /* 0=stand, 1=duck */
+    /* PMF_DUCKED = 1 (bg_public.h) - same in CoD1 */
+    stance = cl.snap.ps.pm_flags & PMF_DUCKED;
 
     /* Apply weapon file offsets */
     if ( cl_weapon.active ) {
         weaponDef_t *def = &cl_weapon.def;
-        if ( stance == 1 ) {   /* Ducked */
+        if ( stance == PMF_DUCKED ) {   /* Ducked */
             ofsF = def->duckedOfsF;
             ofsR = def->duckedOfsR;
             ofsU = def->duckedOfsU;
