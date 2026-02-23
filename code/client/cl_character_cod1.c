@@ -100,6 +100,7 @@ typedef struct {
     tpTorsoAnimSlot_t currentTorsoAnim;
     int               legAnimStartTime;
     int               torsoAnimStartTime;
+    float             baseFootOffset;
     float          renderYaw;
     qboolean       renderYawValid;
 } tpCharacterState_t;
@@ -120,6 +121,7 @@ static cvar_t *cl_thirdPersonFaceMove;
 static cvar_t *cl_thirdPersonUseGsc;
 static cvar_t *cl_thirdPersonBlendTorso;
 static cvar_t *cl_thirdPersonTorsoRoot;
+static cvar_t *cl_thirdPersonAutoGround;
 static cvar_t *cl_thirdPersonYawLerpSpeed;
 static cvar_t *cl_thirdPersonDebug;
 
@@ -1253,6 +1255,7 @@ static void CL_TP_LoadCharacterAssets( void )
 
     Com_Memset( &s_tpChar.attachments, 0, sizeof( s_tpChar.attachments ) );
     s_tpChar.numAttachments = 0;
+    s_tpChar.baseFootOffset = 0.0f;
 
     s_tpChar.baseModel = CL_TP_RegisterModelWithFallback( desiredModelPath,
                                                           desiredModelPath,
@@ -1261,6 +1264,13 @@ static void CL_TP_LoadCharacterAssets( void )
     if ( !s_tpChar.baseModel ) {
         Com_Printf( "thirdperson: failed to load model '%s' (and fallback playerbody models)\n",
                     desiredModelPath );
+    } else if ( re.ModelBounds ) {
+        vec3_t mins, maxs;
+        re.ModelBounds( s_tpChar.baseModel, mins, maxs );
+        s_tpChar.baseFootOffset = -mins[2];
+        if ( s_tpChar.baseFootOffset < -256.0f || s_tpChar.baseFootOffset > 256.0f ) {
+            s_tpChar.baseFootOffset = 0.0f;
+        }
     }
 
     for ( i = 0; i < desiredAttachmentCount; ++i ) {
@@ -1854,6 +1864,9 @@ void CL_AddThirdPersonCharacter( const refdef_t *fd )
     ent.renderfx = RF_LIGHTING_ORIGIN;
 
     VectorCopy( interpOrigin, ent.origin );
+    if ( cl_thirdPersonAutoGround && cl_thirdPersonAutoGround->integer ) {
+        ent.origin[2] += s_tpChar.baseFootOffset;
+    }
     ent.origin[2] += cl_thirdPersonZOffset ? cl_thirdPersonZOffset->value : 0.0f;
 
     VectorCopy( ent.origin, ent.oldorigin );
@@ -1954,6 +1967,7 @@ void CL_CharacterCod1_Init( void )
     cl_thirdPersonUseGsc        = Cvar_Get( "cl_thirdPersonUseGsc", "1", CVAR_ARCHIVE );
     cl_thirdPersonBlendTorso    = Cvar_Get( "cl_thirdPersonBlendTorso", "1", CVAR_ARCHIVE );
     cl_thirdPersonTorsoRoot     = Cvar_Get( "cl_thirdPersonTorsoRoot", "bip01 spine2", CVAR_ARCHIVE );
+    cl_thirdPersonAutoGround    = Cvar_Get( "cl_thirdPersonAutoGround", "1", CVAR_ARCHIVE );
     cl_thirdPersonYawLerpSpeed  = Cvar_Get( "cl_thirdPersonYawLerpSpeed", "540", CVAR_ARCHIVE );
     cl_thirdPersonDebug         = Cvar_Get( "cl_thirdPersonDebug", "0", CVAR_TEMP );
 
