@@ -286,40 +286,21 @@ void CL_DrawViewModel( stereoFrame_t stereo )
         Com_Printf( "anim=%d frame=%.1f\n", cl_weapon.currentAnim, animFrame );
 
     /* ---- Camera / view setup ----
-     * CoD: use tag_camera on hand model as the eye position.
-     * tag_camera IS the eye position after animation (stance offsets baked in). */
-    vec3_t       cameraOrigin, modelOrigin;
-    vec3_t       entityAxis[3];
-    orientation_t tagCamera;
-    qboolean     hasTagCamera;
+     * CoD: viewmodel renders at player eye position. The animation bakes in
+     * all stance offsets. tag_camera is (0,0,0) by default if not a bone. */
+    vec3_t cameraOrigin, modelOrigin;
+    vec3_t entityAxis[3];
 
     VectorCopy( cl.snap.ps.viewangles, viewAngles );
     AnglesToAxis( viewAngles, axis );
 
-    /* Get tag_camera from animated hand model - this IS the eye position */
-    hasTagCamera = qfalse;
-    if ( re.LerpTag && cl_weapon.handModel ) {
-        hasTagCamera = re.LerpTag( &tagCamera, cl_weapon.handModel,
-                                    0, 0, 1.0f, "tag_camera" );
-    }
+    /* Player eye position = model origin = camera origin */
+    VectorCopy( cl.snap.ps.origin, cameraOrigin );
+    cameraOrigin[2] += cl.snap.ps.viewheight;
+    VectorCopy( cameraOrigin, modelOrigin );
 
-    if ( hasTagCamera ) {
-        /* Camera = tag_camera's world position */
-        VectorCopy( tagCamera.origin, cameraOrigin );
-        /* Model rendered at same origin with tag_camera's orientation */
-        VectorCopy( cameraOrigin, modelOrigin );
-        AxisCopy( tagCamera.axis, entityAxis );
-        if ( cl_animDebug && cl_animDebug->integer )
-            Com_Printf( "tag_camera: %.1f,%.1f,%.1f\n",
-                       cameraOrigin[0], cameraOrigin[1], cameraOrigin[2] );
-    } else {
-        /* Fallback: use player eye position */
-        Com_Printf( "WARNING: No tag_camera on hand model!\n" );
-        VectorCopy( cl.snap.ps.origin, cameraOrigin );
-        cameraOrigin[2] += cl.snap.ps.viewheight;
-        VectorCopy( cameraOrigin, modelOrigin );
-        AnglesToAxis( viewAngles, entityAxis );
-    }
+    /* Entity orientation follows player view */
+    AnglesToAxis( viewAngles, entityAxis );
 
     /* Full-screen refdef with no world (just our weapon entities) */
     Com_Memset( &refdef, 0, sizeof(refdef) );
