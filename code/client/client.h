@@ -648,5 +648,9 @@ void CL_WeaponCod1_Init( void );
 void CL_WeaponCod1_Shutdown( void );
 void CL_GiveWeapon( const char *name );
 void CL_DrawViewModel( stereoFrame_t stereo );
-#endif
 
+/* cl_character_cod1.c */
+void CL_CharacterCod1_Init( void );
+void CL_CharacterCod1_Shutdown( void );
+void CL_AddThirdPersonCharacter( const refdef_t *fd );
+#endif

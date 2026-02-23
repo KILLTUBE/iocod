@@ -563,8 +563,14 @@ intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		re.AddAdditiveLightToScene( VMA(1), VMF(2), VMF(3), VMF(4), VMF(5) );
 		return 0;
 	case CG_R_RENDERSCENE:
-		re.RenderScene( VMA(1) );
+	{
+		refdef_t *refdef = VMA(1);
+#ifdef STANDALONE
+		CL_AddThirdPersonCharacter( refdef );
+#endif
+		re.RenderScene( refdef );
 		return 0;
+	}
 	case CG_R_SETCOLOR:
 		re.SetColor( VMA(1) );
 		return 0;

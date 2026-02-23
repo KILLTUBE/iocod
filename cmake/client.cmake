@@ -50,6 +50,7 @@ if(BUILD_STANDALONE)
     list(APPEND CLIENT_SOURCES
         ${SOURCE_DIR}/qcommon/bg_weapon_cod1.c
         ${SOURCE_DIR}/client/cl_weapon_cod1.c
+        ${SOURCE_DIR}/client/cl_character_cod1.c
     )
 endif()
 

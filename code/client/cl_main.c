@@ -1215,6 +1215,7 @@ void CL_ShutdownAll(qboolean shutdownRef)
 	S_DisableSounds();
 #ifdef STANDALONE
 	CL_WeaponCod1_Shutdown();
+	CL_CharacterCod1_Shutdown();
 #endif
 	// shutdown CGame
 	CL_ShutdownCGame();
@@ -3745,6 +3746,7 @@ void CL_Init( void ) {
 	Cmd_AddCommand ("stopvideo", CL_StopVideo_f );
 #ifdef STANDALONE
 	CL_WeaponCod1_Init();
+	CL_CharacterCod1_Init();
 #endif
 	if( !com_dedicated->integer ) {
 		Cmd_AddCommand ("sayto", CL_Sayto_f );
