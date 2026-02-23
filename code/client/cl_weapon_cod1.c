@@ -285,70 +285,41 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     if ( cl_animDebug && cl_animDebug->integer )
         Com_Printf( "anim=%d frame=%.1f\n", cl_weapon.currentAnim, animFrame );
 
-    /* ---- Camera / view setup ---- */
-    vec3_t cameraOrigin, modelOrigin, modelAngles;
-    int    stance;
+    /* ---- Camera / view setup ----
+     * CoD uses tag_camera on the hand model as the eye position.
+     * The animation bakes in all stance offsets, so we just use tag_camera
+     * directly as both the camera origin and model rendering origin. */
+    vec3_t       modelOrigin, cameraOrigin;
+    vec3_t       entityAxis[3];
+    orientation_t tagCamera;
+    qboolean     hasTagCamera;
 
-    VectorCopy( cl.snap.ps.origin, cameraOrigin );
-    cameraOrigin[2] += cl.snap.ps.viewheight;
     VectorCopy( cl.snap.ps.viewangles, viewAngles );
     AnglesToAxis( viewAngles, axis );
 
-    /* PMF_DUCKED = bit 0 in CoD1 pm_flags */
-    stance = ( cl.snap.ps.pm_flags & 1 ) ? 1 : 0;  /* 0=stand, 1=duck */
-
-    /* ---- Stance-specific STATIC position offsets (Quake units) ----
-     *
-     * standMoveF/R/U  = bob/sway SCALE parameters — NOT static offsets.
-     *   A value of 900 means "scale this axis at 900 when moving at full speed".
-     *   They must NOT be applied as a constant position offset.
-     *
-     * duckedOfsF/R/U / proneOfsF/R/U = actual small offsets (e.g. -2, 2 units)
-     *   applied when the stance changes, to shift the gun into a new position.
-     */
-    float ofsF = 0.0f, ofsR = 0.0f, ofsU = 0.0f;
-    float rotP = 0.0f, rotY = 0.0f, rotR = 0.0f;
-
-    {
-        weaponDef_t *def = &cl_weapon.def;
-        if ( stance == 1 ) {   /* Ducked */
-            ofsF = def->duckedOfsF;
-            ofsR = def->duckedOfsR;
-            ofsU = def->duckedOfsU;
-            rotP = def->duckedRotP;
-            rotY = def->duckedRotY;
-            rotR = def->duckedRotR;
-        } else {               /* Standing */
-            ofsF = def->standMoveF;
-            ofsR = def->standMoveR;
-            ofsU = def->standMoveU;
-            rotP = def->standRotP;
-            rotY = def->standRotY;
-            rotR = def->standRotR;
-        }
+    /* Get tag_camera from the animated hand model - this IS the eye position */
+    hasTagCamera = qfalse;
+    if ( re.LerpTag && cl_weapon.handModel ) {
+        hasTagCamera = re.LerpTag( &tagCamera, cl_weapon.handModel,
+                                    0, 0, 1.0f, "tag_camera" );
     }
 
-    /* ---- Manual tuning cvars (cg_gun_x/y/z equivalent) ---- */
-    ofsR += cl_gunX ? cl_gunX->value : 0.0f;   /* right */
-    ofsF += cl_gunY ? cl_gunY->value : 0.0f;   /* forward */
-    ofsU += cl_gunZ ? cl_gunZ->value : 0.0f;   /* up */
-
-    /* ---- Build model origin: eye + stance offsets along view axes ----
-     * axis[0]=forward, axis[1]=left, axis[2]=up
-     * CoD convention: F=forward, R=right, U=up  (right = -left) */
-    VectorCopy( cameraOrigin, modelOrigin );
-    VectorMA( modelOrigin,  ofsF, axis[0], modelOrigin );   /* forward  */
-    VectorMA( modelOrigin, -ofsR, axis[1], modelOrigin );   /* right    */
-    VectorMA( modelOrigin,  ofsU, axis[2], modelOrigin );   /* up       */
-
-    /* ---- Build entity axis: view angles + stance rotation ---- */
-    VectorCopy( viewAngles, modelAngles );
-    modelAngles[0] += rotP;
-    modelAngles[1] += rotY;
-    modelAngles[2] += rotR;
-
-    vec3_t entityAxis[3];
-    AnglesToAxis( modelAngles, entityAxis );
+    if ( hasTagCamera ) {
+        /* Use tag_camera's world position and orientation */
+        MatrixToVectors( (const float(*)[4])tagCamera.axis, entityAxis );
+        VectorCopy( tagCamera.origin, modelOrigin );
+        VectorCopy( tagCamera.origin, cameraOrigin );
+        if ( cl_animDebug && cl_animDebug->integer )
+            Com_Printf( "Using tag_camera: origin=%.1f %.1f %.1f\n",
+                       modelOrigin[0], modelOrigin[1], modelOrigin[2] );
+    } else {
+        /* Fallback: use player eye position (won't match CoD positioning) */
+        Com_Printf( "WARNING: No tag_camera found on hand model!\n" );
+        VectorCopy( cl.snap.ps.origin, modelOrigin );
+        modelOrigin[2] += cl.snap.ps.viewheight;
+        VectorCopy( modelOrigin, cameraOrigin );
+        AnglesToAxis( viewAngles, entityAxis );
+    }
 
     /* Full-screen refdef with no world (just our weapon entities) */
     Com_Memset( &refdef, 0, sizeof(refdef) );
