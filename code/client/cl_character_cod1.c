@@ -24,25 +24,35 @@ Animation source:
 #define TP_TAGNAME_LEN     64
 
 typedef enum {
-    TP_ANIM_STAND_IDLE = 0,
-    TP_ANIM_STAND_FWD,
-    TP_ANIM_STAND_BACK,
-    TP_ANIM_STAND_LEFT,
-    TP_ANIM_STAND_RIGHT,
-    TP_ANIM_CROUCH_IDLE,
-    TP_ANIM_CROUCH_FWD,
-    TP_ANIM_CROUCH_BACK,
-    TP_ANIM_CROUCH_LEFT,
-    TP_ANIM_CROUCH_RIGHT,
-    TP_ANIM_PRONE_IDLE,
-    TP_ANIM_PRONE_FWD,
-    TP_ANIM_PRONE_BACK,
-    TP_ANIM_PRONE_LEFT,
-    TP_ANIM_PRONE_RIGHT,
-    TP_ANIM_COUNT
-} tpAnimSlot_t;
+    TP_LEG_ANIM_STAND_IDLE = 0,
+    TP_LEG_ANIM_STAND_FWD,
+    TP_LEG_ANIM_STAND_BACK,
+    TP_LEG_ANIM_STAND_LEFT,
+    TP_LEG_ANIM_STAND_RIGHT,
+    TP_LEG_ANIM_CROUCH_IDLE,
+    TP_LEG_ANIM_CROUCH_FWD,
+    TP_LEG_ANIM_CROUCH_BACK,
+    TP_LEG_ANIM_CROUCH_LEFT,
+    TP_LEG_ANIM_CROUCH_RIGHT,
+    TP_LEG_ANIM_PRONE_IDLE,
+    TP_LEG_ANIM_PRONE_FWD,
+    TP_LEG_ANIM_PRONE_BACK,
+    TP_LEG_ANIM_PRONE_LEFT,
+    TP_LEG_ANIM_PRONE_RIGHT,
+    TP_LEG_ANIM_COUNT
+} tpLegAnimSlot_t;
 
-static const char *s_tpAnimNames[TP_ANIM_COUNT] = {
+typedef enum {
+    TP_TORSO_ANIM_STAND_IDLE = 0,
+    TP_TORSO_ANIM_STAND_FIRE,
+    TP_TORSO_ANIM_CROUCH_IDLE,
+    TP_TORSO_ANIM_CROUCH_FIRE,
+    TP_TORSO_ANIM_PRONE_IDLE,
+    TP_TORSO_ANIM_PRONE_FIRE,
+    TP_TORSO_ANIM_COUNT
+} tpTorsoAnimSlot_t;
+
+static const char *s_tpLegAnimNames[TP_LEG_ANIM_COUNT] = {
     "pb_stand_alert",
     "pb_stand_shoot_walk_forward",
     "pb_stand_shoot_walk_back",
@@ -60,6 +70,15 @@ static const char *s_tpAnimNames[TP_ANIM_COUNT] = {
     "pb_prone_crawl_right"
 };
 
+static const char *s_tpTorsoAnimCandidates[TP_TORSO_ANIM_COUNT][4] = {
+    { "pt_stand_pullout_pose", "pt_stand_shoot_ads", "pt_stand_shoot", NULL },
+    { "pt_stand_shoot_auto",   "pt_stand_shoot",     "pt_rifle_fire",  NULL },
+    { "pt_crouch_pullout_pose","pt_crouch_shoot_ads","pt_crouch_shoot",NULL },
+    { "pt_crouch_shoot_auto",  "pt_crouch_shoot",    NULL,             NULL },
+    { "pt_prone_pullout_pose", "pt_prone_shoot",     NULL,             NULL },
+    { "pt_prone_shoot_auto",   "pt_prone_shoot",     NULL,             NULL }
+};
+
 typedef struct {
     char      modelPath[MAX_QPATH];
     char      tagName[TP_TAGNAME_LEN];
@@ -68,7 +87,8 @@ typedef struct {
 
 typedef struct {
     qhandle_t      baseModel;
-    qhandle_t      anims[TP_ANIM_COUNT];
+    qhandle_t      legAnims[TP_LEG_ANIM_COUNT];
+    qhandle_t      torsoAnims[TP_TORSO_ANIM_COUNT];
     tpAttachment_t attachments[TP_MAX_ATTACHMENTS];
     int            numAttachments;
 
@@ -76,10 +96,10 @@ typedef struct {
     char           loadedScriptPath[MAX_QPATH];
     char           loadedModelOverride[MAX_QPATH];
 
-    tpAnimSlot_t   currentAnim;
-    int            animStartTime;
-    int            lastLegsAnimRaw;
-    int            lastTorsoAnimRaw;
+    tpLegAnimSlot_t   currentLegAnim;
+    tpTorsoAnimSlot_t currentTorsoAnim;
+    int               legAnimStartTime;
+    int               torsoAnimStartTime;
     float          renderYaw;
     qboolean       renderYawValid;
 } tpCharacterState_t;
@@ -98,6 +118,8 @@ static cvar_t *cl_thirdPersonMoveThreshold;
 static cvar_t *cl_thirdPersonFaceView;
 static cvar_t *cl_thirdPersonFaceMove;
 static cvar_t *cl_thirdPersonUseGsc;
+static cvar_t *cl_thirdPersonBlendTorso;
+static cvar_t *cl_thirdPersonTorsoRoot;
 static cvar_t *cl_thirdPersonYawLerpSpeed;
 static cvar_t *cl_thirdPersonDebug;
 
@@ -1116,21 +1138,44 @@ static void CL_TP_LoadAnimations( void )
 {
     int i;
 
-    for ( i = 0; i < TP_ANIM_COUNT; ++i ) {
-        s_tpChar.anims[i] = 0;
+    for ( i = 0; i < TP_LEG_ANIM_COUNT; ++i ) {
+        s_tpChar.legAnims[i] = 0;
         if ( re.RegisterXAnim ) {
-            s_tpChar.anims[i] = re.RegisterXAnim( s_tpAnimNames[i] );
+            s_tpChar.legAnims[i] = re.RegisterXAnim( s_tpLegAnimNames[i] );
         }
 
-        if ( !s_tpChar.anims[i] && cl_thirdPersonDebug && cl_thirdPersonDebug->integer ) {
-            Com_Printf( "thirdperson: missing xanim '%s'\n", s_tpAnimNames[i] );
+        if ( !s_tpChar.legAnims[i] && cl_thirdPersonDebug && cl_thirdPersonDebug->integer ) {
+            Com_Printf( "thirdperson: missing legs xanim '%s'\n", s_tpLegAnimNames[i] );
         }
     }
 
-    s_tpChar.currentAnim = TP_ANIM_STAND_IDLE;
-    s_tpChar.animStartTime = cl.serverTime;
-    s_tpChar.lastLegsAnimRaw = -1;
-    s_tpChar.lastTorsoAnimRaw = -1;
+    for ( i = 0; i < TP_TORSO_ANIM_COUNT; ++i ) {
+        int c;
+        s_tpChar.torsoAnims[i] = 0;
+        for ( c = 0; c < (int)ARRAY_LEN( s_tpTorsoAnimCandidates[i] ); ++c ) {
+            const char *name = s_tpTorsoAnimCandidates[i][c];
+            if ( !name || !name[0] ) {
+                continue;
+            }
+            if ( !re.RegisterXAnim ) {
+                break;
+            }
+
+            s_tpChar.torsoAnims[i] = re.RegisterXAnim( name );
+            if ( s_tpChar.torsoAnims[i] ) {
+                break;
+            }
+        }
+
+        if ( !s_tpChar.torsoAnims[i] && cl_thirdPersonDebug && cl_thirdPersonDebug->integer ) {
+            Com_Printf( "thirdperson: missing torso xanim set for slot %d\n", i );
+        }
+    }
+
+    s_tpChar.currentLegAnim = TP_LEG_ANIM_STAND_IDLE;
+    s_tpChar.currentTorsoAnim = TP_TORSO_ANIM_STAND_IDLE;
+    s_tpChar.legAnimStartTime = cl.serverTime;
+    s_tpChar.torsoAnimStartTime = cl.serverTime;
 }
 
 static qboolean CL_TP_AttachmentListsEqual( const tpAttachment_t *a, int aCount,
@@ -1323,18 +1368,60 @@ static float CL_TP_StepYawToward( float currentYaw, float desiredYaw, float maxS
     return AngleNormalize360( currentYaw + delta );
 }
 
-static tpAnimSlot_t CL_TP_IdleAnimForStance( qboolean crouched, qboolean prone )
+static void CL_TP_DeriveStanceFlags( const playerState_t *ps,
+                                     qboolean *outCrouched, qboolean *outProne )
 {
-    if ( prone ) {
-        return TP_ANIM_PRONE_IDLE;
+    int legsAnim;
+
+    *outCrouched = ( ps->pm_flags & PMF_DUCKED ) ? qtrue : qfalse;
+    *outProne = ( ps->viewheight <= ( PRONE_VIEWHEIGHT + 1 ) );
+
+    legsAnim = ps->legsAnim & ~ANIM_TOGGLEBIT;
+    switch ( legsAnim ) {
+        case LEGS_WALKCR:
+        case LEGS_IDLECR:
+        case LEGS_BACKCR:
+            *outCrouched = qtrue;
+            break;
+        default:
+            break;
     }
-    if ( crouched ) {
-        return TP_ANIM_CROUCH_IDLE;
-    }
-    return TP_ANIM_STAND_IDLE;
 }
 
-static tpAnimSlot_t CL_TP_MoveAnimForDir( int dir, qboolean crouched, qboolean prone, qboolean forceBack )
+static tpLegAnimSlot_t CL_TP_LegIdleAnimForStance( qboolean crouched, qboolean prone )
+{
+    if ( prone ) {
+        return TP_LEG_ANIM_PRONE_IDLE;
+    }
+    if ( crouched ) {
+        return TP_LEG_ANIM_CROUCH_IDLE;
+    }
+    return TP_LEG_ANIM_STAND_IDLE;
+}
+
+static tpTorsoAnimSlot_t CL_TP_TorsoIdleAnimForStance( qboolean crouched, qboolean prone )
+{
+    if ( prone ) {
+        return TP_TORSO_ANIM_PRONE_IDLE;
+    }
+    if ( crouched ) {
+        return TP_TORSO_ANIM_CROUCH_IDLE;
+    }
+    return TP_TORSO_ANIM_STAND_IDLE;
+}
+
+static tpTorsoAnimSlot_t CL_TP_TorsoFireAnimForStance( qboolean crouched, qboolean prone )
+{
+    if ( prone ) {
+        return TP_TORSO_ANIM_PRONE_FIRE;
+    }
+    if ( crouched ) {
+        return TP_TORSO_ANIM_CROUCH_FIRE;
+    }
+    return TP_TORSO_ANIM_STAND_FIRE;
+}
+
+static tpLegAnimSlot_t CL_TP_MoveAnimForDir( int dir, qboolean crouched, qboolean prone, qboolean forceBack )
 {
     if ( forceBack ) {
         dir = 4;
@@ -1345,13 +1432,13 @@ static tpAnimSlot_t CL_TP_MoveAnimForDir( int dir, qboolean crouched, qboolean p
             case 4:
             case 3:
             case 5:
-                return TP_ANIM_PRONE_BACK;
+                return TP_LEG_ANIM_PRONE_BACK;
             case 2:
-                return TP_ANIM_PRONE_LEFT;
+                return TP_LEG_ANIM_PRONE_LEFT;
             case 6:
-                return TP_ANIM_PRONE_RIGHT;
+                return TP_LEG_ANIM_PRONE_RIGHT;
             default:
-                return TP_ANIM_PRONE_FWD;
+                return TP_LEG_ANIM_PRONE_FWD;
         }
     }
 
@@ -1360,13 +1447,13 @@ static tpAnimSlot_t CL_TP_MoveAnimForDir( int dir, qboolean crouched, qboolean p
             case 4:
             case 3:
             case 5:
-                return TP_ANIM_CROUCH_BACK;
+                return TP_LEG_ANIM_CROUCH_BACK;
             case 2:
-                return TP_ANIM_CROUCH_LEFT;
+                return TP_LEG_ANIM_CROUCH_LEFT;
             case 6:
-                return TP_ANIM_CROUCH_RIGHT;
+                return TP_LEG_ANIM_CROUCH_RIGHT;
             default:
-                return TP_ANIM_CROUCH_FWD;
+                return TP_LEG_ANIM_CROUCH_FWD;
         }
     }
 
@@ -1374,20 +1461,19 @@ static tpAnimSlot_t CL_TP_MoveAnimForDir( int dir, qboolean crouched, qboolean p
         case 4:
         case 3:
         case 5:
-            return TP_ANIM_STAND_BACK;
+            return TP_LEG_ANIM_STAND_BACK;
         case 2:
-            return TP_ANIM_STAND_LEFT;
+            return TP_LEG_ANIM_STAND_LEFT;
         case 6:
-            return TP_ANIM_STAND_RIGHT;
+            return TP_LEG_ANIM_STAND_RIGHT;
         default:
-            return TP_ANIM_STAND_FWD;
+            return TP_LEG_ANIM_STAND_FWD;
     }
 }
 
-static tpAnimSlot_t CL_TP_ChooseAnimForPlayerState( const playerState_t *ps )
+static tpLegAnimSlot_t CL_TP_ChooseLegAnimForPlayerState( const playerState_t *ps )
 {
     int legsAnim;
-    int torsoAnim;
     float xyspeed;
     qboolean moving;
     qboolean crouched;
@@ -1396,18 +1482,16 @@ static tpAnimSlot_t CL_TP_ChooseAnimForPlayerState( const playerState_t *ps )
     int dir;
 
     legsAnim = ps->legsAnim & ~ANIM_TOGGLEBIT;
-    torsoAnim = ps->torsoAnim & ~ANIM_TOGGLEBIT;
 
     xyspeed = sqrtf( ps->velocity[0] * ps->velocity[0] +
                      ps->velocity[1] * ps->velocity[1] );
     moving = qfalse;
-    crouched = ( ps->pm_flags & PMF_DUCKED ) ? qtrue : qfalse;
-    prone = ( ps->viewheight <= ( PRONE_VIEWHEIGHT + 1 ) );
+    CL_TP_DeriveStanceFlags( ps, &crouched, &prone );
     forceBack = qfalse;
     dir = ps->movementDir & 7;
 
     if ( ps->pm_type != PM_NORMAL && ps->pm_type != PM_DEAD ) {
-        return CL_TP_IdleAnimForStance( crouched, prone );
+        return CL_TP_LegIdleAnimForStance( crouched, prone );
     }
 
     switch ( legsAnim ) {
@@ -1447,33 +1531,66 @@ static tpAnimSlot_t CL_TP_ChooseAnimForPlayerState( const playerState_t *ps )
         moving = ( xyspeed > ( cl_thirdPersonMoveThreshold ? cl_thirdPersonMoveThreshold->value : 20.0f ) );
     }
 
-    if ( torsoAnim == TORSO_ATTACK || torsoAnim == TORSO_ATTACK2 ) {
-        if ( ps->groundEntityNum != ENTITYNUM_NONE ) {
-            moving = qtrue;
-        }
-    }
-
     if ( !moving || ps->groundEntityNum == ENTITYNUM_NONE ) {
-        return CL_TP_IdleAnimForStance( crouched, prone );
+        return CL_TP_LegIdleAnimForStance( crouched, prone );
     }
 
     return CL_TP_MoveAnimForDir( dir, crouched, prone, forceBack );
 }
 
-static qhandle_t CL_TP_GetAnimHandleForState( tpAnimSlot_t slot )
+static tpTorsoAnimSlot_t CL_TP_ChooseTorsoAnimForPlayerState( const playerState_t *ps )
 {
-    if ( slot < 0 || slot >= TP_ANIM_COUNT ) {
-        slot = TP_ANIM_STAND_IDLE;
+    int torsoAnim;
+    qboolean crouched;
+    qboolean prone;
+    qboolean firing;
+
+    torsoAnim = ps->torsoAnim & ~ANIM_TOGGLEBIT;
+    CL_TP_DeriveStanceFlags( ps, &crouched, &prone );
+
+    firing = ( torsoAnim == TORSO_ATTACK || torsoAnim == TORSO_ATTACK2 ) ? qtrue : qfalse;
+    if ( ps->pm_type != PM_NORMAL && ps->pm_type != PM_DEAD ) {
+        firing = qfalse;
     }
 
-    if ( s_tpChar.anims[slot] ) {
-        return s_tpChar.anims[slot];
+    if ( firing ) {
+        return CL_TP_TorsoFireAnimForStance( crouched, prone );
     }
 
-    return s_tpChar.anims[TP_ANIM_STAND_IDLE];
+    return CL_TP_TorsoIdleAnimForStance( crouched, prone );
 }
 
-static float CL_TP_ComputeAnimFrame( qhandle_t animHandle )
+static qhandle_t CL_TP_GetLegAnimHandleForState( tpLegAnimSlot_t slot )
+{
+    if ( slot < 0 || slot >= TP_LEG_ANIM_COUNT ) {
+        slot = TP_LEG_ANIM_STAND_IDLE;
+    }
+
+    if ( s_tpChar.legAnims[slot] ) {
+        return s_tpChar.legAnims[slot];
+    }
+
+    return s_tpChar.legAnims[TP_LEG_ANIM_STAND_IDLE];
+}
+
+static qhandle_t CL_TP_GetTorsoAnimHandleForState( tpTorsoAnimSlot_t slot )
+{
+    if ( slot < 0 || slot >= TP_TORSO_ANIM_COUNT ) {
+        slot = TP_TORSO_ANIM_STAND_IDLE;
+    }
+
+    if ( s_tpChar.torsoAnims[slot] ) {
+        return s_tpChar.torsoAnims[slot];
+    }
+
+    if ( s_tpChar.torsoAnims[TP_TORSO_ANIM_STAND_IDLE] ) {
+        return s_tpChar.torsoAnims[TP_TORSO_ANIM_STAND_IDLE];
+    }
+
+    return 0;
+}
+
+static float CL_TP_ComputeAnimFrame( qhandle_t animHandle, int animStartTime )
 {
     int fps;
     int numFrames;
@@ -1500,7 +1617,7 @@ static float CL_TP_ComputeAnimFrame( qhandle_t animHandle )
         rate = 1.0f;
     }
 
-    elapsed = (float)( cl.serverTime - s_tpChar.animStartTime ) * 0.001f;
+    elapsed = (float)( cl.serverTime - animStartTime ) * 0.001f;
     frame = elapsed * (float)fps * rate;
 
     if ( numFrames > 1 ) {
@@ -1634,7 +1751,7 @@ static void CL_TP_AddAttachments( const refEntity_t *baseEnt,
 
 static void CL_TP_EnsureAssets( void )
 {
-    if ( !s_tpChar.anims[TP_ANIM_STAND_IDLE] ) {
+    if ( !s_tpChar.legAnims[TP_LEG_ANIM_STAND_IDLE] ) {
         CL_TP_LoadAnimations();
     }
 
@@ -1667,14 +1784,17 @@ void CL_AddThirdPersonCharacter( const refdef_t *fd )
     float desiredYaw;
     float maxYawStep;
     playerState_t interpPs;
-    tpAnimSlot_t desiredAnim;
-    int legsAnimRaw;
-    int torsoAnimRaw;
+    tpLegAnimSlot_t desiredLegAnim;
+    tpTorsoAnimSlot_t desiredTorsoAnim;
     int mergedAttachmentIndex;
     refEntity_t mergedHeadEnt;
     qboolean hasMergedHeadEnt;
-    qhandle_t animHandle;
-    float animFrame;
+    qhandle_t legsAnimHandle;
+    qhandle_t torsoAnimHandle;
+    float legsAnimFrame;
+    float torsoAnimFrame;
+    qboolean useTorsoBlend;
+    const char *torsoRootBone;
 
     if ( !fd || ( fd->rdflags & RDF_NOWORLDMODEL ) ) {
         return;
@@ -1707,22 +1827,26 @@ void CL_AddThirdPersonCharacter( const refdef_t *fd )
     VectorCopy( interpVelocity, interpPs.velocity );
     interpPs.viewheight = interpViewHeight;
 
-    legsAnimRaw = interpPs.legsAnim & ~ANIM_TOGGLEBIT;
-    torsoAnimRaw = interpPs.torsoAnim & ~ANIM_TOGGLEBIT;
-    desiredAnim = CL_TP_ChooseAnimForPlayerState( &interpPs );
-    if ( desiredAnim != s_tpChar.currentAnim ) {
-        s_tpChar.currentAnim = desiredAnim;
-        s_tpChar.animStartTime = cl.serverTime;
-    }
-    s_tpChar.lastLegsAnimRaw = legsAnimRaw;
-    s_tpChar.lastTorsoAnimRaw = torsoAnimRaw;
+    desiredLegAnim = CL_TP_ChooseLegAnimForPlayerState( &interpPs );
+    desiredTorsoAnim = CL_TP_ChooseTorsoAnimForPlayerState( &interpPs );
 
-    animHandle = CL_TP_GetAnimHandleForState( s_tpChar.currentAnim );
-    animFrame = CL_TP_ComputeAnimFrame( animHandle );
-
-    if ( re.UpdateXModelPose && animHandle ) {
-        re.UpdateXModelPose( s_tpChar.baseModel, animHandle, animFrame );
+    if ( desiredLegAnim != s_tpChar.currentLegAnim ) {
+        s_tpChar.currentLegAnim = desiredLegAnim;
+        s_tpChar.legAnimStartTime = cl.serverTime;
     }
+    if ( desiredTorsoAnim != s_tpChar.currentTorsoAnim ) {
+        s_tpChar.currentTorsoAnim = desiredTorsoAnim;
+        s_tpChar.torsoAnimStartTime = cl.serverTime;
+    }
+
+    legsAnimHandle = CL_TP_GetLegAnimHandleForState( s_tpChar.currentLegAnim );
+    torsoAnimHandle = CL_TP_GetTorsoAnimHandleForState( s_tpChar.currentTorsoAnim );
+    legsAnimFrame = CL_TP_ComputeAnimFrame( legsAnimHandle, s_tpChar.legAnimStartTime );
+    torsoAnimFrame = CL_TP_ComputeAnimFrame( torsoAnimHandle, s_tpChar.torsoAnimStartTime );
+    useTorsoBlend = ( cl_thirdPersonBlendTorso && cl_thirdPersonBlendTorso->integer &&
+                      torsoAnimHandle ) ? qtrue : qfalse;
+    torsoRootBone = ( cl_thirdPersonTorsoRoot && cl_thirdPersonTorsoRoot->string[0] ) ?
+                    cl_thirdPersonTorsoRoot->string : "bip01 spine2";
 
     Com_Memset( &ent, 0, sizeof( ent ) );
     ent.reType = RT_MODEL;
@@ -1769,12 +1893,20 @@ void CL_AddThirdPersonCharacter( const refdef_t *fd )
     mergedAttachmentIndex = CL_TP_FindMergedAttachmentIndex();
     hasMergedHeadEnt = qfalse;
     if ( mergedAttachmentIndex >= 0 &&
-         re.UpdateDObjPose &&
-         animHandle &&
          s_tpChar.attachments[mergedAttachmentIndex].hModel ) {
-        re.UpdateDObjPose( s_tpChar.baseModel,
-                           s_tpChar.attachments[mergedAttachmentIndex].hModel,
-                           animHandle, animFrame );
+        if ( useTorsoBlend && re.UpdateDObjPoseBlend && legsAnimHandle ) {
+            re.UpdateDObjPoseBlend( s_tpChar.baseModel,
+                                    s_tpChar.attachments[mergedAttachmentIndex].hModel,
+                                    legsAnimHandle, legsAnimFrame,
+                                    torsoAnimHandle, torsoAnimFrame,
+                                    torsoRootBone );
+        } else if ( re.UpdateDObjPose && ( legsAnimHandle || torsoAnimHandle ) ) {
+            qhandle_t singleAnim = legsAnimHandle ? legsAnimHandle : torsoAnimHandle;
+            float singleFrame = legsAnimHandle ? legsAnimFrame : torsoAnimFrame;
+            re.UpdateDObjPose( s_tpChar.baseModel,
+                               s_tpChar.attachments[mergedAttachmentIndex].hModel,
+                               singleAnim, singleFrame );
+        }
 
         Com_Memset( &mergedHeadEnt, 0, sizeof( mergedHeadEnt ) );
         mergedHeadEnt.reType = RT_MODEL;
@@ -1787,6 +1919,17 @@ void CL_AddThirdPersonCharacter( const refdef_t *fd )
         VectorCopy( ent.axis[1], mergedHeadEnt.axis[1] );
         VectorCopy( ent.axis[2], mergedHeadEnt.axis[2] );
         hasMergedHeadEnt = qtrue;
+    } else {
+        if ( useTorsoBlend && re.UpdateXModelPoseBlend && legsAnimHandle ) {
+            re.UpdateXModelPoseBlend( s_tpChar.baseModel,
+                                      legsAnimHandle, legsAnimFrame,
+                                      torsoAnimHandle, torsoAnimFrame,
+                                      torsoRootBone );
+        } else if ( re.UpdateXModelPose && ( legsAnimHandle || torsoAnimHandle ) ) {
+            qhandle_t singleAnim = legsAnimHandle ? legsAnimHandle : torsoAnimHandle;
+            float singleFrame = legsAnimHandle ? legsAnimFrame : torsoAnimFrame;
+            re.UpdateXModelPose( s_tpChar.baseModel, singleAnim, singleFrame );
+        }
     }
 
     re.AddRefEntityToScene( &ent );
@@ -1809,14 +1952,16 @@ void CL_CharacterCod1_Init( void )
     cl_thirdPersonFaceView      = Cvar_Get( "cl_thirdPersonFaceView", "0", CVAR_ARCHIVE );
     cl_thirdPersonFaceMove      = Cvar_Get( "cl_thirdPersonFaceMove", "1", CVAR_ARCHIVE );
     cl_thirdPersonUseGsc        = Cvar_Get( "cl_thirdPersonUseGsc", "1", CVAR_ARCHIVE );
+    cl_thirdPersonBlendTorso    = Cvar_Get( "cl_thirdPersonBlendTorso", "1", CVAR_ARCHIVE );
+    cl_thirdPersonTorsoRoot     = Cvar_Get( "cl_thirdPersonTorsoRoot", "bip01 spine2", CVAR_ARCHIVE );
     cl_thirdPersonYawLerpSpeed  = Cvar_Get( "cl_thirdPersonYawLerpSpeed", "540", CVAR_ARCHIVE );
     cl_thirdPersonDebug         = Cvar_Get( "cl_thirdPersonDebug", "0", CVAR_TEMP );
 
     Com_Memset( &s_tpChar, 0, sizeof( s_tpChar ) );
-    s_tpChar.currentAnim = TP_ANIM_STAND_IDLE;
-    s_tpChar.animStartTime = cl.serverTime;
-    s_tpChar.lastLegsAnimRaw = -1;
-    s_tpChar.lastTorsoAnimRaw = -1;
+    s_tpChar.currentLegAnim = TP_LEG_ANIM_STAND_IDLE;
+    s_tpChar.currentTorsoAnim = TP_TORSO_ANIM_STAND_IDLE;
+    s_tpChar.legAnimStartTime = cl.serverTime;
+    s_tpChar.torsoAnimStartTime = cl.serverTime;
 
     if ( cl_thirdPersonModel ) {
         cl_thirdPersonModel->modified = qtrue;

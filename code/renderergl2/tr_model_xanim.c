@@ -119,6 +119,14 @@ static xmSkinData_t *s_skinData[  BIND_TABLE_SIZE ];
 static xmBone_t     *s_curPose[   BIND_TABLE_SIZE ];
 static int           s_curCount[  BIND_TABLE_SIZE ];
 
+/* shared work buffers for blended pose composition */
+static xmBone_t       s_blendWorkA[ XMODEL_MAX_BONES * 2 ];
+static xmBone_t       s_blendWorkB[ XMODEL_MAX_BONES * 2 ];
+static byte           s_blendTorsoMask[ XMODEL_MAX_BONES * 2 ];
+
+static int R_FindBoneByNames( const xmBone_t *bones, int numBones,
+                              const char *const *names, int numNames );
+
 /* ===========================================================================
    XModel_ComputeWorldBones
    =========================================================================== */
@@ -172,6 +180,181 @@ void R_StoreXModelSkinData( qhandle_t modelHandle, xmSkinData_t *data )
     s_skinData[idx] = data;
 }
 
+static void R_CachePoseForModel( int idx, const xmBone_t *bones, int numBones )
+{
+    if ( idx < 0 || idx >= BIND_TABLE_SIZE || !bones || numBones <= 0 ) {
+        return;
+    }
+
+    if ( !s_curPose[idx] || s_curCount[idx] < numBones ) {
+        if ( s_curPose[idx] ) {
+            ri.Free( s_curPose[idx] );
+        }
+        s_curPose[idx]  = (xmBone_t *)ri.Malloc( sizeof(xmBone_t) * numBones );
+        s_curCount[idx] = numBones;
+    }
+
+    Com_Memcpy( s_curPose[idx], bones, sizeof(xmBone_t) * numBones );
+}
+
+static void R_SkinAndTagModel( int idx, const xmBone_t *bones, int numBones )
+{
+    xmSkinData_t *sd;
+    mdvModel_t   *mdvModel;
+    int i, j;
+
+    if ( idx < 0 || idx >= BIND_TABLE_SIZE || !bones || numBones <= 0 ) {
+        return;
+    }
+
+    sd = s_skinData[idx];
+    if ( !sd ) {
+        return;
+    }
+
+    for ( i = 0; i < sd->numSurfaces; i++ ) {
+        xmSkinSurf_t *surf = &sd->surfs[i];
+        for ( j = 0; j < surf->numVerts; j++ ) {
+            vec3_t worldPos, worldNormal;
+            int    bi = surf->verts[j].boneIdx;
+
+            if ( bi >= 0 && bi < numBones ) {
+                const xmBone_t *b = &bones[bi];
+                Quat_RotVec( b->wRot, surf->verts[j].localPos,    worldPos    );
+                VectorAdd  ( b->wTrans, worldPos,                  worldPos    );
+                Quat_RotVec( b->wRot, surf->verts[j].localNormal,  worldNormal );
+            } else {
+                VectorCopy( surf->verts[j].localPos,    worldPos    );
+                VectorCopy( surf->verts[j].localNormal, worldNormal );
+            }
+
+            VectorNormalize( worldNormal );
+            VectorCopy( worldPos, surf->mdvVerts[j].xyz );
+            R_VaoPackNormal( surf->mdvVerts[j].normal, worldNormal );
+        }
+    }
+
+    mdvModel = sd->mdvModel;
+    if ( mdvModel && mdvModel->numTags > 0 ) {
+        int tagIdx = 0;
+        for ( i = 0; i < numBones && tagIdx < mdvModel->numTags; i++ ) {
+            if ( Q_strncmp( bones[i].name, "tag_", 4 ) == 0 ) {
+                VectorCopy( bones[i].wTrans, mdvModel->tags[tagIdx].origin );
+                Quat_ToAxis( bones[i].wRot,  mdvModel->tags[tagIdx].axis   );
+                tagIdx++;
+            }
+        }
+    }
+}
+
+static void R_ComputePoseFromAnim( const xmBone_t *bindPose, int numBones,
+                                   qhandle_t animHandle, float frame,
+                                   xmBone_t *outBones )
+{
+    if ( !bindPose || !outBones || numBones <= 0 ) {
+        return;
+    }
+
+    Com_Memcpy( outBones, bindPose, sizeof(xmBone_t) * numBones );
+
+    if ( animHandle > 0 ) {
+        R_EvalXAnimBones( animHandle, frame, outBones, numBones );
+    } else {
+        XModel_ComputeWorldBones( outBones, numBones );
+    }
+}
+
+static int R_FindTorsoRootBone( const xmBone_t *bones, int numBones,
+                                const char *torsoRootBone )
+{
+    static const char *fallbackRoots[] = {
+        "bip01 spine2",
+        "bip01 spine3",
+        "bip01 spine4",
+        "j_spineupper",
+        "tag_torso",
+        "spine2",
+        "spine"
+    };
+
+    if ( torsoRootBone && torsoRootBone[0] ) {
+        const char *singleRoot[1];
+        singleRoot[0] = torsoRootBone;
+        return R_FindBoneByNames( bones, numBones, singleRoot, 1 );
+    }
+
+    return R_FindBoneByNames( bones, numBones,
+                              fallbackRoots, (int)ARRAY_LEN( fallbackRoots ) );
+}
+
+static void R_BuildTorsoMask( const xmBone_t *bones, int numBones, int torsoRoot,
+                              byte *maskOut )
+{
+    int i;
+
+    if ( !maskOut || numBones <= 0 ) {
+        return;
+    }
+
+    Com_Memset( maskOut, 0, (size_t)numBones );
+    if ( !bones || torsoRoot < 0 || torsoRoot >= numBones ) {
+        return;
+    }
+
+    for ( i = 0; i < numBones; ++i ) {
+        int p = i;
+        int safety = numBones;
+        while ( p >= 0 && p < numBones && safety-- > 0 ) {
+            if ( p == torsoRoot ) {
+                maskOut[i] = 1;
+                break;
+            }
+            p = bones[p].parent;
+        }
+    }
+}
+
+static void R_ComposeBlendedPose( const xmBone_t *bindPose, int numBones,
+                                  qhandle_t legsAnimHandle, float legsFrame,
+                                  qhandle_t torsoAnimHandle, float torsoFrame,
+                                  const char *torsoRootBone,
+                                  xmBone_t *outBones )
+{
+    int i;
+    int torsoRoot;
+
+    if ( !bindPose || !outBones || numBones <= 0 ) {
+        return;
+    }
+
+    R_ComputePoseFromAnim( bindPose, numBones, legsAnimHandle, legsFrame, s_blendWorkA );
+
+    if ( torsoAnimHandle <= 0 ) {
+        Com_Memcpy( outBones, s_blendWorkA, sizeof(xmBone_t) * numBones );
+        return;
+    }
+
+    R_ComputePoseFromAnim( bindPose, numBones, torsoAnimHandle, torsoFrame, s_blendWorkB );
+
+    torsoRoot = R_FindTorsoRootBone( bindPose, numBones, torsoRootBone );
+    if ( torsoRoot < 0 ) {
+        Com_Memcpy( outBones, s_blendWorkA, sizeof(xmBone_t) * numBones );
+        return;
+    }
+
+    R_BuildTorsoMask( bindPose, numBones, torsoRoot, s_blendTorsoMask );
+
+    Com_Memcpy( outBones, s_blendWorkA, sizeof(xmBone_t) * numBones );
+    for ( i = 0; i < numBones; ++i ) {
+        if ( s_blendTorsoMask[i] ) {
+            VectorCopy( s_blendWorkB[i].lTrans, outBones[i].lTrans );
+            Vector4Copy( s_blendWorkB[i].lRot, outBones[i].lRot );
+        }
+    }
+
+    XModel_ComputeWorldBones( outBones, numBones );
+}
+
 /* ===========================================================================
    R_UpdateXModelPose
    Evaluates the animation at 'frame', re-skins all vertices in-place, and
@@ -180,72 +363,40 @@ void R_StoreXModelSkinData( qhandle_t modelHandle, xmSkinData_t *data )
 
 void R_UpdateXModelPose( qhandle_t modelHandle, qhandle_t animHandle, float frame )
 {
-    int          idx = (int)modelHandle;
-    int          i, j, numBones;
-    xmBone_t     workBones[XMODEL_MAX_BONES];
-    xmSkinData_t *sd;
-    mdvModel_t   *mdvModel;
+    int      idx = (int)modelHandle;
+    int      numBones;
+    xmBone_t workBones[XMODEL_MAX_BONES];
 
     if ( idx < 0 || idx >= BIND_TABLE_SIZE ) return;
     if ( !s_bindPose[idx] || s_bindCount[idx] <= 0 ) return;
 
     numBones = s_bindCount[idx];
 
-    /* Start from bind pose */
-    Com_Memcpy( workBones, s_bindPose[idx], sizeof(xmBone_t) * numBones );
+    R_ComputePoseFromAnim( s_bindPose[idx], numBones, animHandle, frame, workBones );
+    R_CachePoseForModel( idx, workBones, numBones );
+    R_SkinAndTagModel( idx, workBones, numBones );
+}
 
-    /* Overlay animation keyframes (by bone name matching) */
-    if ( animHandle > 0 )
-        R_EvalXAnimBones( animHandle, frame, workBones, numBones );
-    else
-        XModel_ComputeWorldBones( workBones, numBones );
+void R_UpdateXModelPoseBlend( qhandle_t modelHandle,
+                              qhandle_t legsAnimHandle, float legsFrame,
+                              qhandle_t torsoAnimHandle, float torsoFrame,
+                              const char *torsoRootBone )
+{
+    int      idx = (int)modelHandle;
+    int      numBones;
+    xmBone_t workBones[XMODEL_MAX_BONES];
 
-    /* Cache the evaluated pose for R_XModelLerpTag */
-    if ( !s_curPose[idx] || s_curCount[idx] < numBones ) {
-        if ( s_curPose[idx] ) ri.Free( s_curPose[idx] );
-        s_curPose[idx]  = (xmBone_t *)ri.Malloc( sizeof(xmBone_t) * numBones );
-        s_curCount[idx] = numBones;
-    }
-    Com_Memcpy( s_curPose[idx], workBones, sizeof(xmBone_t) * numBones );
+    if ( idx < 0 || idx >= BIND_TABLE_SIZE ) return;
+    if ( !s_bindPose[idx] || s_bindCount[idx] <= 0 ) return;
 
-    /* Re-skin all vertices in-place */
-    sd = s_skinData[idx];
-    if ( sd ) {
-        for ( i = 0; i < sd->numSurfaces; i++ ) {
-            xmSkinSurf_t *surf = &sd->surfs[i];
-            for ( j = 0; j < surf->numVerts; j++ ) {
-                vec3_t worldPos, worldNormal;
-                int    bi = surf->verts[j].boneIdx;
+    numBones = s_bindCount[idx];
 
-                if ( bi >= 0 && bi < numBones ) {
-                    const xmBone_t *b = &workBones[bi];
-                    Quat_RotVec( b->wRot, surf->verts[j].localPos,    worldPos    );
-                    VectorAdd  ( b->wTrans, worldPos,                  worldPos    );
-                    Quat_RotVec( b->wRot, surf->verts[j].localNormal,  worldNormal );
-                } else {
-                    VectorCopy( surf->verts[j].localPos,    worldPos    );
-                    VectorCopy( surf->verts[j].localNormal, worldNormal );
-                }
-
-                VectorNormalize( worldNormal );
-                VectorCopy( worldPos, surf->mdvVerts[j].xyz );
-                R_VaoPackNormal( surf->mdvVerts[j].normal, worldNormal );
-            }
-        }
-
-        /* Update mdvTag entries so re.LerpTag returns animated positions */
-        mdvModel = sd->mdvModel;
-        if ( mdvModel && mdvModel->numTags > 0 ) {
-            int tagIdx = 0;
-            for ( i = 0; i < numBones && tagIdx < mdvModel->numTags; i++ ) {
-                if ( Q_strncmp( workBones[i].name, "tag_", 4 ) == 0 ) {
-                    VectorCopy( workBones[i].wTrans, mdvModel->tags[tagIdx].origin );
-                    Quat_ToAxis( workBones[i].wRot,  mdvModel->tags[tagIdx].axis   );
-                    tagIdx++;
-                }
-            }
-        }
-    }
+    R_ComposeBlendedPose( s_bindPose[idx], numBones,
+                          legsAnimHandle, legsFrame,
+                          torsoAnimHandle, torsoFrame,
+                          torsoRootBone, workBones );
+    R_CachePoseForModel( idx, workBones, numBones );
+    R_SkinAndTagModel( idx, workBones, numBones );
 }
 
 /*
@@ -594,13 +745,11 @@ static int R_FindBoneByNames( const xmBone_t *bones, int numBones,
 void R_UpdateDObjPose( qhandle_t handModel, qhandle_t gunModel,
                         qhandle_t animHandle, float frame )
 {
-    int          handIdx   = (int)handModel;
-    int          gunIdx    = (int)gunModel;
-    int          numH, numG, total;
-    int          tagWeapon = -1;
-    int          i, j;
-    xmSkinData_t *sd;
-    mdvModel_t   *mdv;
+    int handIdx = (int)handModel;
+    int gunIdx  = (int)gunModel;
+    int numH, numG, total;
+    int i;
+    int tagWeapon = -1;
 
     if ( handIdx < 0 || handIdx >= BIND_TABLE_SIZE ) return;
     if ( !s_bindPose[handIdx] || s_bindCount[handIdx] <= 0 ) return;
@@ -608,20 +757,26 @@ void R_UpdateDObjPose( qhandle_t handModel, qhandle_t gunModel,
     numH = s_bindCount[handIdx];
     numG = 0;
     if ( gunIdx >= 0 && gunIdx < BIND_TABLE_SIZE &&
-         s_bindPose[gunIdx] && s_bindCount[gunIdx] > 0 )
+         s_bindPose[gunIdx] && s_bindCount[gunIdx] > 0 ) {
         numG = s_bindCount[gunIdx];
+    }
 
     total = numH + numG;
-    if ( total > XMODEL_MAX_BONES * 2 ) total = XMODEL_MAX_BONES * 2;
+    if ( total > XMODEL_MAX_BONES * 2 ) {
+        total = XMODEL_MAX_BONES * 2;
+        numG = total - numH;
+        if ( numG < 0 ) {
+            numG = 0;
+            total = numH;
+        }
+    }
 
-    /* ---- Build combined bone array ---- */
-    Com_Memcpy( s_dobjWork,       s_bindPose[handIdx], sizeof(xmBone_t) * numH );
-    if ( numG > 0 )
-        Com_Memcpy( s_dobjWork + numH, s_bindPose[gunIdx],  sizeof(xmBone_t) * numG );
+    Com_Memcpy( s_dobjWork, s_bindPose[handIdx], sizeof(xmBone_t) * numH );
+    if ( numG > 0 ) {
+        Com_Memcpy( s_dobjWork + numH, s_bindPose[gunIdx], sizeof(xmBone_t) * numG );
+    }
 
     {
-        /* Keep weapon behavior first ("tag_weapon"), then support
-         * character-style merge points for body/head composition. */
         static const char *attachTags[] = {
             "tag_weapon",
             "tag_weapon_right",
@@ -641,117 +796,108 @@ void R_UpdateDObjPose( qhandle_t handModel, qhandle_t gunModel,
                                        attachTags, (int)ARRAY_LEN( attachTags ) );
     }
 
-    /* Remap gun bone parent indices into combined-array space;
-     * parent gun root bones to tag_weapon so the animation chain is correct */
     for ( i = numH; i < total; i++ ) {
         if ( s_dobjWork[i].parent < 0 ) {
             if ( tagWeapon >= 0 ) {
-                s_dobjWork[i].parent = tagWeapon;   /* keep -1 if no attach point */
+                s_dobjWork[i].parent = tagWeapon;
             }
-        }
-        else
+        } else {
             s_dobjWork[i].parent += numH;
+        }
     }
 
-    /* ---- Evaluate animation ---- */
-    if ( animHandle > 0 )
+    if ( animHandle > 0 ) {
         R_EvalXAnimBones( animHandle, frame, s_dobjWork, total );
-    else
+    } else {
         XModel_ComputeWorldBones( s_dobjWork, total );
-
-    /* ---- Cache poses ---- */
-    if ( !s_curPose[handIdx] || s_curCount[handIdx] < numH ) {
-        if ( s_curPose[handIdx] ) ri.Free( s_curPose[handIdx] );
-        s_curPose[handIdx]  = (xmBone_t *)ri.Malloc( sizeof(xmBone_t) * numH );
-        s_curCount[handIdx] = numH;
     }
-    Com_Memcpy( s_curPose[handIdx], s_dobjWork, sizeof(xmBone_t) * numH );
+
+    R_CachePoseForModel( handIdx, s_dobjWork, numH );
+    R_SkinAndTagModel( handIdx, s_dobjWork, numH );
 
     if ( numG > 0 ) {
-        if ( !s_curPose[gunIdx] || s_curCount[gunIdx] < numG ) {
-            if ( s_curPose[gunIdx] ) ri.Free( s_curPose[gunIdx] );
-            s_curPose[gunIdx]  = (xmBone_t *)ri.Malloc( sizeof(xmBone_t) * numG );
-            s_curCount[gunIdx] = numG;
-        }
-        Com_Memcpy( s_curPose[gunIdx], s_dobjWork + numH, sizeof(xmBone_t) * numG );
+        R_CachePoseForModel( gunIdx, s_dobjWork + numH, numG );
+        R_SkinAndTagModel( gunIdx, s_dobjWork + numH, numG );
+    }
+}
+
+void R_UpdateDObjPoseBlend( qhandle_t handModel, qhandle_t gunModel,
+                            qhandle_t legsAnimHandle, float legsFrame,
+                            qhandle_t torsoAnimHandle, float torsoFrame,
+                            const char *torsoRootBone )
+{
+    int handIdx = (int)handModel;
+    int gunIdx  = (int)gunModel;
+    int numH, numG, total;
+    int i;
+    int tagWeapon = -1;
+
+    if ( handIdx < 0 || handIdx >= BIND_TABLE_SIZE ) return;
+    if ( !s_bindPose[handIdx] || s_bindCount[handIdx] <= 0 ) return;
+
+    numH = s_bindCount[handIdx];
+    numG = 0;
+    if ( gunIdx >= 0 && gunIdx < BIND_TABLE_SIZE &&
+         s_bindPose[gunIdx] && s_bindCount[gunIdx] > 0 ) {
+        numG = s_bindCount[gunIdx];
     }
 
-    /* ---- CPU-skin hand model ---- */
-    sd = s_skinData[handIdx];
-    if ( sd ) {
-        for ( i = 0; i < sd->numSurfaces; i++ ) {
-            xmSkinSurf_t *surf = &sd->surfs[i];
-            for ( j = 0; j < surf->numVerts; j++ ) {
-                vec3_t wp, wn;
-                int    bi = surf->verts[j].boneIdx;
-                if ( bi >= 0 && bi < numH ) {
-                    const xmBone_t *b = &s_dobjWork[bi];
-                    Quat_RotVec( b->wRot, surf->verts[j].localPos,    wp );
-                    VectorAdd  ( b->wTrans, wp,                        wp );
-                    Quat_RotVec( b->wRot, surf->verts[j].localNormal,  wn );
-                } else {
-                    VectorCopy( surf->verts[j].localPos,    wp );
-                    VectorCopy( surf->verts[j].localNormal, wn );
-                }
-                VectorNormalize( wn );
-                VectorCopy( wp, surf->mdvVerts[j].xyz );
-                R_VaoPackNormal( surf->mdvVerts[j].normal, wn );
-            }
-        }
-        /* Update hand mdvTags from animated hand bones */
-        mdv = sd->mdvModel;
-        if ( mdv && mdv->numTags > 0 ) {
-            int ti = 0;
-            for ( i = 0; i < numH && ti < mdv->numTags; i++ ) {
-                if ( Q_strncmp( s_dobjWork[i].name, "tag_", 4 ) == 0 ) {
-                    VectorCopy( s_dobjWork[i].wTrans, mdv->tags[ti].origin );
-                    Quat_ToAxis( s_dobjWork[i].wRot,  mdv->tags[ti].axis   );
-                    ti++;
-                }
-            }
+    total = numH + numG;
+    if ( total > XMODEL_MAX_BONES * 2 ) {
+        total = XMODEL_MAX_BONES * 2;
+        numG = total - numH;
+        if ( numG < 0 ) {
+            numG = 0;
+            total = numH;
         }
     }
 
-    /* ---- CPU-skin gun model using combined[numH + bi] ----
-     * Gun vertex boneIdx is 0-based within the gun model.
-     * combined[numH + bi].wTrans already includes the tag_weapon world offset,
-     * so gun vertices end up in the correct position relative to the shared
-     * DObj entity origin. */
+    Com_Memcpy( s_dobjWork, s_bindPose[handIdx], sizeof(xmBone_t) * numH );
     if ( numG > 0 ) {
-        sd = s_skinData[gunIdx];
-        if ( sd ) {
-            for ( i = 0; i < sd->numSurfaces; i++ ) {
-                xmSkinSurf_t *surf = &sd->surfs[i];
-                for ( j = 0; j < surf->numVerts; j++ ) {
-                    vec3_t wp, wn;
-                    int    bi = surf->verts[j].boneIdx;
-                    if ( bi >= 0 && bi < numG ) {
-                        const xmBone_t *b = &s_dobjWork[numH + bi];
-                        Quat_RotVec( b->wRot, surf->verts[j].localPos,    wp );
-                        VectorAdd  ( b->wTrans, wp,                        wp );
-                        Quat_RotVec( b->wRot, surf->verts[j].localNormal,  wn );
-                    } else {
-                        VectorCopy( surf->verts[j].localPos,    wp );
-                        VectorCopy( surf->verts[j].localNormal, wn );
-                    }
-                    VectorNormalize( wn );
-                    VectorCopy( wp, surf->mdvVerts[j].xyz );
-                    R_VaoPackNormal( surf->mdvVerts[j].normal, wn );
-                }
+        Com_Memcpy( s_dobjWork + numH, s_bindPose[gunIdx], sizeof(xmBone_t) * numG );
+    }
+
+    {
+        static const char *attachTags[] = {
+            "tag_weapon",
+            "tag_weapon_right",
+            "tag_weapon_left",
+            "tag_head",
+            "j_head",
+            "bip01 head",
+            "bip01 neck",
+            "bip01 spine4",
+            "bip01 spine3",
+            "bip01 spine2",
+            "tag_helmet",
+            "head"
+        };
+
+        tagWeapon = R_FindBoneByNames( s_dobjWork, numH,
+                                       attachTags, (int)ARRAY_LEN( attachTags ) );
+    }
+
+    for ( i = numH; i < total; i++ ) {
+        if ( s_dobjWork[i].parent < 0 ) {
+            if ( tagWeapon >= 0 ) {
+                s_dobjWork[i].parent = tagWeapon;
             }
-            /* Update gun mdvTags */
-            mdv = sd->mdvModel;
-            if ( mdv && mdv->numTags > 0 ) {
-                int ti = 0;
-                for ( i = 0; i < numG && ti < mdv->numTags; i++ ) {
-                    if ( Q_strncmp( s_dobjWork[numH + i].name, "tag_", 4 ) == 0 ) {
-                        VectorCopy( s_dobjWork[numH + i].wTrans, mdv->tags[ti].origin );
-                        Quat_ToAxis( s_dobjWork[numH + i].wRot,  mdv->tags[ti].axis   );
-                        ti++;
-                    }
-                }
-            }
+        } else {
+            s_dobjWork[i].parent += numH;
         }
+    }
+
+    R_ComposeBlendedPose( s_dobjWork, total,
+                          legsAnimHandle, legsFrame,
+                          torsoAnimHandle, torsoFrame,
+                          torsoRootBone, s_dobjWork );
+
+    R_CachePoseForModel( handIdx, s_dobjWork, numH );
+    R_SkinAndTagModel( handIdx, s_dobjWork, numH );
+
+    if ( numG > 0 ) {
+        R_CachePoseForModel( gunIdx, s_dobjWork + numH, numG );
+        R_SkinAndTagModel( gunIdx, s_dobjWork + numH, numG );
     }
 }
 

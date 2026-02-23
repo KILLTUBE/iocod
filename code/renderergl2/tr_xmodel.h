@@ -253,11 +253,25 @@ void R_StoreXModelSkinData( qhandle_t modelHandle, xmSkinData_t *data );
  * Safe to call every frame before AddRefEntityToScene. */
 void R_UpdateXModelPose( qhandle_t modelHandle, qhandle_t animHandle, float frame );
 
+/* Evaluate independent lower/upper-body animation tracks and blend them by
+ * hierarchy from torsoRootBone (inclusive), then CPU-skin and update mdvTags. */
+void R_UpdateXModelPoseBlend( qhandle_t modelHandle,
+                              qhandle_t legsAnimHandle, float legsFrame,
+                              qhandle_t torsoAnimHandle, float torsoFrame,
+                              const char *torsoRootBone );
+
 /* DObj-equivalent: combine hand + gun into one skeleton, parent gun root to
  * tag_weapon, evaluate animation once, CPU-skin both models.
  * Render BOTH entities at the same origin/axis after calling this. */
 void R_UpdateDObjPose( qhandle_t handModel, qhandle_t gunModel,
                         qhandle_t animHandle, float frame );
+
+/* DObj-equivalent blended update: evaluate lower + upper anim tracks on the
+ * combined skeleton and blend from torsoRootBone before skinning both models. */
+void R_UpdateDObjPoseBlend( qhandle_t handModel, qhandle_t gunModel,
+                            qhandle_t legsAnimHandle, float legsFrame,
+                            qhandle_t torsoAnimHandle, float torsoFrame,
+                            const char *torsoRootBone );
 
 /* Look up a bone by name in the current animated pose (or bind-pose fallback)
  * and return its world-space orientation.  Returns 1 if found, 0 otherwise. */

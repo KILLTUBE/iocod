@@ -1720,11 +1720,21 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 		extern int       R_XAnimFramerate  ( qhandle_t h );
 		extern void      R_UpdateXModelPose( qhandle_t model, qhandle_t anim, float frame );
 		extern void      R_UpdateDObjPose  ( qhandle_t hand, qhandle_t gun, qhandle_t anim, float frame );
+		extern void      R_UpdateXModelPoseBlend( qhandle_t model,
+		                                           qhandle_t legsAnim, float legsFrame,
+		                                           qhandle_t torsoAnim, float torsoFrame,
+		                                           const char *torsoRootBone );
+		extern void      R_UpdateDObjPoseBlend( qhandle_t hand, qhandle_t gun,
+		                                        qhandle_t legsAnim, float legsFrame,
+		                                        qhandle_t torsoAnim, float torsoFrame,
+		                                        const char *torsoRootBone );
 		re.RegisterXAnim    = R_RegisterXAnim;
 		re.XAnimNumFrames   = R_XAnimNumFrames;
 		re.XAnimFramerate   = R_XAnimFramerate;
 		re.UpdateXModelPose = R_UpdateXModelPose;
 		re.UpdateDObjPose   = R_UpdateDObjPose;
+		re.UpdateXModelPoseBlend = R_UpdateXModelPoseBlend;
+		re.UpdateDObjPoseBlend = R_UpdateDObjPoseBlend;
 	}
 
 	return &re;
