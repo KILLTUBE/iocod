@@ -647,6 +647,215 @@ static void CG_DrawStatusBar( void ) {
 /*
 ===========================================================================================
 
+  COD1 HUD
+
+  Positions match ui_mp/hud.menu (640x480 virtual space).
+  Health menu:      rect 488 460 0 0
+  Weaponinfo menu:  rect 0 420.375 640 40
+  Stance menu:      rect 100 434.375 40 40
+  Compass menu:     rect -25 345 160 160  (COMPASS_X/Y/SIZE from menudef.h)
+
+===========================================================================================
+*/
+#ifdef STANDALONE
+
+/* Draw a string centred inside rect (x,y,w,h) using the CoD1 HUD font. */
+static void CG_DrawCod1String( float x, float y, float w, float h, const char *s, vec4_t color ) {
+	if ( !cgs.hudFont.glyphScale )
+		return;
+
+	trap_R_SetColor( color );
+
+	/* measure total pixel width to centre-align */
+	float total = 0;
+	const char *p = s;
+	while ( *p ) {
+		int c = (unsigned char)*p++;
+		total += cgs.hudFont.glyphs[c].xSkip;
+	}
+
+	float scale_h = h / 16.0f;
+	float cx = x + ( w - total * scale_h ) * 0.5f;
+	float cy = y;
+
+	p = s;
+	while ( *p ) {
+		int c = (unsigned char)*p++;
+		glyphInfo_t *g = &cgs.hudFont.glyphs[c];
+		if ( g->glyph && g->imageHeight > 0 ) {
+			float gw = g->imageWidth  * scale_h;
+			float gh = g->imageHeight * scale_h;
+			float yo = (12 - g->top) * scale_h;
+			float ax = cx, ay = cy + yo, aw = gw, ah = gh;
+			CG_AdjustFrom640( &ax, &ay, &aw, &ah );
+			trap_R_DrawStretchPic( ax, ay, aw, ah,
+			                       g->s, g->t, g->s2, g->t2, g->glyph );
+		}
+		cx += g->xSkip * scale_h;
+	}
+	trap_R_SetColor( NULL );
+}
+
+/* Draw a scalar-clipped horizontal bar (used for health fill). */
+static void CG_DrawCod1Bar( float x, float y, float w, float h,
+                            float frac, vec4_t color, qhandle_t shader ) {
+	if ( frac <= 0 )
+		return;
+	if ( frac > 1 )
+		frac = 1;
+
+	float ax = x, ay = y, aw = w * frac, ah = h;
+	CG_AdjustFrom640( &ax, &ay, &aw, &ah );
+	trap_R_SetColor( color );
+	trap_R_DrawStretchPic( ax, ay, aw, ah, 0, 0, frac, 1, shader );
+	trap_R_SetColor( NULL );
+}
+
+static void CG_DrawCod1Hud( void ) {
+	playerState_t *ps = &cg.snap->ps;
+
+	/* --- HEALTH --- */
+	/* hud.menu Health: menuRect (488,460)
+	   back:  item rect (13,0,130,12)   → absolute (501,460,130,12)
+	   bar:   item rect (14,1,128,10)   → absolute (502,461,128,10)
+	   cross: item rect (0,0,12,12)     → absolute (488,460,12,12)  */
+	{
+		vec4_t white = { 1, 1, 1, 1 };
+		vec4_t orange = { 0.7f, 0.4f, 0.0f, 1.0f };
+
+		float menuX = 488, menuY = 460;
+
+		/* health cross (red-cross icon, top-left of the group) */
+		if ( cgs.cod1HealthCross ) {
+			float ax=menuX+0, ay=menuY+0, aw=12, ah=12;
+			CG_AdjustFrom640(&ax,&ay,&aw,&ah);
+			trap_R_SetColor(white);
+			trap_R_DrawStretchPic(ax,ay,aw,ah, 0,0,1,1, cgs.cod1HealthCross);
+			trap_R_SetColor(NULL);
+		}
+
+		/* health background bar */
+		if ( cgs.cod1HealthBack ) {
+			float ax=menuX+13, ay=menuY+0, aw=130, ah=12;
+			CG_AdjustFrom640(&ax,&ay,&aw,&ah);
+			trap_R_SetColor(white);
+			trap_R_DrawStretchPic(ax,ay,aw,ah, 0,0,1,1, cgs.cod1HealthBack);
+			trap_R_SetColor(NULL);
+		}
+
+		/* health fill bar, clipped to current health */
+		if ( cgs.cod1HealthBar ) {
+			int hp = ps->stats[STAT_HEALTH];
+			if ( hp < 0 ) hp = 0;
+			if ( hp > 100 ) hp = 100;
+			CG_DrawCod1Bar( menuX+14, menuY+1, 128, 10,
+			                hp / 100.0f, orange, cgs.cod1HealthBar );
+		}
+	}
+
+	/* --- WEAPON INFO --- */
+	/* hud.menu weaponinfo: menuRect (0, 420.375, 640, 40)
+	   weapon name back: sub (242.5,10.625,320,20) → abs (242.5,431,320,20)
+	   ammo back:        sub (557.5,1.25,80,40)    → abs (557.5,421.625,80,40)
+	   ammo text:        sub (570,24.25,55,40)      → abs (570,444.625,55,40) */
+	{
+		vec4_t white = { 1, 1, 1, 1 };
+		float menuY = 420.375f;
+
+		if ( cgs.cod1WeaponNameBack ) {
+			float ax=242.5f, ay=menuY+10.625f, aw=320, ah=20;
+			CG_AdjustFrom640(&ax,&ay,&aw,&ah);
+			trap_R_SetColor(white);
+			trap_R_DrawStretchPic(ax,ay,aw,ah, 0,0,1,1, cgs.cod1WeaponNameBack);
+			trap_R_SetColor(NULL);
+		}
+
+		if ( cgs.cod1AmmoBack ) {
+			float ax=557.5f, ay=menuY+1.25f, aw=80, ah=40;
+			CG_AdjustFrom640(&ax,&ay,&aw,&ah);
+			trap_R_SetColor(white);
+			trap_R_DrawStretchPic(ax,ay,aw,ah, 0,0,1,1, cgs.cod1AmmoBack);
+			trap_R_SetColor(NULL);
+		}
+
+		/* ammo value */
+		{
+			int ammo = ps->ammo[ps->weapon];
+			char buf[8];
+			Com_sprintf( buf, sizeof(buf), "%i", ammo );
+			vec4_t col = { 1, 1, 1, 1 };
+			CG_DrawCod1String( 570, menuY+24.25f, 55, 16, buf, col );
+		}
+	}
+
+	/* --- STANCE --- */
+	/* hud.menu stance: menuRect (100, 434.375, 40, 40) */
+	{
+		vec4_t white = { 1, 1, 1, 1 };
+		qhandle_t stanceShader;
+		if ( ps->pm_flags & PMF_DUCKED )
+			stanceShader = cgs.cod1StanceCrouch;
+		else
+			stanceShader = cgs.cod1StanceStand;
+
+		if ( stanceShader ) {
+			float ax=100, ay=434.375f, aw=40, ah=40;
+			CG_AdjustFrom640(&ax,&ay,&aw,&ah);
+			trap_R_SetColor(white);
+			trap_R_DrawStretchPic(ax,ay,aw,ah, 0,0,1,1, stanceShader);
+			trap_R_SetColor(NULL);
+		}
+	}
+
+	/* --- COMPASS --- */
+	/* hud.menu Compass: COMPASS_X=-25, COMPASS_Y=345, COMPASS_SIZE=160
+	   Clamp x to 0 so the compass is fully visible. */
+	{
+		vec4_t white = { 1, 1, 1, 1 };
+		float cx = 0, cy = 345, cs = 160;
+
+		/* compass background */
+		if ( cgs.cod1CompassBack ) {
+			float ax=cx, ay=cy, aw=cs, ah=cs;
+			CG_AdjustFrom640(&ax,&ay,&aw,&ah);
+			trap_R_SetColor(white);
+			trap_R_DrawStretchPic(ax,ay,aw,ah, 0,0,1,1, cgs.cod1CompassBack);
+			trap_R_SetColor(NULL);
+		}
+
+		/* compass face (rotates with yaw — drawn static for now) */
+		if ( cgs.cod1CompassFace ) {
+			float ax=cx, ay=cy, aw=cs, ah=cs;
+			CG_AdjustFrom640(&ax,&ay,&aw,&ah);
+			trap_R_SetColor(white);
+			trap_R_DrawStretchPic(ax,ay,aw,ah, 0,0,1,1, cgs.cod1CompassFace);
+			trap_R_SetColor(NULL);
+		}
+
+		/* compass highlight overlay */
+		if ( cgs.cod1CompassHL ) {
+			float ax=cx, ay=cy, aw=cs, ah=cs;
+			CG_AdjustFrom640(&ax,&ay,&aw,&ah);
+			trap_R_SetColor(white);
+			trap_R_DrawStretchPic(ax,ay,aw,ah, 0,0,1,1, cgs.cod1CompassHL);
+			trap_R_SetColor(NULL);
+		}
+
+		/* compass needle (COMPASS_NEEDLE_XOFF=60,YOFF=50,W=40,H=40) */
+		if ( cgs.cod1CompassArrow ) {
+			float ax=cx+60, ay=cy+50, aw=40, ah=40;
+			CG_AdjustFrom640(&ax,&ay,&aw,&ah);
+			trap_R_SetColor(white);
+			trap_R_DrawStretchPic(ax,ay,aw,ah, 0,0,1,1, cgs.cod1CompassArrow);
+			trap_R_SetColor(NULL);
+		}
+	}
+}
+#endif /* STANDALONE */
+
+/*
+===========================================================================================
+
   UPPER RIGHT CORNER
 
 ===========================================================================================
@@ -2556,7 +2765,9 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 		// don't draw any status if dead or the scoreboard is being explicitly shown
 		if ( !cg.showScores && cg.snap->ps.stats[STAT_HEALTH] > 0 ) {
 
-#ifdef MISSIONPACK
+#ifdef STANDALONE
+			CG_DrawCod1Hud();
+#elif defined(MISSIONPACK)
 			if ( cg_drawStatus.integer ) {
 				Menu_PaintAll();
 				CG_DrawTimedMenus();
@@ -2595,7 +2806,10 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 
 	CG_DrawLagometer();
 
-#ifdef MISSIONPACK
+#ifdef STANDALONE
+	/* suppress Q3-specific corner info; FPS/timer still useful */
+	CG_DrawUpperRight(stereoFrame);
+#elif defined(MISSIONPACK)
 	if (!cg_paused.integer) {
 		CG_DrawUpperRight(stereoFrame);
 	}
@@ -2604,8 +2818,10 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 #endif
 
 #ifndef MISSIONPACK
+#ifndef STANDALONE
 	CG_DrawLowerRight();
 	CG_DrawLowerLeft();
+#endif
 #endif
 
 	if ( !CG_DrawFollow() ) {

@@ -1075,6 +1075,20 @@ typedef struct {
 
 #ifdef STANDALONE
 	fontInfo_t	hudFont;		/* CoD1 font used for HUD text */
+
+	/* CoD1 HUD image assets */
+	qhandle_t	cod1HealthBack;		/* gfx/hud/hud@health_back  */
+	qhandle_t	cod1HealthBar;		/* gfx/hud/hud@health_bar   */
+	qhandle_t	cod1HealthCross;	/* gfx/hud/hud@health_cross */
+	qhandle_t	cod1AmmoBack;		/* gfx/hud/hud@ammocounterback */
+	qhandle_t	cod1WeaponNameBack;	/* gfx/hud/hud@weaponnameback  */
+	qhandle_t	cod1StanceStand;	/* gfx/hud/stance_stand     */
+	qhandle_t	cod1StanceCrouch;	/* gfx/hud/stance_crouch    */
+	qhandle_t	cod1StanceProne;	/* gfx/hud/stance_prone     */
+	qhandle_t	cod1CompassBack;	/* gfx/hud/hud@compassback  */
+	qhandle_t	cod1CompassFace;	/* gfx/hud/hud@compassface  */
+	qhandle_t	cod1CompassHL;		/* gfx/hud/hud@compasshighlight */
+	qhandle_t	cod1CompassArrow;	/* gfx/hud/hud@compass_arrow    */
 #endif
 
 } cgs_t;

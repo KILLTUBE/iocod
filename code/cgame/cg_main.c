@@ -1869,6 +1869,20 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 	// Load CoD1 font for HUD text
 	Com_Memset( &cgs.hudFont, 0, sizeof( cgs.hudFont ) );
 	trap_R_RegisterFont( "fonts/fontImage", 16, &cgs.hudFont );
+
+	// CoD1 HUD image assets
+	cgs.cod1HealthBack     = trap_R_RegisterShaderNoMip( "gfx/hud/hud@health_back" );
+	cgs.cod1HealthBar      = trap_R_RegisterShaderNoMip( "gfx/hud/hud@health_bar" );
+	cgs.cod1HealthCross    = trap_R_RegisterShaderNoMip( "gfx/hud/hud@health_cross" );
+	cgs.cod1AmmoBack       = trap_R_RegisterShaderNoMip( "gfx/hud/hud@ammocounterback" );
+	cgs.cod1WeaponNameBack = trap_R_RegisterShaderNoMip( "gfx/hud/hud@weaponnameback" );
+	cgs.cod1StanceStand    = trap_R_RegisterShaderNoMip( "gfx/hud/stance_stand" );
+	cgs.cod1StanceCrouch   = trap_R_RegisterShaderNoMip( "gfx/hud/stance_crouch" );
+	cgs.cod1StanceProne    = trap_R_RegisterShaderNoMip( "gfx/hud/stance_prone" );
+	cgs.cod1CompassBack    = trap_R_RegisterShaderNoMip( "gfx/hud/hud@compassback" );
+	cgs.cod1CompassFace    = trap_R_RegisterShaderNoMip( "gfx/hud/hud@compassface" );
+	cgs.cod1CompassHL      = trap_R_RegisterShaderNoMip( "gfx/hud/hud@compasshighlight" );
+	cgs.cod1CompassArrow   = trap_R_RegisterShaderNoMip( "gfx/hud/hud@compass_arrow" );
 #endif
 
 	CG_RegisterCvars();
