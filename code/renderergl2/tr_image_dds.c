@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
 #include "../renderercommon/tr_common.h"
+#include "../renderercommon/qgl.h"
 
 typedef unsigned int   ui32_t;
 
@@ -211,6 +212,237 @@ typedef enum DXGI_FORMAT {
                          (((ui32_t)((x)[1])) << 8 ) | \
                          (((ui32_t)((x)[2])) << 16) | \
                          (((ui32_t)((x)[3])) << 24) )
+
+// DXT decompression for OpenGL ES/WebGL (no S3TC support)
+static void DXTDecodeRGB565(uint16_t color, byte *rgba)
+{
+	// RGB565: rrrrrgggggbbbbb
+	int r = (color >> 11) & 0x1F;
+	int g = (color >> 5) & 0x3F;
+	int b = color & 0x1F;
+
+	// Expand to 8-bit
+	rgba[0] = (byte)((r << 3) | (r >> 2));
+	rgba[1] = (byte)((g << 2) | (g >> 4));
+	rgba[2] = (byte)((b << 3) | (b >> 2));
+	rgba[3] = 255;
+}
+
+static void DXTBlendColors(uint16_t c0, uint16_t c1, int code, byte *out)
+{
+	byte rgba0[4], rgba1[4];
+	DXTDecodeRGB565(c0, rgba0);
+	DXTDecodeRGB565(c1, rgba1);
+
+	if (code == 0)
+	{
+		out[0] = rgba0[0]; out[1] = rgba0[1]; out[2] = rgba0[2]; out[3] = rgba0[3];
+	}
+	else if (code == 1)
+	{
+		out[0] = rgba1[0]; out[1] = rgba1[1]; out[2] = rgba1[2]; out[3] = rgba1[3];
+	}
+	else if (c0 > c1)
+	{
+		// DXT1: 2/3 and 1/3 blends
+		int frac = (code == 2) ? 2 : 1;
+		out[0] = (byte)((rgba0[0] * 2 + rgba1[0]) / 3);
+		out[1] = (byte)((rgba0[1] * 2 + rgba1[1]) / 3);
+		out[2] = (byte)((rgba0[2] * 2 + rgba1[2]) / 3);
+		out[3] = 255;
+	}
+	else
+	{
+		// DXT1: 1/2 blend, then transparent
+		if (code == 2)
+		{
+			out[0] = (byte)((rgba0[0] + rgba1[0]) / 2);
+			out[1] = (byte)((rgba0[1] + rgba1[1]) / 2);
+			out[2] = (byte)((rgba0[2] + rgba1[2]) / 2);
+			out[3] = 255;
+		}
+		else
+		{
+			out[0] = out[1] = out[2] = out[3] = 0;  // Transparent
+		}
+	}
+}
+
+static void DXTInterpolateColor(uint16_t c0, uint16_t c1, int code, byte *out)
+{
+	byte rgba0[4], rgba1[4];
+	DXTDecodeRGB565(c0, rgba0);
+	DXTDecodeRGB565(c1, rgba1);
+
+	if (code == 0)
+	{
+		out[0] = rgba0[0]; out[1] = rgba0[1]; out[2] = rgba0[2];
+	}
+	else if (code == 1)
+	{
+		out[0] = rgba1[0]; out[1] = rgba1[1]; out[2] = rgba1[2];
+	}
+	else if (code == 2)
+	{
+		// (2/3)*c0 + (1/3)*c1
+		out[0] = (byte)((rgba0[0] * 2 + rgba1[0]) / 3);
+		out[1] = (byte)((rgba0[1] * 2 + rgba1[1]) / 3);
+		out[2] = (byte)((rgba0[2] * 2 + rgba1[2]) / 3);
+	}
+	else // code == 3
+	{
+		// (1/3)*c0 + (2/3)*c1
+		out[0] = (byte)((rgba0[0] + rgba1[0] * 2) / 3);
+		out[1] = (byte)((rgba0[1] + rgba1[1] * 2) / 3);
+		out[2] = (byte)((rgba0[2] + rgba1[2] * 2) / 3);
+	}
+}
+
+static void DXT1DecompressBlock(const byte *block, int bx, int by, int width, int height, byte *out)
+{
+	uint16_t c0 = block[0] | (block[1] << 8);
+	uint16_t c1 = block[2] | (block[3] << 8);
+	uint32_t indices = block[4] | (block[5] << 8) | (block[6] << 16) | (block[7] << 24);
+	qboolean transparent = (c0 <= c1);
+
+	for (int y = 0; y < 4 && (by + y) < height; y++)
+	{
+		for (int x = 0; x < 4 && (bx + x) < width; x++)
+		{
+			int i = y * 4 + x;
+			int idx = (indices >> (2 * i)) & 0x03;
+			byte *pixel = out + ((by + y) * width + (bx + x)) * 4;
+
+			if (transparent && idx == 3)
+			{
+				pixel[0] = pixel[1] = pixel[2] = pixel[3] = 0;
+			}
+			else
+			{
+				// Adjust index for transparent mode
+				int code = idx;
+				if (transparent && idx == 2)
+					code = 3;  // 1/2 blend
+				else if (transparent && idx == 3)
+					code = 2;  // shouldn't happen (transparent case handled above)
+
+				if (code <= 1)
+				{
+					byte rgba[4];
+					DXTDecodeRGB565(code == 0 ? c0 : c1, rgba);
+					pixel[0] = rgba[0]; pixel[1] = rgba[1];
+					pixel[2] = rgba[2]; pixel[3] = 255;
+				}
+				else
+				{
+					DXTInterpolateColor(c0, c1, code, pixel);
+					pixel[3] = 255;
+				}
+			}
+		}
+	}
+}
+
+static void DXT5DecompressBlock(const byte *block, int bx, int by, int width, int height, byte *out)
+{
+	uint16_t c0 = block[8] | (block[9] << 8);
+	uint16_t c1 = block[10] | (block[11] << 8);
+	uint32_t indices = block[12] | (block[13] << 8) | (block[14] << 16) | (block[15] << 24);
+
+	// Alpha: a0, a1 then 48 bits of indices (3 bits per pixel)
+	byte a0 = block[0];
+	byte a1 = block[1];
+	uint64_t alphaIndices = ((uint64_t)block[2]) | ((uint64_t)block[3] << 8) |
+	                        ((uint64_t)block[4] << 16) | ((uint64_t)block[5] << 24) |
+	                        ((uint64_t)block[6] << 32) | ((uint64_t)block[7] << 40);
+	qboolean alpha4 = (a0 <= a1);
+
+	for (int y = 0; y < 4 && (by + y) < height; y++)
+	{
+		for (int x = 0; x < 4 && (bx + x) < width; x++)
+		{
+			int i = y * 4 + x;
+			byte *pixel = out + ((by + y) * width + (bx + x)) * 4;
+
+			// Decode alpha
+			int alphaIdx = (alphaIndices >> (3 * i)) & 0x07;
+			if (alpha4)
+			{
+				// 4-alpha mode: a0, a1, 6 interpolated, 0, 255
+				if (alphaIdx == 0) pixel[3] = a0;
+				else if (alphaIdx == 1) pixel[3] = a1;
+				else if (alphaIdx == 6) pixel[3] = 0;
+				else if (alphaIdx == 7) pixel[3] = 255;
+				else
+				{
+					int w = alphaIdx - 2;
+					pixel[3] = (byte)((a0 * (6-w) + a1 * w) / 7);
+				}
+			}
+			else
+			{
+				// 8-alpha mode: a0, a1, 6 interpolated
+				pixel[3] = (byte)((a0 * (8-alphaIdx) + a1 * alphaIdx) / 8);
+			}
+
+			// Decode color (same interpolation for DXT3 and DXT5)
+			int colorIdx = (indices >> (2 * i)) & 0x03;
+			DXTInterpolateColor(c0, c1, colorIdx, pixel);
+		}
+	}
+}
+
+// DXT3 uses explicit 4-bit alpha per pixel
+static void DXT3DecompressBlock(const byte *block, int bx, int by, int width, int height, byte *out)
+{
+	uint16_t c0 = block[8] | (block[9] << 8);
+	uint16_t c1 = block[10] | (block[11] << 8);
+	uint32_t indices = block[12] | (block[13] << 8) | (block[14] << 16) | (block[15] << 24);
+
+	// DXT3 alpha is 4 bits per pixel in first 8 bytes, stored low-to-high
+	for (int y = 0; y < 4 && (by + y) < height; y++)
+	{
+		for (int x = 0; x < 4 && (bx + x) < width; x++)
+		{
+			int i = y * 4 + x;
+			byte *pixel = out + ((by + y) * width + (bx + x)) * 4;
+
+			// Alpha: 4 bits per pixel, little endian
+			int alphaWord = i / 2;
+			int alphaShift = (i % 2) * 4;
+			pixel[3] = (byte)(((block[alphaWord] >> alphaShift) & 0x0F) * 17); // 4-bit to 8-bit
+
+			// Decode color (same interpolation for DXT3 and DXT5)
+			int colorIdx = (indices >> (2 * i)) & 0x03;
+			DXTInterpolateColor(c0, c1, colorIdx, pixel);
+		}
+	}
+}
+
+static byte *DXTDecompress(const byte *compressed, int width, int height, GLenum format, int *outSize)
+{
+	int blockSize = (format == GL_COMPRESSED_RGB_S3TC_DXT1_EXT) ? 8 : 16;
+	int numBlocks = ((width + 3) / 4) * ((height + 3) / 4);
+	byte *rgba = ri.Malloc(width * height * 4);
+	*outSize = width * height * 4;
+
+	const byte *src = compressed;
+	for (int by = 0; by < height; by += 4)
+	{
+		for (int bx = 0; bx < width; bx += 4)
+		{
+			if (format == GL_COMPRESSED_RGB_S3TC_DXT1_EXT)
+				DXT1DecompressBlock(src, bx, by, width, height, rgba);
+			else if (format == GL_COMPRESSED_RGBA_S3TC_DXT3_EXT)
+				DXT3DecompressBlock(src, bx, by, width, height, rgba);
+			else // DXT5
+				DXT5DecompressBlock(src, bx, by, width, height, rgba);
+			src += blockSize;
+		}
+	}
+
+	return rgba;
+}
 
 
 void R_LoadDDS ( const char *filename, byte **pic, int *width, int *height, GLenum *picFormat, int *numMips )
@@ -443,6 +675,33 @@ void R_LoadDDS ( const char *filename, byte **pic, int *width, int *height, GLen
 			ri.Printf(PRINT_ALL, "DDS File %s has unsupported RGBA format.", filename);
 			ri.FS_FreeFile(buffer.v);
 			return;
+		}
+	}
+
+	// For OpenGL ES/WebGL, decompress DXT textures since S3TC isn't supported
+	if (qglesMajorVersion > 0)
+	{
+		qboolean isDXT = (*picFormat == GL_COMPRESSED_RGB_S3TC_DXT1_EXT ||
+		                   *picFormat == GL_COMPRESSED_RGBA_S3TC_DXT3_EXT ||
+		                   *picFormat == GL_COMPRESSED_RGBA_S3TC_DXT5_EXT ||
+		                   *picFormat == GL_COMPRESSED_SRGB_S3TC_DXT1_EXT ||
+		                   *picFormat == GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT ||
+		                   *picFormat == GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT);
+
+		if (isDXT)
+		{
+			int decompressedSize;
+			byte *decompressed = DXTDecompress(data, ddsHeader->width, ddsHeader->height, *picFormat, &decompressedSize);
+			if (decompressed)
+			{
+				*pic = decompressed;
+				*picFormat = GL_RGBA8;
+				// For decompressed textures, only load the base mip
+				if (numMips)
+					*numMips = 1;
+				ri.FS_FreeFile(buffer.v);
+				return;
+			}
 		}
 	}
 
