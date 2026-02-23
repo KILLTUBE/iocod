@@ -2660,3 +2660,13 @@ void CG_DrawActive( stereoFrame_t stereoView ) {
  	CG_Draw2D(stereoView);
 }
 
+/*
+=====================
+CG_Draw2DOnly
+
+Allows the engine to redraw HUD/UI overlays without re-rendering the 3D scene.
+=====================
+*/
+void CG_Draw2DOnly( stereoFrame_t stereoView ) {
+	CG_Draw2D( stereoView );
+}

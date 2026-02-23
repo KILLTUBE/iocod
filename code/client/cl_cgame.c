@@ -799,8 +799,15 @@ void CL_CGameRendering( stereoFrame_t stereo ) {
 	VM_Call( cgvm, CG_DRAW_ACTIVE_FRAME, cl.serverTime, stereo, clc.demoplaying );
 	VM_Debug( 0 );
 #ifdef STANDALONE
-	/* Draw CoD1 viewmodel on top of the cgame scene */
-	CL_DrawViewModel( stereo );
+	/*
+	 * Optional CoD1 client-side viewmodel path.
+	 * After drawing it, redraw cgame 2D so HUD remains above the weapon.
+	 */
+	if ( Cvar_VariableIntegerValue( "cl_drawGunPostHud" ) ) {
+		CL_DrawViewModel( stereo );
+		VM_Call( cgvm, CG_DRAW_2D_ONLY, stereo );
+		VM_Debug( 0 );
+	}
 #endif
 }
 
@@ -1084,6 +1091,4 @@ void CL_SetCGameTime( void ) {
 	}
 
 }
-
-
 

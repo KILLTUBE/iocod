@@ -218,8 +218,12 @@ typedef enum {
 
 	CG_DRAW_ACTIVE_FRAME,
 //	void (*CG_DrawActiveFrame)( int serverTime, stereoFrame_t stereoView, qboolean demoPlayback );
-	// Generates and draws a game scene and status information at the given time.
-	// If demoPlayback is set, local movement prediction will not be enabled
+		// Generates and draws a game scene and status information at the given time.
+		// If demoPlayback is set, local movement prediction will not be enabled
+
+	CG_DRAW_2D_ONLY,
+//	void (*CG_Draw2DOnly)( stereoFrame_t stereoView );
+		// Draws only HUD/2D overlays for the current frame.
 
 	CG_CROSSHAIR_PLAYER,
 //	int (*CG_CrosshairPlayer)( void );

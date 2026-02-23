@@ -421,6 +421,8 @@ void CL_WeaponCod1_Init( void )
     cl_startWeapon = Cvar_Get( "cl_startWeapon", "mp44_mp", CVAR_ARCHIVE );
     cl_gunFov      = Cvar_Get( "cl_gunFov",      "65",      CVAR_ARCHIVE );
     cl_drawGun     = Cvar_Get( "cl_drawGun",     "1",       CVAR_ARCHIVE );
+    /* 1 = enable CoD1 client-side viewmodel pass (HUD is redrawn over it) */
+    (void)Cvar_Get( "cl_drawGunPostHud", "1", CVAR_ARCHIVE );
     cl_animDebug   = Cvar_Get( "cl_animDebug",   "0",       CVAR_TEMP   );
     cl_gunX        = Cvar_Get( "cl_gunX",        "0",       CVAR_ARCHIVE );
     cl_gunY        = Cvar_Get( "cl_gunY",        "0",       CVAR_ARCHIVE );

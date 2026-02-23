@@ -1541,13 +1541,16 @@ void CG_OwnerDraw(float x, float y, float w, float h, float text_x, float text_y
 			playerState_t *ps = &cg.snap->ps;
 			char num[16];
 			int value, tw;
+			float tx, ty;
 			if ( cent->currentState.weapon ) {
 				value = ps->ammo[cent->currentState.weapon];
 				if ( value > -1 ) {
 					Com_sprintf( num, sizeof(num), "%i", value );
 					tw = CG_Text_Width( num, scale, 0 );
-					/* CoD1 ammo text sits toward the right side of the ammo box. */
-					CG_Text_Paint( x + w - tw - 2, y + h, scale, color, num, 0, 0, textStyle );
+					/* CoD1 ammo text sits slightly above the bottom and inset from the right edge. */
+					tx = x + w - tw - 6;
+					ty = y + h * 0.78f;
+					CG_Text_Paint( tx, ty, scale, color, num, 0, 0, textStyle );
 				}
 			}
 			return;
@@ -1793,11 +1796,13 @@ void CG_OwnerDraw(float x, float y, float w, float h, float text_x, float text_y
 	    int wp = cg.snap->ps.weapon;
 	    const char *wname = "";
 		int tw;
+		float ty;
 	    if ( wp > 0 && wp < MAX_WEAPONS && cg_weapons[wp].item )
 	      wname = cg_weapons[wp].item->pickup_name;
 	    if ( *wname ) {
 			tw = CG_Text_Width( wname, scale, 0 );
-	      CG_Text_Paint( x + (w - tw) * 0.5f, y + h, scale, color, wname, 0, 0, textStyle );
+			ty = y + h * 0.80f;
+	      CG_Text_Paint( x + (w - tw) * 0.5f, ty, scale, color, wname, 0, 0, textStyle );
 		}
 	    break;
 	  }
