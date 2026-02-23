@@ -567,6 +567,30 @@ int R_XAnimFramerate( qhandle_t h )
 /* Static work buffer — avoids per-frame allocation; safe for single-threaded use */
 static xmBone_t s_dobjWork[ XMODEL_MAX_BONES * 2 ];
 
+static int R_FindBoneByNames( const xmBone_t *bones, int numBones,
+                              const char *const *names, int numNames )
+{
+    int i, n;
+
+    if ( !bones || numBones <= 0 || !names || numNames <= 0 ) {
+        return -1;
+    }
+
+    for ( n = 0; n < numNames; ++n ) {
+        if ( !names[n] || !names[n][0] ) {
+            continue;
+        }
+
+        for ( i = 0; i < numBones; ++i ) {
+            if ( !Q_stricmp( bones[i].name, names[n] ) ) {
+                return i;
+            }
+        }
+    }
+
+    return -1;
+}
+
 void R_UpdateDObjPose( qhandle_t handModel, qhandle_t gunModel,
                         qhandle_t animHandle, float frame )
 {
@@ -595,19 +619,36 @@ void R_UpdateDObjPose( qhandle_t handModel, qhandle_t gunModel,
     if ( numG > 0 )
         Com_Memcpy( s_dobjWork + numH, s_bindPose[gunIdx],  sizeof(xmBone_t) * numG );
 
-    /* Find tag_weapon in hand portion */
-    for ( i = 0; i < numH; i++ ) {
-        if ( !Q_stricmp( s_dobjWork[i].name, "tag_weapon" ) ) {
-            tagWeapon = i;
-            break;
-        }
+    {
+        /* Keep weapon behavior first ("tag_weapon"), then support
+         * character-style merge points for body/head composition. */
+        static const char *attachTags[] = {
+            "tag_weapon",
+            "tag_weapon_right",
+            "tag_weapon_left",
+            "tag_head",
+            "j_head",
+            "bip01 head",
+            "bip01 neck",
+            "bip01 spine4",
+            "bip01 spine3",
+            "bip01 spine2",
+            "tag_helmet",
+            "head"
+        };
+
+        tagWeapon = R_FindBoneByNames( s_dobjWork, numH,
+                                       attachTags, (int)ARRAY_LEN( attachTags ) );
     }
 
     /* Remap gun bone parent indices into combined-array space;
      * parent gun root bones to tag_weapon so the animation chain is correct */
     for ( i = numH; i < total; i++ ) {
-        if ( s_dobjWork[i].parent < 0 )
-            s_dobjWork[i].parent = tagWeapon;   /* -1 keeps root if no tag_weapon */
+        if ( s_dobjWork[i].parent < 0 ) {
+            if ( tagWeapon >= 0 ) {
+                s_dobjWork[i].parent = tagWeapon;   /* keep -1 if no attach point */
+            }
+        }
         else
             s_dobjWork[i].parent += numH;
     }
@@ -751,67 +792,72 @@ void R_EvalXAnimBones( qhandle_t animHandle, float fframe,
     for ( i = 0; i < anim->numParts; i++ ) {
         const xaPartAnim_t *part = &anim->parts[i];
 
-        /* Find bone by name */
-        int boneIdx = -1;
+        int matches = 0;
+
+        /* Apply to all matching bones.
+         * Combined DObj-style meshes can legitimately contain duplicate
+         * part names (e.g. body + head chains). */
         for ( j = 0; j < numBones; j++ ) {
-            if ( !Q_stricmp( inOutBones[j].name, part->partName ) ) {
-                boneIdx = j;
-                matchedBones++;
-                break;
+            if ( Q_stricmp( inOutBones[j].name, part->partName ) ) {
+                continue;
+            }
+
+            matches++;
+            matchedBones++;
+
+            /* ---- Rotation ---- */
+            if ( part->rotTrack.numKeys > 0 ) {
+                int ki = FindKeyBefore( part->rotTrack.frames,
+                                        part->rotTrack.numKeys, frame );
+                if ( ki >= 0 ) {
+                    /* Interpolate with next keyframe when possible */
+                    int next = ki + 1;
+                    if ( t > 0.0f && next < part->rotTrack.numKeys ) {
+                        int   fn = part->rotTrack.frames[next];
+                        int   f0 = part->rotTrack.frames[ki];
+                        float dt = ( fn > f0 )
+                            ? (float)( frame - f0 ) / (float)( fn - f0 ) + t / (float)( fn - f0 )
+                            : t;
+                        if ( dt > 1.0f ) dt = 1.0f;
+                        Quat_Slerp( part->rotTrack.rots[ki],
+                                    part->rotTrack.rots[next],
+                                    dt, inOutBones[j].lRot );
+                    } else {
+                        Vector4Copy( part->rotTrack.rots[ki], inOutBones[j].lRot );
+                    }
+                }
+            }
+
+            /* ---- Translation ---- */
+            if ( part->transTrack.numKeys > 0 ) {
+                int ki = FindKeyBefore( part->transTrack.frames,
+                                        part->transTrack.numKeys, frame );
+                if ( ki >= 0 ) {
+                    int next = ki + 1;
+                    if ( t > 0.0f && next < part->transTrack.numKeys ) {
+                        int   fn = part->transTrack.frames[next];
+                        int   f0 = part->transTrack.frames[ki];
+                        float dt = ( fn > f0 )
+                            ? (float)( frame - f0 ) / (float)( fn - f0 ) + t / (float)( fn - f0 )
+                            : t;
+                        if ( dt > 1.0f ) dt = 1.0f;
+                        VectorLerp( part->transTrack.trans[ki],
+                                    part->transTrack.trans[next],
+                                    dt, inOutBones[j].lTrans );
+                    } else {
+                        VectorCopy( part->transTrack.trans[ki],
+                                    inOutBones[j].lTrans );
+                    }
+                }
             }
         }
-        if ( boneIdx < 0 ) {
+
+        if ( matches <= 0 ) {
             /* Bone in animation but not in model - log it */
             if ( ri.Cvar_Get( "xanim_debug", "0", 0 )->integer >= 2 ) {
                 ri.Printf( PRINT_ALL, "  unmatched anim bone: %s\n", part->partName );
             }
             continue;
-        }
-
-        /* ---- Rotation ---- */
-        if ( part->rotTrack.numKeys > 0 ) {
-            int ki = FindKeyBefore( part->rotTrack.frames,
-                                    part->rotTrack.numKeys, frame );
-            if ( ki >= 0 ) {
-                /* Interpolate with next keyframe when possible */
-                int next = ki + 1;
-                if ( t > 0.0f && next < part->rotTrack.numKeys ) {
-                    int   fn = part->rotTrack.frames[next];
-                    int   f0 = part->rotTrack.frames[ki];
-                    float dt = ( fn > f0 )
-                        ? (float)( frame - f0 ) / (float)( fn - f0 ) + t / (float)( fn - f0 )
-                        : t;
-                    if ( dt > 1.0f ) dt = 1.0f;
-                    Quat_Slerp( part->rotTrack.rots[ki],
-                                part->rotTrack.rots[next],
-                                dt, inOutBones[boneIdx].lRot );
-                } else {
-                    Vector4Copy( part->rotTrack.rots[ki], inOutBones[boneIdx].lRot );
-                }
-            }
-        }
-
-        /* ---- Translation ---- */
-        if ( part->transTrack.numKeys > 0 ) {
-            int ki = FindKeyBefore( part->transTrack.frames,
-                                    part->transTrack.numKeys, frame );
-            if ( ki >= 0 ) {
-                int next = ki + 1;
-                if ( t > 0.0f && next < part->transTrack.numKeys ) {
-                    int   fn = part->transTrack.frames[next];
-                    int   f0 = part->transTrack.frames[ki];
-                    float dt = ( fn > f0 )
-                        ? (float)( frame - f0 ) / (float)( fn - f0 ) + t / (float)( fn - f0 )
-                        : t;
-                    if ( dt > 1.0f ) dt = 1.0f;
-                    VectorLerp( part->transTrack.trans[ki],
-                                part->transTrack.trans[next],
-                                dt, inOutBones[boneIdx].lTrans );
-                } else {
-                    VectorCopy( part->transTrack.trans[ki],
-                                inOutBones[boneIdx].lTrans );
-                }
-            }
         }
     }
 

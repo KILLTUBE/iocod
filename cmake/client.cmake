@@ -46,12 +46,27 @@ set(CLIENT_BINARY ${CLIENT_NAME})
 list(APPEND CLIENT_DEFINITIONS BOTLIB)
 
 if(BUILD_STANDALONE)
+    set(GSC_SOURCES
+        ${SOURCE_DIR}/thirdparty/gsc/visitor.c
+        ${SOURCE_DIR}/thirdparty/gsc/compiler.c
+        ${SOURCE_DIR}/thirdparty/gsc/traverse.c
+        ${SOURCE_DIR}/thirdparty/gsc/parse.c
+        ${SOURCE_DIR}/thirdparty/gsc/vm.c
+        ${SOURCE_DIR}/thirdparty/gsc/precedence.c
+        ${SOURCE_DIR}/thirdparty/gsc/library.c
+        ${SOURCE_DIR}/thirdparty/gsc/main.c
+    )
+
     list(APPEND CLIENT_DEFINITIONS STANDALONE NO_QVM)
     list(APPEND CLIENT_SOURCES
         ${SOURCE_DIR}/qcommon/bg_weapon_cod1.c
         ${SOURCE_DIR}/client/cl_weapon_cod1.c
         ${SOURCE_DIR}/client/cl_character_cod1.c
+        ${GSC_SOURCES}
     )
+
+    # Vendored GSC emits a large number of third-party warnings under ioq3 flags.
+    set_source_files_properties(${GSC_SOURCES} PROPERTIES COMPILE_OPTIONS "-w")
 endif()
 
 if(USE_RENDERER_DLOPEN)
