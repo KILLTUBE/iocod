@@ -2668,5 +2668,9 @@ Allows the engine to redraw HUD/UI overlays without re-rendering the 3D scene.
 =====================
 */
 void CG_Draw2DOnly( stereoFrame_t stereoView ) {
+	/* Can be called from the client after the viewmodel pass; guard early startup frames. */
+	if ( !cg.snap ) {
+		return;
+	}
 	CG_Draw2D( stereoView );
 }
