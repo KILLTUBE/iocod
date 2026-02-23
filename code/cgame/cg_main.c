@@ -298,7 +298,11 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_recordSPDemo, "ui_recordSPDemo", "0", CVAR_ARCHIVE},
 	{ &cg_recordSPDemoName, "ui_recordSPDemoName", "", CVAR_ARCHIVE},
 	{ &cg_obeliskRespawnDelay, "g_obeliskRespawnDelay", "10", CVAR_SERVERINFO},
+#ifdef STANDALONE
+	{ &cg_hudFiles, "cg_hudFiles", "ui_mp/hud.txt", CVAR_ARCHIVE},
+#else
 	{ &cg_hudFiles, "cg_hudFiles", "ui/hud.txt", CVAR_ARCHIVE},
+#endif
 #endif
 	{ &cg_cameraOrbit, "cg_cameraOrbit", "0", CVAR_CHEAT},
 	{ &cg_cameraOrbitDelay, "cg_cameraOrbitDelay", "50", CVAR_ARCHIVE},
@@ -1438,15 +1442,26 @@ void CG_LoadMenus(const char *menuFile) {
 	int	len, start;
 	fileHandle_t	f;
 	static char buf[MAX_MENUDEFFILE];
+#ifdef STANDALONE
+	const char *fallbackMenu = "ui_mp/hud.txt";
+#else
+	const char *fallbackMenu = "ui/hud.txt";
+#endif
 
 	start = trap_Milliseconds();
 
 	len = trap_FS_FOpenFile( menuFile, &f, FS_READ );
 	if ( !f ) {
-		Com_Printf( S_COLOR_YELLOW "menu file not found: %s, using default\n", menuFile );
-		len = trap_FS_FOpenFile( "ui/hud.txt", &f, FS_READ );
-		if (!f) {
-			CG_Error( S_COLOR_RED "default menu file not found: ui/hud.txt, unable to continue!" );
+		Com_Printf( S_COLOR_YELLOW "menu file not found: %s, using default: %s\n", menuFile, fallbackMenu );
+		len = trap_FS_FOpenFile( fallbackMenu, &f, FS_READ );
+#ifdef STANDALONE
+		if ( !f && Q_stricmp( fallbackMenu, "ui/hud.txt" ) ) {
+			Com_Printf( S_COLOR_YELLOW "fallback menu file not found: %s, trying ui/hud.txt\n", fallbackMenu );
+			len = trap_FS_FOpenFile( "ui/hud.txt", &f, FS_READ );
+		}
+#endif
+		if ( !f ) {
+			CG_Error( S_COLOR_RED "default menu file not found: %s, unable to continue!", fallbackMenu );
 		}
 	}
 
@@ -1803,13 +1818,16 @@ void CG_LoadHudMenu( void ) {
 	
 	trap_Cvar_VariableStringBuffer("cg_hudFiles", buff, sizeof(buff));
 	hudSet = buff;
-	if (hudSet[0] == '\0') {
 #ifdef STANDALONE
+	if ( hudSet[0] == '\0' || !Q_stricmp( hudSet, "ui/hud.txt" ) ) {
 		hudSet = "ui_mp/hud.txt";
-#else
-		hudSet = "ui/hud.txt";
-#endif
+		trap_Cvar_Set( "cg_hudFiles", hudSet );
 	}
+#else
+	if (hudSet[0] == '\0') {
+		hudSet = "ui/hud.txt";
+	}
+#endif
 
 	CG_LoadMenus(hudSet);
 }
