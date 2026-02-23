@@ -31,13 +31,16 @@ files; R_EvalXAnimBones evaluates bone transforms per frame.
        -> compute world transform if parent != -1
    =========================================================================== */
 
-static int XModel_LoadParts( const char *lodName, xmBone_t *bones, int maxBones )
+static int XModel_LoadParts( const char *lodName, xmBone_t *bones, int maxBones,
+                              qboolean *isViewhands )
 {
 	void	*buf;
 	int		 fSize, i, boneCount, rootBoneCount, totalBones;
 	xmR_t	 r;
 	char	 path[MAX_QPATH];
 	char	 boneName[64];
+
+	*isViewhands = qfalse;
 
 	Com_sprintf( path, sizeof(path), "xmodelparts/%s", lodName );
 	fSize = ri.FS_ReadFile( path, &buf );
@@ -85,12 +88,29 @@ static int XModel_LoadParts( const char *lodName, xmBone_t *bones, int maxBones 
 		xmR_quat( &r, bones[idx].lRot   );
 	}
 
-	/* All bone names (root first) + 24-byte skip per bone + world transform */
+	/* All bone names (root first) + 24-byte skip per bone.
+	 * Also detect viewhands models: these have a "tag_camera" or "tag_view"
+	 * root bone.  The CoD1 reference importer zeroes all bone translations
+	 * for viewhands so animations drive the skeleton from a clean origin. */
 	for ( i = 0; i < totalBones && i < maxBones; i++ ) {
 		xmR_str ( &r, boneName, sizeof(boneName) );
 		xmR_skip( &r, 24 );	/* CoD1 V14: 24 extra bytes after each bone name */
 
 		Q_strncpyz( bones[i].name, boneName, sizeof(bones[i].name) );
+
+		if ( !Q_stricmp( boneName, "tag_camera"  ) ||
+		     !Q_stricmp( boneName, "tag_view"    ) ||
+		     !Q_stricmp( boneName, "tag_cambone" ) ) {
+			*isViewhands = qtrue;
+		}
+	}
+
+	/* For viewhands models: zero all local translations so the skeleton
+	 * collapses to origin in bind pose.  Animations then drive every bone
+	 * from a clean zeroed origin, matching the CoD1 reference importer. */
+	if ( *isViewhands ) {
+		for ( i = 0; i < totalBones; i++ )
+			VectorClear( bones[i].lTrans );
 	}
 
 	/* Compute world transforms from local after all names are read */
@@ -275,7 +295,8 @@ static qboolean XModel_LoadSurfs(
 	int				 numBones,
 	mdvModel_t		*mdvModel,
 	const xmLod_t	*lod,
-	xmSkinData_t	*skinOut )
+	xmSkinData_t	*skinOut,
+	qboolean		 isViewhands )
 {
 	void			*buf;
 	int				 fSize;
@@ -378,6 +399,8 @@ static qboolean XModel_LoadSurfs(
 				Com_sprintf( skinPath, sizeof(skinPath), "skins/%s", matName );
 				sh = R_FindShader( skinPath, LIGHTMAP_WHITEIMAGE, qtrue );
 			}
+			if ( isViewhands && !sh->defaultShader )
+				sh->cullType = CT_TWO_SIDED;
 			shaderIdx[0] = sh->defaultShader ? 0 : sh->index;
 		} else {
 			shaderIdx[0] = 0;
@@ -533,22 +556,25 @@ qhandle_t R_RegisterXModel( const char *name, model_t *mod )
 	bones = (xmBone_t *)ri.Malloc( sizeof(xmBone_t) * XMODEL_MAX_BONES );
 	Com_Memset( bones, 0, sizeof(xmBone_t) * XMODEL_MAX_BONES );
 
-	numBones = XModel_LoadParts( lods[0].name, bones, XMODEL_MAX_BONES );
-	if ( numBones <= 0 ) {
-		ri.Free( bones );
-		mod->type = MOD_BAD;
-		return 0;
-	}
+	{
+		qboolean isViewhands = qfalse;
 
-	mod->type    = MOD_MESH;
-	mod->numLods = 1;
-	mdvModel     = mod->mdv[0] = (mdvModel_t *)ri.Hunk_Alloc( sizeof(mdvModel_t), h_low );
+		numBones = XModel_LoadParts( lods[0].name, bones, XMODEL_MAX_BONES, &isViewhands );
+		if ( numBones <= 0 ) {
+			ri.Free( bones );
+			mod->type = MOD_BAD;
+			return 0;
+		}
+
+		mod->type    = MOD_MESH;
+		mod->numLods = 1;
+		mdvModel     = mod->mdv[0] = (mdvModel_t *)ri.Hunk_Alloc( sizeof(mdvModel_t), h_low );
 
 	{
 		xmSkinData_t *skinData = (xmSkinData_t *)ri.Malloc( sizeof(xmSkinData_t) );
 		Com_Memset( skinData, 0, sizeof(xmSkinData_t) );
 
-		if ( !XModel_LoadSurfs( lods[0].name, bones, numBones, mdvModel, &lods[0], skinData ) ) {
+		if ( !XModel_LoadSurfs( lods[0].name, bones, numBones, mdvModel, &lods[0], skinData, isViewhands ) ) {
 			ri.Free( skinData );
 			ri.Free( bones );
 			mod->type = MOD_BAD;
@@ -591,7 +617,8 @@ qhandle_t R_RegisterXModel( const char *name, model_t *mod )
 		/* Cache bind pose and skin data for per-frame evaluation */
 		R_StoreXModelBindPose( (qhandle_t)mod->index, bones, numBones );
 		R_StoreXModelSkinData( (qhandle_t)mod->index, skinData );
-	}
+		}  /* skinData block */
+	}  /* isViewhands block */
 
 	ri.Free( bones );
 
