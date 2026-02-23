@@ -352,13 +352,32 @@ static qboolean XModel_LoadSurfs(
 			/*
 			 * CoD1 material names include the extension, e.g. "viewhands@default.jpg".
 			 * Prefix with "skins/" to form the full VFS path.
-			 * Use LIGHTMAP_WHITEIMAGE so the surface renders fullbright (unlit),
-			 * avoiding the over-bright ambient that RDF_NOWORLDMODEL sets.
+			 *
+			 * "@default" is a 4×4 white placeholder used as a material template.
+			 * CoD1 substitutes the correct faction skin at runtime (e.g. @hand, @vsleeve_waffen).
+			 * We try "@hand" first as the base skin texture, falling back to "@default".
+			 *
+			 * Use LIGHTMAP_WHITEIMAGE so surfaces render fullbright (unlit) in the
+			 * NOWORLDMODEL pass — CGEN_IDENTITY_LIGHTING in GL2 does not apply
+			 * entity ambient, so the texture colour is preserved without over-brightening.
 			 */
-			char skinPath[MAX_QPATH];
-			shader_t *sh;
-			Com_sprintf( skinPath, sizeof(skinPath), "skins/%s", lod->matNames[matIdx] );
-			sh = R_FindShader( skinPath, LIGHTMAP_WHITEIMAGE, qtrue );
+			const char *matName = lod->matNames[matIdx];
+			const char *defAt   = strstr( matName, "@default" );
+			shader_t   *sh      = NULL;
+
+			if ( defAt ) {
+				/* Try replacing "@default[.ext]" with "@hand" */
+				char altPath[MAX_QPATH];
+				Com_sprintf( altPath, sizeof(altPath), "skins/%.*s@hand",
+				             (int)(defAt - matName), matName );
+				sh = R_FindShader( altPath, LIGHTMAP_WHITEIMAGE, qtrue );
+				if ( sh->defaultShader ) sh = NULL;
+			}
+			if ( !sh ) {
+				char skinPath[MAX_QPATH];
+				Com_sprintf( skinPath, sizeof(skinPath), "skins/%s", matName );
+				sh = R_FindShader( skinPath, LIGHTMAP_WHITEIMAGE, qtrue );
+			}
 			shaderIdx[0] = sh->defaultShader ? 0 : sh->index;
 		} else {
 			shaderIdx[0] = 0;
