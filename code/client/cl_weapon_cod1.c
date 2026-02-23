@@ -285,21 +285,47 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     if ( cl_animDebug && cl_animDebug->integer )
         Com_Printf( "anim=%d frame=%.1f\n", cl_weapon.currentAnim, animFrame );
 
-    /* ---- Camera / view setup ----
-     * CoD: viewmodel renders at player eye position. The animation bakes in
-     * all stance offsets. tag_camera is (0,0,0) by default if not a bone. */
+    /* ---- Camera / view setup ---- */
     vec3_t cameraOrigin, modelOrigin;
     vec3_t entityAxis[3];
+    int    stance;
+    float  ofsF = 0.0f, ofsR = 0.0f, ofsU = 0.0f;
 
     VectorCopy( cl.snap.ps.viewangles, viewAngles );
     AnglesToAxis( viewAngles, axis );
 
-    /* Player eye position = model origin = camera origin */
+    /* Player eye position */
     VectorCopy( cl.snap.ps.origin, cameraOrigin );
     cameraOrigin[2] += cl.snap.ps.viewheight;
-    VectorCopy( cameraOrigin, modelOrigin );
 
-    /* Entity orientation follows player view */
+    /* PMF_DUCKED = bit 0 in CoD1 pm_flags */
+    stance = ( cl.snap.ps.pm_flags & 1 ) ? 1 : 0;  /* 0=stand, 1=duck */
+
+    /* Apply weapon file offsets */
+    if ( cl_weapon.active ) {
+        weaponDef_t *def = &cl_weapon.def;
+        if ( stance == 1 ) {   /* Ducked */
+            ofsF = def->duckedOfsF;
+            ofsR = def->duckedOfsR;
+            ofsU = def->duckedOfsU;
+        } else {               /* Standing */
+            ofsF = def->standMoveF;
+            ofsR = def->standMoveR;
+            ofsU = def->standMoveU;
+        }
+    }
+
+    /* Manual tuning cvars */
+    ofsR += cl_gunX ? cl_gunX->value : 0.0f;
+    ofsF += cl_gunY ? cl_gunY->value : 0.0f;
+    ofsU += cl_gunZ ? cl_gunZ->value : 0.0f;
+
+    /* Model origin = camera + offsets (axis[0]=F, axis[1]=L, axis[2]=U) */
+    VectorCopy( cameraOrigin, modelOrigin );
+    VectorMA( modelOrigin,  ofsF, axis[0], modelOrigin );   /* forward  */
+    VectorMA( modelOrigin, -ofsR, axis[1], modelOrigin );   /* right (R = -L) */
+    VectorMA( modelOrigin,  ofsU, axis[2], modelOrigin );   /* up       */
+
     AnglesToAxis( viewAngles, entityAxis );
 
     /* Full-screen refdef with no world (just our weapon entities) */
