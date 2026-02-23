@@ -28,6 +28,7 @@ static cvar_t *cl_drawGun;      /* 0 = hide viewmodel                   */
 static cvar_t *cg_gunX;
 static cvar_t *cg_gunY;
 static cvar_t *cg_gunZ;
+static cvar_t *cl_gunOffsetScale; /* multiplier for weapon file handOffset */
 static cvar_t *cl_animDebug;    /* print current anim frame each frame  */
 
 /* ===========================================================================
@@ -274,15 +275,29 @@ void CL_DrawViewModel( stereoFrame_t stereo )
         Com_Printf( "anim=%d frame=%.1f\n", cl_weapon.currentAnim, animFrame );
 
     /* Build eye position from player state */
-    VectorCopy( cl.snap.ps.origin,    viewOrigin );
-    viewOrigin[2] += cl.snap.ps.viewheight;
+    vec3_t cameraOrigin, modelOrigin;
+    VectorCopy( cl.snap.ps.origin,    cameraOrigin );
+    cameraOrigin[2] += cl.snap.ps.viewheight;
     VectorCopy( cl.snap.ps.viewangles, viewAngles );
     AnglesToAxis( viewAngles, axis );
 
-    /* Apply gun offsets */
-    if ( cg_gunX && cg_gunX->value != 0.0f ) VectorMA( viewOrigin, cg_gunX->value, axis[0], viewOrigin );
-    if ( cg_gunY && cg_gunY->value != 0.0f ) VectorMA( viewOrigin, cg_gunY->value, axis[1], viewOrigin );
-    if ( cg_gunZ && cg_gunZ->value != 0.0f ) VectorMA( viewOrigin, cg_gunZ->value, axis[2], viewOrigin );
+    /* Model origin starts at camera, then apply weapon's handOffset
+     * CoD1 axis: [0]=right, [1]=forward, [2]=up */
+    VectorCopy( cameraOrigin, modelOrigin );
+    if ( cl_weapon.def.handOffset[0] != 0.0f )
+        VectorMA( modelOrigin, cl_weapon.def.handOffset[0], axis[0], modelOrigin );
+    if ( cl_weapon.def.handOffset[1] != 0.0f )
+        VectorMA( modelOrigin, cl_weapon.def.handOffset[1], axis[1], modelOrigin );
+    if ( cl_weapon.def.handOffset[2] != 0.0f )
+        VectorMA( modelOrigin, cl_weapon.def.handOffset[2], axis[2], modelOrigin );
+
+    /* cg_gunX/Y/Z cvars can override the weapon file values for tuning */
+    if ( cg_gunX && cg_gunX->value != 0.0f )
+        VectorMA( modelOrigin, cg_gunX->value, axis[0], modelOrigin );
+    if ( cg_gunY && cg_gunY->value != 0.0f )
+        VectorMA( modelOrigin, cg_gunY->value, axis[1], modelOrigin );
+    if ( cg_gunZ && cg_gunZ->value != 0.0f )
+        VectorMA( modelOrigin, cg_gunZ->value, axis[2], modelOrigin );
 
     /* Full-screen refdef with no world (just our weapon entities) */
     Com_Memset( &refdef, 0, sizeof(refdef) );
@@ -300,14 +315,15 @@ void CL_DrawViewModel( stereoFrame_t stereo )
                         * (float)refdef.height / (float)refdef.width )
                    * (float)(180.0 / M_PI);
 
-    VectorCopy( viewOrigin, refdef.vieworg );
+    /* Camera stays at eye position (no gun offset) */
+    VectorCopy( cameraOrigin, refdef.vieworg );
     AxisCopy( axis, refdef.viewaxis );
 
     /* Start a new entity list after cgame's committed scene */
     re.ClearScene();
 
     if ( cl_weapon.handModel ) {
-        AddViewmodelEnt( cl_weapon.handModel, viewOrigin, axis );
+        AddViewmodelEnt( cl_weapon.handModel, modelOrigin, axis );
     }
     if ( cl_weapon.gunModel ) {
         /* Place gun at the same root origin as the hands.  In CoD, the hand
@@ -315,7 +331,7 @@ void CL_DrawViewModel( stereoFrame_t stereo )
          * viewOrigin and the shared animation drives all bones (including
          * tag_weapon) relative to that root.  Placing the gun at the hand's
          * tag_weapon would double-count the tag_weapon bone offset. */
-        AddViewmodelEnt( cl_weapon.gunModel, viewOrigin, axis );
+        AddViewmodelEnt( cl_weapon.gunModel, modelOrigin, axis );
     }
 
     re.RenderScene( &refdef );
@@ -381,9 +397,11 @@ void CL_WeaponCod1_Init( void )
     cl_startWeapon = Cvar_Get( "cl_startWeapon", "mp44_mp", CVAR_ARCHIVE );
     cl_gunFov      = Cvar_Get( "cl_gunFov",      "65",      CVAR_ARCHIVE );
     cl_drawGun     = Cvar_Get( "cl_drawGun",     "1",       CVAR_ARCHIVE );
-    cg_gunX        = Cvar_Get( "cg_gunX",        "0",       CVAR_CHEAT );
-    cg_gunY        = Cvar_Get( "cg_gunY",        "0",       CVAR_CHEAT );
-    cg_gunZ        = Cvar_Get( "cg_gunZ",        "0",       CVAR_CHEAT );
+    /* Viewmodel positioning overrides (weapon file provides defaults) */
+    cg_gunX           = Cvar_Get( "cg_gunX",           "0",    CVAR_CHEAT );
+    cg_gunY           = Cvar_Get( "cg_gunY",           "0",    CVAR_CHEAT );
+    cg_gunZ           = Cvar_Get( "cg_gunZ",           "0",    CVAR_CHEAT );
+    cl_gunOffsetScale = Cvar_Get( "cl_gunOffsetScale", "15",   CVAR_ARCHIVE );
     cl_animDebug   = Cvar_Get( "cl_animDebug",   "0",       CVAR_TEMP  );
 
     Cmd_AddCommand( "give",        CL_Give_f        );

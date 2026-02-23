@@ -44,6 +44,9 @@ typedef struct {
 	char  handModel[MAX_QPATH];   /* hands xmodel (without "xmodel/") */
 	char  worldModel[MAX_QPATH];  /* world/pickup xmodel (full path, e.g. "xmodel/weapon_colt45") */
 
+	/* Viewmodel positioning (offset from camera eye) */
+	float  handOffset[3];         /* right, forward, up offset for viewmodel */
+
 	/* Animations */
 	weaponAnims_t anims;
 

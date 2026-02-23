@@ -41,6 +41,11 @@ static void SetWeaponField( weaponDef_t *out, const char *key, const char *val )
     else if ( !Q_stricmp( key, "handModel"           ) ) WFSTR( handModel          );
     else if ( !Q_stricmp( key, "worldModel"          ) ) WFSTR( worldModel         );
 
+    /* Viewmodel positioning - CoD1 uses standMoveF/R/U for standing offsets */
+    else if ( !Q_stricmp( key, "standMoveF"          ) ) WFFLT( handOffset[1]      );  /* Forward */
+    else if ( !Q_stricmp( key, "standMoveR"          ) ) WFFLT( handOffset[0]      );  /* Right */
+    else if ( !Q_stricmp( key, "standMoveU"          ) ) WFFLT( handOffset[2]      );  /* Up */
+
     /* Animations */
     else if ( !Q_stricmp( key, "idleAnim"            ) ) WFSTR( anims.idleAnim           );
     else if ( !Q_stricmp( key, "emptyIdleAnim"       ) ) WFSTR( anims.emptyIdleAnim      );
