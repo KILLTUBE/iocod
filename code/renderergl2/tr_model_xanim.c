@@ -304,7 +304,15 @@ static void XAnim_FreeTransTrack( xaTransTrack_t *t )
     t->numKeys = 0;
 }
 
-/* Read a rotation track.  When flipquat is set the data is consumed but discarded. */
+/* Read a rotation track.
+ * flipquat: when set, negate all stored quaternion components.
+ *           (q and -q represent the same rotation; the flag picks the
+ *            hemisphere for best interpolation.  Our Quat_Slerp already
+ *            handles the sign-flip via its dot<0 branch, so either sign
+ *            produces correct results, but we honour the flag anyway.)
+ * simplequat: when set, only the Z component is stored in the file
+ *             (W and XY are derived).  Otherwise X, Y, Z are stored.
+ */
 static void XAnim_ReadRotTrack( xmR_t *r, int numFrames,
                                   xaRotTrack_t *track,
                                   qboolean flipquat, qboolean simplequat )
@@ -344,14 +352,20 @@ static void XAnim_ReadRotTrack( xmR_t *r, int numFrames,
         track->rots[i][1] = x;
         track->rots[i][2] = y;
         track->rots[i][3] = z;
+
+        /* Honour the per-part flip flag: negate all components.
+         * Previously the track was discarded when flipquat was set, which
+         * caused those bone rotation tracks to be silently dropped,
+         * leaving affected bones frozen in their bind-pose orientation. */
+        if ( flipquat ) {
+            track->rots[i][0] = -track->rots[i][0];
+            track->rots[i][1] = -track->rots[i][1];
+            track->rots[i][2] = -track->rots[i][2];
+            track->rots[i][3] = -track->rots[i][3];
+        }
     }
 
-    if ( flipquat ) {
-        /* Consumed to advance reader; not used */
-        XAnim_FreeRotTrack( track );
-    } else {
-        track->numKeys = numKeys;
-    }
+    track->numKeys = numKeys;
 }
 
 static void XAnim_ReadTransTrack( xmR_t *r, int numFrames, xaTransTrack_t *track )
