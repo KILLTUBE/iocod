@@ -1536,8 +1536,22 @@ void CG_OwnerDraw(float x, float y, float w, float h, float text_x, float text_y
 	 */
 	switch ( ownerDraw ) {
 		case 5:
-			CG_DrawPlayerAmmoValue(&rect, scale, color, shader, textStyle);
+		{
+			centity_t *cent = &cg_entities[cg.snap->ps.clientNum];
+			playerState_t *ps = &cg.snap->ps;
+			char num[16];
+			int value, tw;
+			if ( cent->currentState.weapon ) {
+				value = ps->ammo[cent->currentState.weapon];
+				if ( value > -1 ) {
+					Com_sprintf( num, sizeof(num), "%i", value );
+					tw = CG_Text_Width( num, scale, 0 );
+					/* CoD1 ammo text sits toward the right side of the ammo box. */
+					CG_Text_Paint( x + w - tw - 2, y + h, scale, color, num, 0, 0, textStyle );
+				}
+			}
 			return;
+		}
 		case 6:
 			if ( shader ) {
 				trap_R_SetColor( color );
@@ -1775,15 +1789,18 @@ void CG_OwnerDraw(float x, float y, float w, float h, float text_x, float text_y
     break;
 
   /* CG_PLAYER_WEAPON_NAME (81): weapon display name (use configstring weapon name) */
-  case 81: {
-    int wp = cg.snap->ps.weapon;
-    const char *wname = "";
-    if ( wp > 0 && wp < MAX_WEAPONS && cg_weapons[wp].item )
-      wname = cg_weapons[wp].item->pickup_name;
-    if ( *wname )
-      CG_Text_Paint( x + text_x, y + text_y, scale, color, wname, 0, 0, textStyle );
-    break;
-  }
+	  case 81: {
+	    int wp = cg.snap->ps.weapon;
+	    const char *wname = "";
+		int tw;
+	    if ( wp > 0 && wp < MAX_WEAPONS && cg_weapons[wp].item )
+	      wname = cg_weapons[wp].item->pickup_name;
+	    if ( *wname ) {
+			tw = CG_Text_Width( wname, scale, 0 );
+	      CG_Text_Paint( x + (w - tw) * 0.5f, y + h, scale, color, wname, 0, 0, textStyle );
+		}
+	    break;
+	  }
 
   /* CG_PLAYER_WEAPON_MODE_ICON (83): fire mode icon — draw shader if available */
   case 83:
@@ -1797,17 +1814,16 @@ void CG_OwnerDraw(float x, float y, float w, float h, float text_x, float text_y
   /* CoD1 ownerdraw 20 collides with Q3 CG_PLAYER_SCORE; keep Q3 handler above. */
 
   /* CG_PLAYER_COMPASS (84): compass face — rotates with yaw */
-  case 84:
-    if ( shader ) {
-      float cx, cy, aw, ah;
-      trap_R_SetColor( color );
-      cx = x + w * 0.5f;  cy = y + h * 0.5f;
-      aw = w;              ah = h;
-      CG_AdjustFrom640( &cx, &cy, &aw, &ah );
-      trap_R_DrawRotatePic2( cx, cy, aw, ah, 0, 0, 1, 1,
-                              cg.snap->ps.viewangles[YAW], shader );
-      trap_R_SetColor( NULL );
-    }
+	  case 84:
+	    if ( shader ) {
+	      float ax, ay, aw, ah;
+	      trap_R_SetColor( color );
+	      ax = x; ay = y; aw = w; ah = h;
+	      CG_AdjustFrom640( &ax, &ay, &aw, &ah );
+	      trap_R_DrawRotatePic2( ax, ay, aw, ah, 0, 0, 1, 1,
+	                              cg.snap->ps.viewangles[YAW], shader );
+	      trap_R_SetColor( NULL );
+	    }
     break;
 
   /* CG_PLAYER_COMPASS_BACK (85): compass back / needle (drawn static) */
