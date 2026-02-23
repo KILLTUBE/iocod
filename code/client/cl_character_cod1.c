@@ -1204,13 +1204,11 @@ static qhandle_t CL_Character_RegisterJumpAnimFromPlayerScript( void )
             if ( cl_thirdPersonDebug && cl_thirdPersonDebug->integer ) {
                 Com_Printf( "thirdperson: jump legs xanim from script -> '%s'\n", token );
             }
-            COM_EndParseSession();
             FS_FreeFile( scriptText );
             return h;
         }
     }
 
-    COM_EndParseSession();
     FS_FreeFile( scriptText );
     return 0;
 }
