@@ -42,7 +42,7 @@ char systemChat[256];
 char teamChat1[256];
 char teamChat2[256];
 
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || defined(STANDALONE)
 
 int CG_Text_Width(const char *text, float scale, int limit) {
   int count,len;
@@ -2659,5 +2659,4 @@ void CG_DrawActive( stereoFrame_t stereoView ) {
 	// draw status bar and other floating elements
  	CG_Draw2D(stereoView);
 }
-
 
