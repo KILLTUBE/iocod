@@ -270,17 +270,22 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     animFrame = CL_WeaponCurrentAnimFrame();
     curAnim   = cl_weapon.anims[ cl_weapon.currentAnim ];
 
-    /* CPU-skin hands using the current animation.
-     * The gun model attaches to tag_weapon on the hands model - it doesn't
-     * get animated separately. The animation drives tag_weapon position. */
-    if ( re.UpdateXModelPose && cl_weapon.handModel ) {
-        if ( !curAnim ) {
-            /* No animation loaded - model will be in bind pose */
-            if ( cl_animDebug && cl_animDebug->integer )
-                Com_Printf( "WARNING: No animation loaded for hand model!\n" );
-        } else {
-            re.UpdateXModelPose( cl_weapon.handModel, curAnim, animFrame );
-        }
+    /* DObj-style combined pose evaluation.
+     *
+     * Both hand and gun bones are evaluated together in one skeleton:
+     *   combined[0..N]   = hand model bones
+     *   combined[N..N+M] = gun model bones, gun root parented to tag_weapon
+     *
+     * The animation drives all bones by name-matching across both models.
+     * Gun vertices end up in correct world-space positions relative to the
+     * shared entity origin (tag_weapon offset is baked in by the skeleton).
+     *
+     * IMPORTANT: both entities MUST be rendered at the SAME origin/axis. */
+    if ( re.UpdateDObjPose && ( cl_weapon.handModel || cl_weapon.gunModel ) ) {
+        if ( !curAnim && cl_animDebug && cl_animDebug->integer )
+            Com_Printf( "WARNING: No animation loaded for viewmodel!\n" );
+        re.UpdateDObjPose( cl_weapon.handModel, cl_weapon.gunModel,
+                            curAnim, animFrame );
     }
 
     /* Debug output */
@@ -352,6 +357,7 @@ void CL_DrawViewModel( stereoFrame_t stereo )
 
     /* axis[0] = forward, axis[1] = left, axis[2] = up in Quake */
     /* But CoD offsets are: F = forward, R = right, U = up */
+    /* Note: CoD offsets ARE in view axis space already */
     VectorMA( modelOrigin, gunOffset[0][0] * scale, axis[0], modelOrigin );  /* Forward */
     VectorMA( modelOrigin, -gunOffset[1][0] * scale, axis[1], modelOrigin ); /* Right (negate left axis) */
     VectorMA( modelOrigin, gunOffset[2][0] * scale, axis[2], modelOrigin );  /* Up */
@@ -389,34 +395,12 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     /* Start a new entity list after cgame's committed scene */
     re.ClearScene();
 
-    if ( cl_weapon.handModel ) {
+    /* Both entities at the same origin/axis — DObj bone evaluation has
+     * already baked the tag_weapon offset into gun vertex positions. */
+    if ( cl_weapon.handModel )
         AddViewmodelEnt( cl_weapon.handModel, modelOrigin, entityAxis );
-    }
-
-    /* Gun model attaches to tag_weapon on the animated hands model */
-    if ( cl_weapon.gunModel && cl_weapon.handModel && re.LerpTag ) {
-        orientation_t tag;
-        if ( re.LerpTag( &tag, cl_weapon.handModel, 0, 0, 0, "tag_weapon" ) ) {
-            vec3_t gunOrigin, gunAxis[3];
-
-            /* Transform tag from hand model space to world space */
-            VectorCopy( modelOrigin, gunOrigin );
-            VectorMA( gunOrigin, tag.origin[0], entityAxis[0], gunOrigin );
-            VectorMA( gunOrigin, tag.origin[1], entityAxis[1], gunOrigin );
-            VectorMA( gunOrigin, tag.origin[2], entityAxis[2], gunOrigin );
-
-            /* Combine hand rotation with tag rotation */
-            MatrixMultiply( tag.axis, entityAxis, gunAxis );
-
-            AddViewmodelEnt( cl_weapon.gunModel, gunOrigin, gunAxis );
-        } else {
-            /* tag_weapon not found - put gun at hands origin */
-            AddViewmodelEnt( cl_weapon.gunModel, modelOrigin, entityAxis );
-        }
-    } else if ( cl_weapon.gunModel ) {
-        /* No hands model, just render gun at origin */
-        AddViewmodelEnt( cl_weapon.gunModel, modelOrigin, entityAxis );
-    }
+    if ( cl_weapon.gunModel )
+        AddViewmodelEnt( cl_weapon.gunModel,  modelOrigin, entityAxis );
 
     re.RenderScene( &refdef );
 }

@@ -107,6 +107,7 @@ typedef struct {
 
 	/* CoD1 xmodel CPU skinning: evaluate anim, re-skin verts, update tags */
 	void      (*UpdateXModelPose)( qhandle_t model, qhandle_t anim, float frame );
+	void      (*UpdateDObjPose) ( qhandle_t hand,  qhandle_t gun, qhandle_t anim, float frame );
 } refexport_t;
 
 //

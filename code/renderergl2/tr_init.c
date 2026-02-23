@@ -1718,10 +1718,12 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 		extern int       R_XAnimNumFrames  ( qhandle_t h );
 		extern int       R_XAnimFramerate  ( qhandle_t h );
 		extern void      R_UpdateXModelPose( qhandle_t model, qhandle_t anim, float frame );
+		extern void      R_UpdateDObjPose  ( qhandle_t hand, qhandle_t gun, qhandle_t anim, float frame );
 		re.RegisterXAnim    = R_RegisterXAnim;
 		re.XAnimNumFrames   = R_XAnimNumFrames;
 		re.XAnimFramerate   = R_XAnimFramerate;
 		re.UpdateXModelPose = R_UpdateXModelPose;
+		re.UpdateDObjPose   = R_UpdateDObjPose;
 	}
 
 	return &re;

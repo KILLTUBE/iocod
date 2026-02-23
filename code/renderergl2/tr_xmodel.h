@@ -253,6 +253,12 @@ void R_StoreXModelSkinData( qhandle_t modelHandle, xmSkinData_t *data );
  * Safe to call every frame before AddRefEntityToScene. */
 void R_UpdateXModelPose( qhandle_t modelHandle, qhandle_t animHandle, float frame );
 
+/* DObj-equivalent: combine hand + gun into one skeleton, parent gun root to
+ * tag_weapon, evaluate animation once, CPU-skin both models.
+ * Render BOTH entities at the same origin/axis after calling this. */
+void R_UpdateDObjPose( qhandle_t handModel, qhandle_t gunModel,
+                        qhandle_t animHandle, float frame );
+
 /* Look up a bone by name in the current animated pose (or bind-pose fallback)
  * and return its world-space orientation.  Returns 1 if found, 0 otherwise. */
 int R_XModelLerpTag( orientation_t *tag, qhandle_t handle,

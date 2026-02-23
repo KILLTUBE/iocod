@@ -554,6 +554,167 @@ int R_XAnimFramerate( qhandle_t h )
 }
 
 /* ===========================================================================
+   R_UpdateDObjPose
+   DObj-equivalent: combines hand + gun bones into one skeleton, parents
+   the gun model's root bones to tag_weapon in the hand model, evaluates
+   the animation once against all bones, then CPU-skins each model in-place.
+
+   Both entities must be rendered at the SAME origin/axis — the DObj bone
+   evaluation places gun vertices in the correct position relative to the
+   shared entity origin, with the tag_weapon offset already baked in.
+   =========================================================================== */
+
+/* Static work buffer — avoids per-frame allocation; safe for single-threaded use */
+static xmBone_t s_dobjWork[ XMODEL_MAX_BONES * 2 ];
+
+void R_UpdateDObjPose( qhandle_t handModel, qhandle_t gunModel,
+                        qhandle_t animHandle, float frame )
+{
+    int          handIdx   = (int)handModel;
+    int          gunIdx    = (int)gunModel;
+    int          numH, numG, total;
+    int          tagWeapon = -1;
+    int          i, j;
+    xmSkinData_t *sd;
+    mdvModel_t   *mdv;
+
+    if ( handIdx < 0 || handIdx >= BIND_TABLE_SIZE ) return;
+    if ( !s_bindPose[handIdx] || s_bindCount[handIdx] <= 0 ) return;
+
+    numH = s_bindCount[handIdx];
+    numG = 0;
+    if ( gunIdx >= 0 && gunIdx < BIND_TABLE_SIZE &&
+         s_bindPose[gunIdx] && s_bindCount[gunIdx] > 0 )
+        numG = s_bindCount[gunIdx];
+
+    total = numH + numG;
+    if ( total > XMODEL_MAX_BONES * 2 ) total = XMODEL_MAX_BONES * 2;
+
+    /* ---- Build combined bone array ---- */
+    Com_Memcpy( s_dobjWork,       s_bindPose[handIdx], sizeof(xmBone_t) * numH );
+    if ( numG > 0 )
+        Com_Memcpy( s_dobjWork + numH, s_bindPose[gunIdx],  sizeof(xmBone_t) * numG );
+
+    /* Find tag_weapon in hand portion */
+    for ( i = 0; i < numH; i++ ) {
+        if ( !Q_stricmp( s_dobjWork[i].name, "tag_weapon" ) ) {
+            tagWeapon = i;
+            break;
+        }
+    }
+
+    /* Remap gun bone parent indices into combined-array space;
+     * parent gun root bones to tag_weapon so the animation chain is correct */
+    for ( i = numH; i < total; i++ ) {
+        if ( s_dobjWork[i].parent < 0 )
+            s_dobjWork[i].parent = tagWeapon;   /* -1 keeps root if no tag_weapon */
+        else
+            s_dobjWork[i].parent += numH;
+    }
+
+    /* ---- Evaluate animation ---- */
+    if ( animHandle > 0 )
+        R_EvalXAnimBones( animHandle, frame, s_dobjWork, total );
+    else
+        XModel_ComputeWorldBones( s_dobjWork, total );
+
+    /* ---- Cache poses ---- */
+    if ( !s_curPose[handIdx] || s_curCount[handIdx] < numH ) {
+        if ( s_curPose[handIdx] ) ri.Free( s_curPose[handIdx] );
+        s_curPose[handIdx]  = (xmBone_t *)ri.Malloc( sizeof(xmBone_t) * numH );
+        s_curCount[handIdx] = numH;
+    }
+    Com_Memcpy( s_curPose[handIdx], s_dobjWork, sizeof(xmBone_t) * numH );
+
+    if ( numG > 0 ) {
+        if ( !s_curPose[gunIdx] || s_curCount[gunIdx] < numG ) {
+            if ( s_curPose[gunIdx] ) ri.Free( s_curPose[gunIdx] );
+            s_curPose[gunIdx]  = (xmBone_t *)ri.Malloc( sizeof(xmBone_t) * numG );
+            s_curCount[gunIdx] = numG;
+        }
+        Com_Memcpy( s_curPose[gunIdx], s_dobjWork + numH, sizeof(xmBone_t) * numG );
+    }
+
+    /* ---- CPU-skin hand model ---- */
+    sd = s_skinData[handIdx];
+    if ( sd ) {
+        for ( i = 0; i < sd->numSurfaces; i++ ) {
+            xmSkinSurf_t *surf = &sd->surfs[i];
+            for ( j = 0; j < surf->numVerts; j++ ) {
+                vec3_t wp, wn;
+                int    bi = surf->verts[j].boneIdx;
+                if ( bi >= 0 && bi < numH ) {
+                    const xmBone_t *b = &s_dobjWork[bi];
+                    Quat_RotVec( b->wRot, surf->verts[j].localPos,    wp );
+                    VectorAdd  ( b->wTrans, wp,                        wp );
+                    Quat_RotVec( b->wRot, surf->verts[j].localNormal,  wn );
+                } else {
+                    VectorCopy( surf->verts[j].localPos,    wp );
+                    VectorCopy( surf->verts[j].localNormal, wn );
+                }
+                VectorNormalize( wn );
+                VectorCopy( wp, surf->mdvVerts[j].xyz );
+                R_VaoPackNormal( surf->mdvVerts[j].normal, wn );
+            }
+        }
+        /* Update hand mdvTags from animated hand bones */
+        mdv = sd->mdvModel;
+        if ( mdv && mdv->numTags > 0 ) {
+            int ti = 0;
+            for ( i = 0; i < numH && ti < mdv->numTags; i++ ) {
+                if ( Q_strncmp( s_dobjWork[i].name, "tag_", 4 ) == 0 ) {
+                    VectorCopy( s_dobjWork[i].wTrans, mdv->tags[ti].origin );
+                    Quat_ToAxis( s_dobjWork[i].wRot,  mdv->tags[ti].axis   );
+                    ti++;
+                }
+            }
+        }
+    }
+
+    /* ---- CPU-skin gun model using combined[numH + bi] ----
+     * Gun vertex boneIdx is 0-based within the gun model.
+     * combined[numH + bi].wTrans already includes the tag_weapon world offset,
+     * so gun vertices end up in the correct position relative to the shared
+     * DObj entity origin. */
+    if ( numG > 0 ) {
+        sd = s_skinData[gunIdx];
+        if ( sd ) {
+            for ( i = 0; i < sd->numSurfaces; i++ ) {
+                xmSkinSurf_t *surf = &sd->surfs[i];
+                for ( j = 0; j < surf->numVerts; j++ ) {
+                    vec3_t wp, wn;
+                    int    bi = surf->verts[j].boneIdx;
+                    if ( bi >= 0 && bi < numG ) {
+                        const xmBone_t *b = &s_dobjWork[numH + bi];
+                        Quat_RotVec( b->wRot, surf->verts[j].localPos,    wp );
+                        VectorAdd  ( b->wTrans, wp,                        wp );
+                        Quat_RotVec( b->wRot, surf->verts[j].localNormal,  wn );
+                    } else {
+                        VectorCopy( surf->verts[j].localPos,    wp );
+                        VectorCopy( surf->verts[j].localNormal, wn );
+                    }
+                    VectorNormalize( wn );
+                    VectorCopy( wp, surf->mdvVerts[j].xyz );
+                    R_VaoPackNormal( surf->mdvVerts[j].normal, wn );
+                }
+            }
+            /* Update gun mdvTags */
+            mdv = sd->mdvModel;
+            if ( mdv && mdv->numTags > 0 ) {
+                int ti = 0;
+                for ( i = 0; i < numG && ti < mdv->numTags; i++ ) {
+                    if ( Q_strncmp( s_dobjWork[numH + i].name, "tag_", 4 ) == 0 ) {
+                        VectorCopy( s_dobjWork[numH + i].wTrans, mdv->tags[ti].origin );
+                        Quat_ToAxis( s_dobjWork[numH + i].wRot,  mdv->tags[ti].axis   );
+                        ti++;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/* ===========================================================================
    R_EvalXAnimBones
    =========================================================================== */
 
