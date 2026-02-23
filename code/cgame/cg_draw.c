@@ -735,34 +735,43 @@ static float CG_DrawFPS( float y ) {
 	int			w;
 	static int	previousTimes[FPS_FRAMES];
 	static int	index;
+	static int	cachedFps;
+	static int	lastSampleClientFrame = -1;
 	int		i, total;
-	int		fps;
 	static	int	previous;
 	int		t, frameTime;
 
-	// don't use serverTime, because that will be drifting to
-	// correct for internet lag changes, timescales, timedemos, etc
-	t = trap_Milliseconds();
-	frameTime = t - previous;
-	previous = t;
+	/*
+	 * A frame can call CG_Draw2D more than once (e.g. standalone post-viewmodel HUD pass).
+	 * Sample timing once per rendered cgame frame so FPS math tracks real frame pacing.
+	 */
+	if ( lastSampleClientFrame != cg.clientFrame ) {
+		// don't use serverTime, because that will be drifting to
+		// correct for internet lag changes, timescales, timedemos, etc
+		t = trap_Milliseconds();
+		frameTime = t - previous;
+		previous = t;
 
-	previousTimes[index % FPS_FRAMES] = frameTime;
-	index++;
-	if ( index > FPS_FRAMES ) {
-		// average multiple frames together to smooth changes out a bit
-		total = 0;
-		for ( i = 0 ; i < FPS_FRAMES ; i++ ) {
-			total += previousTimes[i];
+		previousTimes[index % FPS_FRAMES] = frameTime;
+		index++;
+		if ( index > FPS_FRAMES ) {
+			// average multiple frames together to smooth changes out a bit
+			total = 0;
+			for ( i = 0 ; i < FPS_FRAMES ; i++ ) {
+				total += previousTimes[i];
+			}
+			if ( !total ) {
+				total = 1;
+			}
+			cachedFps = 1000 * FPS_FRAMES / total;
 		}
-		if ( !total ) {
-			total = 1;
-		}
-		fps = 1000 * FPS_FRAMES / total;
+		lastSampleClientFrame = cg.clientFrame;
+	}
 
-		s = va( "%ifps", fps );
+	if ( cachedFps > 0 ) {
+		s = va( "%ifps", cachedFps );
 		w = CG_DrawStrlen( s ) * BIGCHAR_WIDTH;
-
-		CG_DrawBigString( 635 - w, y + 2, s, 1.0F);
+		CG_DrawBigString( 635 - w, y + 2, s, 1.0F );
 	}
 
 	return y + BIGCHAR_HEIGHT + 4;

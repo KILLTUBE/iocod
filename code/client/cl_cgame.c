@@ -800,11 +800,11 @@ void CL_CGameRendering( stereoFrame_t stereo ) {
 	VM_Debug( 0 );
 #ifdef STANDALONE
 	/*
-	 * Optional CoD1 client-side viewmodel path.
-	 * After drawing it, redraw cgame 2D so HUD remains above the weapon.
+	 * CoD1 client-side viewmodel path.
+	 * Optional second 2D pass keeps HUD above the weapon.
 	 */
+	CL_DrawViewModel( stereo );
 	if ( Cvar_VariableIntegerValue( "cl_drawGunPostHud" ) ) {
-		CL_DrawViewModel( stereo );
 		VM_Call( cgvm, CG_DRAW_2D_ONLY, stereo );
 		VM_Debug( 0 );
 	}
@@ -1091,4 +1091,3 @@ void CL_SetCGameTime( void ) {
 	}
 
 }
-
