@@ -295,8 +295,9 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     VectorCopy( cl.snap.ps.viewangles, viewAngles );
     AnglesToAxis( viewAngles, axis );
 
-    /* Determine stance: 0=stand, 4=duck, 5=prone (pm_type values) */
-    stance = cl.snap.ps.pm_type;
+    /* Determine stance from pm_flags: PMF_DUCKED=1, prone=8 (CoD2, may differ in CoD1) */
+    /* For now: 0=stand, 1=ducked, prone not implemented yet */
+    stance = (cl.snap.ps.pm_flags & 1) ? 4 : 0;  /* 4 = ducked for our lookup */
     xyspeed = sqrtf( cl.snap.ps.velocity[0] * cl.snap.ps.velocity[0] +
                      cl.snap.ps.velocity[1] * cl.snap.ps.velocity[1] );
 
@@ -304,7 +305,7 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     adsFrac = 0.0f;  /* TODO: get from player state when ADS is implemented */
 
     /* Select stance-specific offsets */
-    if ( stance == 5 ) {  /* Prone */
+    if ( stance == 5 ) {  /* Prone (not detected yet, always uses standing) */
         gunOffset[0][0] = def->proneOfsF;  gunOffset[1][0] = def->proneOfsR;  gunOffset[2][0] = def->proneOfsU;
         gunRot[0][0] = def->proneRotP;    gunRot[1][0] = def->proneRotY;    gunRot[2][0] = def->proneRotR;
     } else if ( stance == 4 ) {  /* Ducked */

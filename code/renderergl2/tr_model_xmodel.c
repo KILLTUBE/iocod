@@ -380,8 +380,7 @@ static qboolean XModel_LoadSurfs(
 			}
 			/* CoD1 viewmodel geometry wraps around the camera; always use
 			 * two-sided rendering so inner surfaces are visible. */
-			if ( !sh->defaultShader )
-				sh->cullType = CT_TWO_SIDED;
+			sh->cullType = CT_TWO_SIDED;
 			shaderIdx[0] = sh->defaultShader ? 0 : sh->index;
 		} else {
 			shaderIdx[0] = 0;
