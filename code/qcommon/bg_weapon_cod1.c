@@ -41,10 +41,65 @@ static void SetWeaponField( weaponDef_t *out, const char *key, const char *val )
     else if ( !Q_stricmp( key, "handModel"           ) ) WFSTR( handModel          );
     else if ( !Q_stricmp( key, "worldModel"          ) ) WFSTR( worldModel         );
 
-    /* Viewmodel positioning - CoD1 uses standMoveF/R/U for standing offsets */
-    else if ( !Q_stricmp( key, "standMoveF"          ) ) WFFLT( handOffset[1]      );  /* Forward */
-    else if ( !Q_stricmp( key, "standMoveR"          ) ) WFFLT( handOffset[0]      );  /* Right */
-    else if ( !Q_stricmp( key, "standMoveU"          ) ) WFFLT( handOffset[2]      );  /* Up */
+    /* Standing stance offsets */
+    else if ( !Q_stricmp( key, "standMoveF"          ) ) WFFLT( standMoveF         );
+    else if ( !Q_stricmp( key, "standMoveR"          ) ) WFFLT( standMoveR         );
+    else if ( !Q_stricmp( key, "standMoveU"          ) ) WFFLT( standMoveU         );
+    else if ( !Q_stricmp( key, "standRotP"           ) ) WFFLT( standRotP          );
+    else if ( !Q_stricmp( key, "standRotY"           ) ) WFFLT( standRotY          );
+    else if ( !Q_stricmp( key, "standRotR"           ) ) WFFLT( standRotR          );
+
+    /* Crouched stance offsets */
+    else if ( !Q_stricmp( key, "duckedOfsF"          ) ) WFFLT( duckedOfsF         );
+    else if ( !Q_stricmp( key, "duckedOfsR"          ) ) WFFLT( duckedOfsR         );
+    else if ( !Q_stricmp( key, "duckedOfsU"          ) ) WFFLT( duckedOfsU         );
+    else if ( !Q_stricmp( key, "duckedMoveF"         ) ) WFFLT( duckedMoveF        );
+    else if ( !Q_stricmp( key, "duckedMoveR"         ) ) WFFLT( duckedMoveR        );
+    else if ( !Q_stricmp( key, "duckedMoveU"         ) ) WFFLT( duckedMoveU        );
+    else if ( !Q_stricmp( key, "duckedRotP"          ) ) WFFLT( duckedRotP         );
+    else if ( !Q_stricmp( key, "duckedRotY"          ) ) WFFLT( duckedRotY         );
+    else if ( !Q_stricmp( key, "duckedRotR"          ) ) WFFLT( duckedRotR         );
+
+    /* Prone stance offsets */
+    else if ( !Q_stricmp( key, "proneOfsF"           ) ) WFFLT( proneOfsF          );
+    else if ( !Q_stricmp( key, "proneOfsR"           ) ) WFFLT( proneOfsR          );
+    else if ( !Q_stricmp( key, "proneOfsU"           ) ) WFFLT( proneOfsU          );
+    else if ( !Q_stricmp( key, "proneMoveF"          ) ) WFFLT( proneMoveF         );
+    else if ( !Q_stricmp( key, "proneMoveR"          ) ) WFFLT( proneMoveR         );
+    else if ( !Q_stricmp( key, "proneMoveU"          ) ) WFFLT( proneMoveU         );
+    else if ( !Q_stricmp( key, "proneRotP"           ) ) WFFLT( proneRotP          );
+    else if ( !Q_stricmp( key, "proneRotY"           ) ) WFFLT( proneRotY          );
+    else if ( !Q_stricmp( key, "proneRotR"           ) ) WFFLT( proneRotR          );
+
+    /* Movement interpolation */
+    else if ( !Q_stricmp( key, "posMoveRate"         ) ) WFFLT( posMoveRate        );
+    else if ( !Q_stricmp( key, "posRotRate"          ) ) WFFLT( posRotRate         );
+    else if ( !Q_stricmp( key, "posProneMoveRate"    ) ) WFFLT( posProneMoveRate   );
+    else if ( !Q_stricmp( key, "posProneRotRate"     ) ) WFFLT( posProneRotRate    );
+    else if ( !Q_stricmp( key, "standMoveMinSpeed"   ) ) WFFLT( standMoveMinSpeed  );
+    else if ( !Q_stricmp( key, "duckedMoveMinSpeed"  ) ) WFFLT( duckedMoveMinSpeed );
+    else if ( !Q_stricmp( key, "proneMoveMinSpeed"   ) ) WFFLT( proneMoveMinSpeed  );
+    else if ( !Q_stricmp( key, "standRotMinSpeed"    ) ) WFFLT( standRotMinSpeed   );
+    else if ( !Q_stricmp( key, "duckedRotMinSpeed"   ) ) WFFLT( duckedRotMinSpeed  );
+    else if ( !Q_stricmp( key, "proneRotMinSpeed"    ) ) WFFLT( proneRotMinSpeed   );
+
+    /* Weapon bob/sway */
+    else if ( !Q_stricmp( key, "swayMaxAngle"        ) ) WFFLT( swayMaxAngle       );
+    else if ( !Q_stricmp( key, "swayLerpSpeed"       ) ) WFFLT( swayLerpSpeed      );
+    else if ( !Q_stricmp( key, "swayPitchScale"      ) ) WFFLT( swayPitchScale     );
+    else if ( !Q_stricmp( key, "swayYawScale"        ) ) WFFLT( swayYawScale       );
+    else if ( !Q_stricmp( key, "swayHorizScale"      ) ) WFFLT( swayHorizScale     );
+    else if ( !Q_stricmp( key, "swayVertScale"       ) ) WFFLT( swayVertScale      );
+    else if ( !Q_stricmp( key, "adsSwayMaxAngle"     ) ) WFFLT( adsSwayMaxAngle    );
+    else if ( !Q_stricmp( key, "adsSwayLerpSpeed"    ) ) WFFLT( adsSwayLerpSpeed   );
+    else if ( !Q_stricmp( key, "adsSwayPitchScale"   ) ) WFFLT( adsSwayPitchScale  );
+    else if ( !Q_stricmp( key, "adsSwayYawScale"     ) ) WFFLT( adsSwayYawScale    );
+    else if ( !Q_stricmp( key, "adsSwayHorizScale"   ) ) WFFLT( adsSwayHorizScale  );
+    else if ( !Q_stricmp( key, "adsSwayVertScale"    ) ) WFFLT( adsSwayVertScale   );
+    else if ( !Q_stricmp( key, "adsIdleAmount"       ) ) WFFLT( adsIdleAmount      );
+    else if ( !Q_stricmp( key, "hipIdleAmount"       ) ) WFFLT( hipIdleAmount      );
+    else if ( !Q_stricmp( key, "idleCrouchFactor"    ) ) WFFLT( idleCrouchFactor  );
+    else if ( !Q_stricmp( key, "idleProneFactor"     ) ) WFFLT( idleProneFactor    );
 
     /* Animations */
     else if ( !Q_stricmp( key, "idleAnim"            ) ) WFSTR( anims.idleAnim           );

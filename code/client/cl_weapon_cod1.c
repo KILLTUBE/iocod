@@ -25,10 +25,6 @@ Cvars:
 static cvar_t *cl_startWeapon;  /* weapon name to auto-equip on spawn   */
 static cvar_t *cl_gunFov;       /* viewmodel field of view (degrees)    */
 static cvar_t *cl_drawGun;      /* 0 = hide viewmodel                   */
-static cvar_t *cg_gunX;
-static cvar_t *cg_gunY;
-static cvar_t *cg_gunZ;
-static cvar_t *cl_gunOffsetScale; /* multiplier for weapon file handOffset */
 static cvar_t *cl_animDebug;    /* print current anim frame each frame  */
 
 /* ===========================================================================
@@ -68,6 +64,16 @@ static clWeapon_t cl_weapon;
 /* Track player state to detect spawns */
 static int  s_prevPmType  = -1;  /* -1 = never set */
 static int  s_spawnSerial =  0;  /* incremented on each spawn */
+
+/* Weapon bob/sway state - tracks interpolation between stances */
+typedef struct {
+    float   lastMoveAng[3];      /* interpolated movement angles */
+    float   lastIdleFactor;      /* idle sway amount */
+    int     weapIdleTime;        /* time accumulator for idle sway */
+    float   swayAngles[3];       /* current sway angles */
+} weaponSwayState_t;
+
+static weaponSwayState_t s_sway = {0};
 
 /* ===========================================================================
    Helpers
@@ -274,30 +280,74 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     if ( cl_animDebug && cl_animDebug->integer )
         Com_Printf( "anim=%d frame=%.1f\n", cl_weapon.currentAnim, animFrame );
 
-    /* Build eye position from player state */
-    vec3_t cameraOrigin, modelOrigin;
-    VectorCopy( cl.snap.ps.origin,    cameraOrigin );
+    /* Get player stance and build view axis */
+    vec3_t cameraOrigin, modelOrigin, modelAngles;
+    vec3_t gunOffset[3];  /* [0]=forward, [1]=right, [2]=up */
+    vec3_t gunRot[3];     /* rotation angles */
+    int stance;
+    float xyspeed, adsFrac;
+    weaponDef_t *def = &cl_weapon.def;
+    int i;
+
+    VectorCopy( cl.snap.ps.origin, cameraOrigin );
     cameraOrigin[2] += cl.snap.ps.viewheight;
     VectorCopy( cl.snap.ps.viewangles, viewAngles );
     AnglesToAxis( viewAngles, axis );
 
-    /* Model origin starts at camera, then apply weapon's handOffset
-     * CoD1 axis: [0]=right, [1]=forward, [2]=up */
-    VectorCopy( cameraOrigin, modelOrigin );
-    if ( cl_weapon.def.handOffset[0] != 0.0f )
-        VectorMA( modelOrigin, cl_weapon.def.handOffset[0], axis[0], modelOrigin );
-    if ( cl_weapon.def.handOffset[1] != 0.0f )
-        VectorMA( modelOrigin, cl_weapon.def.handOffset[1], axis[1], modelOrigin );
-    if ( cl_weapon.def.handOffset[2] != 0.0f )
-        VectorMA( modelOrigin, cl_weapon.def.handOffset[2], axis[2], modelOrigin );
+    /* Determine stance: 0=stand, 4=duck, 5=prone (pm_type values) */
+    stance = cl.snap.ps.pm_type;
+    xyspeed = sqrtf( cl.snap.ps.velocity[0] * cl.snap.ps.velocity[0] +
+                     cl.snap.ps.velocity[1] * cl.snap.ps.velocity[1] );
 
-    /* cg_gunX/Y/Z cvars can override the weapon file values for tuning */
-    if ( cg_gunX && cg_gunX->value != 0.0f )
-        VectorMA( modelOrigin, cg_gunX->value, axis[0], modelOrigin );
-    if ( cg_gunY && cg_gunY->value != 0.0f )
-        VectorMA( modelOrigin, cg_gunY->value, axis[1], modelOrigin );
-    if ( cg_gunZ && cg_gunZ->value != 0.0f )
-        VectorMA( modelOrigin, cg_gunZ->value, axis[2], modelOrigin );
+    /* ADS fraction (0 = hip, 1 = fully ADS) - simplified for now */
+    adsFrac = 0.0f;  /* TODO: get from player state when ADS is implemented */
+
+    /* Select stance-specific offsets */
+    if ( stance == 5 ) {  /* Prone */
+        gunOffset[0][0] = def->proneOfsF;  gunOffset[1][0] = def->proneOfsR;  gunOffset[2][0] = def->proneOfsU;
+        gunRot[0][0] = def->proneRotP;    gunRot[1][0] = def->proneRotY;    gunRot[2][0] = def->proneRotR;
+    } else if ( stance == 4 ) {  /* Ducked */
+        gunOffset[0][0] = def->duckedOfsF; gunOffset[1][0] = def->duckedOfsR; gunOffset[2][0] = def->duckedOfsU;
+        gunRot[0][0] = def->duckedRotP;   gunRot[1][0] = def->duckedRotY;   gunRot[2][0] = def->duckedRotR;
+    } else {  /* Standing */
+        gunOffset[0][0] = def->standMoveF; gunOffset[1][0] = def->standMoveR; gunOffset[2][0] = def->standMoveU;
+        gunRot[0][0] = def->standRotP;    gunRot[1][0] = def->standRotY;    gunRot[2][0] = def->standRotR;
+    }
+
+    /* Calculate weapon bob/sway - simplified version */
+    /* Time-based idle sway */
+    float idleAmount = def->hipIdleAmount;
+    if ( stance == 4 ) idleAmount *= def->idleCrouchFactor;
+    else if ( stance == 5 ) idleAmount *= def->idleProneFactor;
+
+    s_sway.weapIdleTime += cls.frametime * 1000.0f;
+    gunRot[0][0] += sinf( s_sway.weapIdleTime * 0.001f ) * idleAmount * 0.01f;
+    gunRot[1][0] += sinf( s_sway.weapIdleTime * 0.0007f ) * idleAmount * 0.01f;
+    gunRot[2][0] += sinf( s_sway.weapIdleTime * 0.0005f ) * idleAmount * 0.01f;
+
+    /* Movement bob - simplified */
+    if ( xyspeed > 10.0f ) {
+        float bob = sinf( cls.realtime * 0.01f ) * 0.5f;
+        gunRot[2][0] += bob * 0.5f;  /* Roll bob */
+    }
+
+    /* Build model position: start at camera, apply offsets along view axes */
+    VectorCopy( cameraOrigin, modelOrigin );
+    /* axis[0] = forward, axis[1] = left, axis[2] = up in Quake */
+    /* But CoD offsets are: F = forward, R = right, U = up */
+    VectorMA( modelOrigin, gunOffset[0][0], axis[0], modelOrigin );  /* Forward */
+    VectorMA( modelOrigin, -gunOffset[1][0], axis[1], modelOrigin ); /* Right (negate left axis) */
+    VectorMA( modelOrigin, gunOffset[2][0], axis[2], modelOrigin );  /* Up */
+
+    /* Build model angles: view angles + weapon rotation */
+    VectorCopy( viewAngles, modelAngles );
+    modelAngles[0] += gunRot[0][0];  /* Pitch */
+    modelAngles[1] += gunRot[1][0];  /* Yaw */
+    modelAngles[2] += gunRot[2][0];  /* Roll */
+
+    /* Build entity rotation axis from model angles */
+    vec3_t entityAxis[3];
+    AnglesToAxis( modelAngles, entityAxis );
 
     /* Full-screen refdef with no world (just our weapon entities) */
     Com_Memset( &refdef, 0, sizeof(refdef) );
@@ -315,15 +365,15 @@ void CL_DrawViewModel( stereoFrame_t stereo )
                         * (float)refdef.height / (float)refdef.width )
                    * (float)(180.0 / M_PI);
 
-    /* Camera stays at eye position (no gun offset) */
+    /* Camera stays at eye position with raw view angles */
     VectorCopy( cameraOrigin, refdef.vieworg );
-    AxisCopy( axis, refdef.viewaxis );
+    AnglesToAxis( viewAngles, refdef.viewaxis );
 
     /* Start a new entity list after cgame's committed scene */
     re.ClearScene();
 
     if ( cl_weapon.handModel ) {
-        AddViewmodelEnt( cl_weapon.handModel, modelOrigin, axis );
+        AddViewmodelEnt( cl_weapon.handModel, modelOrigin, entityAxis );
     }
     if ( cl_weapon.gunModel ) {
         /* Place gun at the same root origin as the hands.  In CoD, the hand
@@ -331,7 +381,7 @@ void CL_DrawViewModel( stereoFrame_t stereo )
          * viewOrigin and the shared animation drives all bones (including
          * tag_weapon) relative to that root.  Placing the gun at the hand's
          * tag_weapon would double-count the tag_weapon bone offset. */
-        AddViewmodelEnt( cl_weapon.gunModel, modelOrigin, axis );
+        AddViewmodelEnt( cl_weapon.gunModel, modelOrigin, entityAxis );
     }
 
     re.RenderScene( &refdef );
@@ -397,11 +447,6 @@ void CL_WeaponCod1_Init( void )
     cl_startWeapon = Cvar_Get( "cl_startWeapon", "mp44_mp", CVAR_ARCHIVE );
     cl_gunFov      = Cvar_Get( "cl_gunFov",      "65",      CVAR_ARCHIVE );
     cl_drawGun     = Cvar_Get( "cl_drawGun",     "1",       CVAR_ARCHIVE );
-    /* Viewmodel positioning overrides (weapon file provides defaults) */
-    cg_gunX           = Cvar_Get( "cg_gunX",           "0",    CVAR_CHEAT );
-    cg_gunY           = Cvar_Get( "cg_gunY",           "0",    CVAR_CHEAT );
-    cg_gunZ           = Cvar_Get( "cg_gunZ",           "0",    CVAR_CHEAT );
-    cl_gunOffsetScale = Cvar_Get( "cl_gunOffsetScale", "15",   CVAR_ARCHIVE );
     cl_animDebug   = Cvar_Get( "cl_animDebug",   "0",       CVAR_TEMP  );
 
     Cmd_AddCommand( "give",        CL_Give_f        );

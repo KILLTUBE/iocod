@@ -44,8 +44,50 @@ typedef struct {
 	char  handModel[MAX_QPATH];   /* hands xmodel (without "xmodel/") */
 	char  worldModel[MAX_QPATH];  /* world/pickup xmodel (full path, e.g. "xmodel/weapon_colt45") */
 
-	/* Viewmodel positioning (offset from camera eye) */
-	float  handOffset[3];         /* right, forward, up offset for viewmodel */
+	/* Viewmodel positioning - stance-specific offsets (F/R/U = Forward/Right/Up) */
+	/* Standing position offsets */
+	float  standMoveF, standMoveR, standMoveU;      /* position */
+	float  standRotP, standRotY, standRotR;         /* rotation (pitch/yaw/roll) */
+
+	/* Crouched position offsets */
+	float  duckedOfsF, duckedOfsR, duckedOfsU;      /* base position offset */
+	float  duckedMoveF, duckedMoveR, duckedMoveU;   /* movement offset */
+	float  duckedRotP, duckedRotY, duckedRotR;      /* rotation */
+
+	/* Prone position offsets */
+	float  proneOfsF, proneOfsR, proneOfsU;         /* base position offset */
+	float  proneMoveF, proneMoveR, proneMoveU;      /* movement offset */
+	float  proneRotP, proneRotY, proneRotR;         /* rotation */
+
+	/* Movement interpolation */
+	float  posMoveRate;              /* position transition speed */
+	float  posRotRate;               /* rotation transition speed */
+	float  posProneMoveRate;         /* prone position speed */
+	float  posProneRotRate;          /* prone rotation speed */
+	float  standMoveMinSpeed;        /* min speed for stand movement */
+	float  duckedMoveMinSpeed;       /* min speed for ducked movement */
+	float  proneMoveMinSpeed;        /* min speed for prone movement */
+	float  standRotMinSpeed;         /* min speed for stand rotation */
+	float  duckedRotMinSpeed;        /* min speed for ducked rotation */
+	float  proneRotMinSpeed;         /* min speed for prone rotation */
+
+	/* Weapon bob/sway */
+	float  swayMaxAngle;             /* max sway angle */
+	float  swayLerpSpeed;            /* sway interpolation speed */
+	float  swayPitchScale;           /* pitch sway multiplier */
+	float  swayYawScale;             /* yaw sway multiplier */
+	float  swayHorizScale;           /* horizontal sway multiplier */
+	float  swayVertScale;            /* vertical sway multiplier */
+	float  adsSwayMaxAngle;          /* ADS max sway angle */
+	float  adsSwayLerpSpeed;         /* ADS sway speed */
+	float  adsSwayPitchScale;        /* ADS pitch scale */
+	float  adsSwayYawScale;          /* ADS yaw scale */
+	float  adsSwayHorizScale;        /* ADS horizontal scale */
+	float  adsSwayVertScale;         /* ADS vertical scale */
+	float  adsIdleAmount;            /* ADS idle sway amount */
+	float  hipIdleAmount;            /* hip idle sway amount */
+	float  idleCrouchFactor;         /* crouch idle multiplier */
+	float  idleProneFactor;          /* prone idle multiplier */
 
 	/* Animations */
 	weaponAnims_t anims;
