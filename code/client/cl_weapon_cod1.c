@@ -25,6 +25,7 @@ Cvars:
 static cvar_t *cl_startWeapon;  /* weapon name to auto-equip on spawn   */
 static cvar_t *cl_gunFov;       /* viewmodel field of view (degrees)    */
 static cvar_t *cl_drawGun;      /* 0 = hide viewmodel                   */
+static cvar_t *cl_gunPosScale;  /* scale multiplier for weapon offsets  */
 static cvar_t *cl_animDebug;    /* print current anim frame each frame  */
 
 /* ===========================================================================
@@ -315,29 +316,38 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     }
 
     /* Calculate weapon bob/sway - simplified version */
-    /* Time-based idle sway */
+    /* Time-based idle sway - use smaller scale factor */
     float idleAmount = def->hipIdleAmount;
     if ( stance == 4 ) idleAmount *= def->idleCrouchFactor;
     else if ( stance == 5 ) idleAmount *= def->idleProneFactor;
 
-    s_sway.weapIdleTime += cls.frametime * 1000.0f;
-    gunRot[0][0] += sinf( s_sway.weapIdleTime * 0.001f ) * idleAmount * 0.01f;
-    gunRot[1][0] += sinf( s_sway.weapIdleTime * 0.0007f ) * idleAmount * 0.01f;
-    gunRot[2][0] += sinf( s_sway.weapIdleTime * 0.0005f ) * idleAmount * 0.01f;
+    /* Clamp idle amount to reasonable values */
+    if ( idleAmount > 30.0f ) idleAmount = 30.0f;
 
-    /* Movement bob - simplified */
-    if ( xyspeed > 10.0f ) {
-        float bob = sinf( cls.realtime * 0.01f ) * 0.5f;
-        gunRot[2][0] += bob * 0.5f;  /* Roll bob */
+    s_sway.weapIdleTime += cls.frametime * 1000.0f;
+    /* Much smaller sway - CoD values are degrees, we need small radians */
+    float swayScale = 0.0001f;  /* very subtle */
+    gunRot[0][0] += sinf( s_sway.weapIdleTime * 0.001f ) * idleAmount * swayScale;
+    gunRot[1][0] += sinf( s_sway.weapIdleTime * 0.0007f ) * idleAmount * swayScale;
+    gunRot[2][0] += sinf( s_sway.weapIdleTime * 0.0005f ) * idleAmount * swayScale;
+
+    /* Movement bob - only when actually moving on ground */
+    if ( xyspeed > 50.0f && stance != 5 ) {
+        float bob = sinf( cls.realtime * 0.01f ) * 0.1f;
+        gunRot[2][0] += bob;  /* Roll bob */
     }
 
     /* Build model position: start at camera, apply offsets along view axes */
     VectorCopy( cameraOrigin, modelOrigin );
+
+    /* Get scale factor for tuning */
+    float scale = ( cl_gunPosScale && cl_gunPosScale->value > 0.0f ) ? cl_gunPosScale->value : 1.0f;
+
     /* axis[0] = forward, axis[1] = left, axis[2] = up in Quake */
     /* But CoD offsets are: F = forward, R = right, U = up */
-    VectorMA( modelOrigin, gunOffset[0][0], axis[0], modelOrigin );  /* Forward */
-    VectorMA( modelOrigin, -gunOffset[1][0], axis[1], modelOrigin ); /* Right (negate left axis) */
-    VectorMA( modelOrigin, gunOffset[2][0], axis[2], modelOrigin );  /* Up */
+    VectorMA( modelOrigin, gunOffset[0][0] * scale, axis[0], modelOrigin );  /* Forward */
+    VectorMA( modelOrigin, -gunOffset[1][0] * scale, axis[1], modelOrigin ); /* Right (negate left axis) */
+    VectorMA( modelOrigin, gunOffset[2][0] * scale, axis[2], modelOrigin );  /* Up */
 
     /* Build model angles: view angles + weapon rotation */
     VectorCopy( viewAngles, modelAngles );
@@ -447,6 +457,7 @@ void CL_WeaponCod1_Init( void )
     cl_startWeapon = Cvar_Get( "cl_startWeapon", "mp44_mp", CVAR_ARCHIVE );
     cl_gunFov      = Cvar_Get( "cl_gunFov",      "65",      CVAR_ARCHIVE );
     cl_drawGun     = Cvar_Get( "cl_drawGun",     "1",       CVAR_ARCHIVE );
+    cl_gunPosScale = Cvar_Get( "cl_gunPosScale", "1.0",     CVAR_ARCHIVE );
     cl_animDebug   = Cvar_Get( "cl_animDebug",   "0",       CVAR_TEMP  );
 
     Cmd_AddCommand( "give",        CL_Give_f        );
