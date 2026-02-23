@@ -143,13 +143,12 @@ void CG_DrawChar( int x, int y, int width, int height, int ch ) {
 	if ( cgs.hudFont.glyphScale > 0 && glyph->glyph && glyph->imageHeight > 0 ) {
 #define HUD_FONT_ASCENDER  12   /* max glyph->top for 16pt font  */
 #define HUD_FONT_LINE_H    16   /* ascender(12) + descender(4)   */
-		// Scale height so the line fits the cell
-		float scale_h = (float)height / HUD_FONT_LINE_H;
-		// Cap rendered width to the cell - wide glyphs are squished
+		// Scale relative to the screen-space cell height (ah already converted from 640)
+		float scale_h = ah / HUD_FONT_LINE_H;
 		float w = glyph->imageWidth  * scale_h;
 		float h = glyph->imageHeight * scale_h;
-		if ( w > width )
-			w = width;
+		if ( w > aw )
+			w = aw;
 		// Baseline alignment: shift each glyph down by the difference
 		// between the max ascender and this glyph's ascender
 		float y_off = (HUD_FONT_ASCENDER - glyph->top) * scale_h;
