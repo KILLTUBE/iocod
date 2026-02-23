@@ -339,7 +339,7 @@ static qboolean CL_TP_IsHelmetLikeModel( const char *modelPath )
 static const char *CL_TP_DefaultTagForAttachment( const char *modelPath )
 {
     if ( CL_TP_IsHeadLikeModel( modelPath ) ) {
-        return "bip01 spine2";
+        return "j_head";
     }
 
     if ( CL_TP_IsHelmetLikeModel( modelPath ) ) {
@@ -1206,12 +1206,14 @@ static void CL_TP_LoadCharacterAssets( void )
     tpAttachment_t desiredAttachments[TP_MAX_ATTACHMENTS];
     int desiredAttachmentCount;
     qboolean fromScript;
+    qboolean hasHeadAttachment;
     int i;
 
     desiredModelPath[0] = '\0';
     desiredScriptPath[0] = '\0';
     desiredAttachmentCount = 0;
     fromScript = qfalse;
+    hasHeadAttachment = qfalse;
 
     if ( cl_thirdPersonModel && cl_thirdPersonModel->string[0] ) {
         CL_TP_NormalizeModelPath( cl_thirdPersonModel->string,
@@ -1268,7 +1270,7 @@ static void CL_TP_LoadCharacterAssets( void )
         vec3_t mins, maxs;
         re.ModelBounds( s_tpChar.baseModel, mins, maxs );
         s_tpChar.baseFootOffset = -mins[2];
-        if ( s_tpChar.baseFootOffset < -256.0f || s_tpChar.baseFootOffset > 256.0f ) {
+        if ( s_tpChar.baseFootOffset < 0.0f || s_tpChar.baseFootOffset > 64.0f ) {
             s_tpChar.baseFootOffset = 0.0f;
         }
     }
@@ -1284,7 +1286,25 @@ static void CL_TP_LoadCharacterAssets( void )
                         s_tpChar.attachments[s_tpChar.numAttachments].modelPath );
         }
 
+        if ( CL_TP_IsHeadLikeModel( s_tpChar.attachments[s_tpChar.numAttachments].modelPath ) &&
+             s_tpChar.attachments[s_tpChar.numAttachments].hModel ) {
+            hasHeadAttachment = qtrue;
+        }
+
+        if ( cl_thirdPersonDebug && cl_thirdPersonDebug->integer >= 2 ) {
+            Com_Printf( "thirdperson: attachment[%d] model='%s' tag='%s' loaded=%d\n",
+                        s_tpChar.numAttachments,
+                        s_tpChar.attachments[s_tpChar.numAttachments].modelPath,
+                        s_tpChar.attachments[s_tpChar.numAttachments].tagName,
+                        s_tpChar.attachments[s_tpChar.numAttachments].hModel ? 1 : 0 );
+        }
+
         s_tpChar.numAttachments++;
+    }
+
+    if ( !hasHeadAttachment && cl_thirdPersonDebug && cl_thirdPersonDebug->integer ) {
+        Com_Printf( "thirdperson: warning - no loaded head attachment for model '%s'\n",
+                    desiredModelPath );
     }
 
     Q_strncpyz( s_tpChar.loadedModelPath, desiredModelPath, sizeof( s_tpChar.loadedModelPath ) );
@@ -1481,6 +1501,38 @@ static tpLegAnimSlot_t CL_TP_MoveAnimForDir( int dir, qboolean crouched, qboolea
     }
 }
 
+static qboolean CL_TP_IsMoveLegAnim( tpLegAnimSlot_t slot )
+{
+    return ( slot != TP_LEG_ANIM_STAND_IDLE &&
+             slot != TP_LEG_ANIM_CROUCH_IDLE &&
+             slot != TP_LEG_ANIM_PRONE_IDLE );
+}
+
+static int CL_TP_ComputeMoveDirFromVelocity( const vec3_t velocity, float yaw )
+{
+    vec3_t angles;
+    vec3_t axis[3];
+    float fwd;
+    float left;
+
+    if ( fabsf( velocity[0] ) < 0.001f && fabsf( velocity[1] ) < 0.001f ) {
+        return 0;
+    }
+
+    VectorClear( angles );
+    angles[YAW] = yaw;
+    AnglesToAxis( angles, axis );
+
+    fwd = velocity[0] * axis[0][0] + velocity[1] * axis[0][1];
+    left = velocity[0] * axis[1][0] + velocity[1] * axis[1][1];
+
+    if ( fabsf( fwd ) >= fabsf( left ) ) {
+        return ( fwd >= 0.0f ) ? 0 : 4;
+    }
+
+    return ( left >= 0.0f ) ? 2 : 6;
+}
+
 static tpLegAnimSlot_t CL_TP_ChooseLegAnimForPlayerState( const playerState_t *ps )
 {
     int legsAnim;
@@ -1490,6 +1542,9 @@ static tpLegAnimSlot_t CL_TP_ChooseLegAnimForPlayerState( const playerState_t *p
     qboolean prone;
     qboolean forceBack;
     int dir;
+    qboolean currentlyMoving;
+    float moveThreshold;
+    float moveStopThreshold;
 
     legsAnim = ps->legsAnim & ~ANIM_TOGGLEBIT;
 
@@ -1499,6 +1554,15 @@ static tpLegAnimSlot_t CL_TP_ChooseLegAnimForPlayerState( const playerState_t *p
     CL_TP_DeriveStanceFlags( ps, &crouched, &prone );
     forceBack = qfalse;
     dir = ps->movementDir & 7;
+    currentlyMoving = CL_TP_IsMoveLegAnim( s_tpChar.currentLegAnim );
+    moveThreshold = cl_thirdPersonMoveThreshold ? cl_thirdPersonMoveThreshold->value : 20.0f;
+    if ( moveThreshold < 1.0f ) {
+        moveThreshold = 1.0f;
+    }
+    moveStopThreshold = moveThreshold * 0.65f;
+    if ( moveStopThreshold < 1.0f ) {
+        moveStopThreshold = 1.0f;
+    }
 
     if ( ps->pm_type != PM_NORMAL && ps->pm_type != PM_DEAD ) {
         return CL_TP_LegIdleAnimForStance( crouched, prone );
@@ -1538,11 +1602,15 @@ static tpLegAnimSlot_t CL_TP_ChooseLegAnimForPlayerState( const playerState_t *p
     }
 
     if ( !moving ) {
-        moving = ( xyspeed > ( cl_thirdPersonMoveThreshold ? cl_thirdPersonMoveThreshold->value : 20.0f ) );
+        moving = currentlyMoving ? ( xyspeed > moveStopThreshold ) : ( xyspeed > moveThreshold );
     }
 
     if ( !moving || ps->groundEntityNum == ENTITYNUM_NONE ) {
         return CL_TP_LegIdleAnimForStance( crouched, prone );
+    }
+
+    if ( !forceBack ) {
+        dir = CL_TP_ComputeMoveDirFromVelocity( ps->velocity, cl.viewangles[YAW] );
     }
 
     return CL_TP_MoveAnimForDir( dir, crouched, prone, forceBack );
@@ -1674,7 +1742,7 @@ static qboolean CL_TP_PositionAttachment( refEntity_t *ent, const refEntity_t *p
                                           const tpAttachment_t *attachment )
 {
     static const char *headFallbackTags[] = {
-        "bip01 spine2", "bip01 neck", "neck", "tag_head", "j_head", "bip01 head", "head", "tag_helmet"
+        "j_head", "tag_head", "bip01 head", "head", "bip01 neck", "neck", "bip01 spine2", "tag_helmet"
     };
     static const char *helmetFallbackTags[] = {
         "tag_helmet", "tag_head", "j_head", "bip01 head", "head"
@@ -1703,35 +1771,86 @@ static qboolean CL_TP_PositionAttachment( refEntity_t *ent, const refEntity_t *p
     return qfalse;
 }
 
-static int CL_TP_FindMergedAttachmentIndex( void )
+static qboolean CL_TP_PositionAttachmentBySharedTag( refEntity_t *ent,
+                                                     const refEntity_t *parent,
+                                                     qhandle_t childModel,
+                                                     const char *tagName )
 {
-    int i;
+    orientation_t parentTag;
+    orientation_t childTag;
+    vec3_t parentOrigin;
+    vec3_t parentTagWorldAxis[3];
+    vec3_t parentAxis[3];
+    vec3_t childInvAxis[3];
+    vec3_t childTagWorldOffset;
 
-    for ( i = 0; i < s_tpChar.numAttachments; ++i ) {
-        if ( !s_tpChar.attachments[i].hModel ) {
-            continue;
-        }
-        if ( CL_TP_IsHeadLikeModel( s_tpChar.attachments[i].modelPath ) ) {
-            return i;
-        }
+    if ( !tagName || !tagName[0] || !childModel ) {
+        return qfalse;
     }
 
-    return -1;
+    if ( !re.LerpTag( &parentTag, parent->hModel, 0, 0, 1.0f, tagName ) ) {
+        return qfalse;
+    }
+    if ( !re.LerpTag( &childTag, childModel, 0, 0, 1.0f, tagName ) ) {
+        return qfalse;
+    }
+
+    VectorCopy( parent->origin, parentOrigin );
+    VectorMA( parentOrigin, parentTag.origin[0], parent->axis[0], parentOrigin );
+    VectorMA( parentOrigin, parentTag.origin[1], parent->axis[1], parentOrigin );
+    VectorMA( parentOrigin, parentTag.origin[2], parent->axis[2], parentOrigin );
+
+    VectorCopy( parent->axis[0], parentAxis[0] );
+    VectorCopy( parent->axis[1], parentAxis[1] );
+    VectorCopy( parent->axis[2], parentAxis[2] );
+    MatrixMultiply( parentTag.axis, parentAxis, parentTagWorldAxis );
+
+    childInvAxis[0][0] = childTag.axis[0][0];
+    childInvAxis[0][1] = childTag.axis[1][0];
+    childInvAxis[0][2] = childTag.axis[2][0];
+    childInvAxis[1][0] = childTag.axis[0][1];
+    childInvAxis[1][1] = childTag.axis[1][1];
+    childInvAxis[1][2] = childTag.axis[2][1];
+    childInvAxis[2][0] = childTag.axis[0][2];
+    childInvAxis[2][1] = childTag.axis[1][2];
+    childInvAxis[2][2] = childTag.axis[2][2];
+
+    MatrixMultiply( parentTagWorldAxis, childInvAxis, ent->axis );
+
+    VectorClear( childTagWorldOffset );
+    VectorMA( childTagWorldOffset, childTag.origin[0], ent->axis[0], childTagWorldOffset );
+    VectorMA( childTagWorldOffset, childTag.origin[1], ent->axis[1], childTagWorldOffset );
+    VectorMA( childTagWorldOffset, childTag.origin[2], ent->axis[2], childTagWorldOffset );
+
+    VectorSubtract( parentOrigin, childTagWorldOffset, ent->origin );
+    VectorCopy( ent->origin, ent->oldorigin );
+    return qtrue;
+}
+
+static void CL_TP_CopyEntityTransform( refEntity_t *dst, const refEntity_t *src )
+{
+    VectorCopy( src->origin, dst->origin );
+    VectorCopy( src->origin, dst->oldorigin );
+    VectorCopy( src->axis[0], dst->axis[0] );
+    VectorCopy( src->axis[1], dst->axis[1] );
+    VectorCopy( src->axis[2], dst->axis[2] );
 }
 
 static void CL_TP_AddAttachments( const refEntity_t *baseEnt,
-                                  const refEntity_t *mergedHeadEnt,
-                                  int mergedAttachmentIndex )
+                                  qhandle_t legsAnimHandle, float legsAnimFrame,
+                                  qhandle_t torsoAnimHandle, float torsoAnimFrame,
+                                  qboolean useTorsoBlend, const char *torsoRootBone )
 {
+    static const char *headSharedTags[] = {
+        "j_head", "tag_head", "bip01 head", "head", "bip01 neck", "bip01 spine2"
+    };
     int i;
 
     for ( i = 0; i < s_tpChar.numAttachments; ++i ) {
         refEntity_t att;
         qboolean positioned;
+        int t;
 
-        if ( i == mergedAttachmentIndex ) {
-            continue;
-        }
         if ( !s_tpChar.attachments[i].hModel ) {
             continue;
         }
@@ -1748,11 +1867,44 @@ static void CL_TP_AddAttachments( const refEntity_t *baseEnt,
         VectorCopy( baseEnt->axis[1], att.axis[1] );
         VectorCopy( baseEnt->axis[2], att.axis[2] );
 
-        positioned = CL_TP_PositionAttachment( &att, baseEnt, &s_tpChar.attachments[i] );
-        if ( !positioned && mergedHeadEnt &&
-             ( CL_TP_IsHeadLikeModel( s_tpChar.attachments[i].modelPath ) ||
-               CL_TP_IsHelmetLikeModel( s_tpChar.attachments[i].modelPath ) ) ) {
-            CL_TP_PositionAttachment( &att, mergedHeadEnt, &s_tpChar.attachments[i] );
+        if ( CL_TP_IsHeadLikeModel( s_tpChar.attachments[i].modelPath ) ) {
+            if ( useTorsoBlend && re.UpdateXModelPoseBlend && legsAnimHandle ) {
+                re.UpdateXModelPoseBlend( att.hModel,
+                                          legsAnimHandle, legsAnimFrame,
+                                          torsoAnimHandle, torsoAnimFrame,
+                                          torsoRootBone );
+            } else if ( re.UpdateXModelPose && ( legsAnimHandle || torsoAnimHandle ) ) {
+                qhandle_t singleAnim = legsAnimHandle ? legsAnimHandle : torsoAnimHandle;
+                float singleFrame = legsAnimHandle ? legsAnimFrame : torsoAnimFrame;
+                re.UpdateXModelPose( att.hModel, singleAnim, singleFrame );
+            }
+        }
+
+        positioned = qfalse;
+        if ( CL_TP_IsHeadLikeModel( s_tpChar.attachments[i].modelPath ) ) {
+            if ( s_tpChar.attachments[i].tagName[0] ) {
+                positioned = CL_TP_PositionAttachmentBySharedTag(
+                    &att, baseEnt, att.hModel, s_tpChar.attachments[i].tagName );
+            }
+            if ( !positioned ) {
+                for ( t = 0; t < (int)ARRAY_LEN( headSharedTags ); ++t ) {
+                    if ( CL_TP_PositionAttachmentBySharedTag( &att, baseEnt, att.hModel, headSharedTags[t] ) ) {
+                        positioned = qtrue;
+                        break;
+                    }
+                }
+            }
+
+            if ( !positioned ) {
+                /* Head/body parts are authored to the character rig.
+                 * If no shared tag resolves, keep base pose alignment. */
+                CL_TP_CopyEntityTransform( &att, baseEnt );
+                positioned = qtrue;
+            }
+        }
+
+        if ( !positioned ) {
+            positioned = CL_TP_PositionAttachment( &att, baseEnt, &s_tpChar.attachments[i] );
         }
 
         re.AddRefEntityToScene( &att );
@@ -1796,13 +1948,11 @@ void CL_AddThirdPersonCharacter( const refdef_t *fd )
     playerState_t interpPs;
     tpLegAnimSlot_t desiredLegAnim;
     tpTorsoAnimSlot_t desiredTorsoAnim;
-    int mergedAttachmentIndex;
-    refEntity_t mergedHeadEnt;
-    qboolean hasMergedHeadEnt;
     qhandle_t legsAnimHandle;
     qhandle_t torsoAnimHandle;
     float legsAnimFrame;
     float torsoAnimFrame;
+    float groundOffset;
     qboolean useTorsoBlend;
     const char *torsoRootBone;
 
@@ -1858,15 +2008,29 @@ void CL_AddThirdPersonCharacter( const refdef_t *fd )
     torsoRootBone = ( cl_thirdPersonTorsoRoot && cl_thirdPersonTorsoRoot->string[0] ) ?
                     cl_thirdPersonTorsoRoot->string : "bip01 spine2";
 
+    if ( useTorsoBlend && re.UpdateXModelPoseBlend && legsAnimHandle ) {
+        re.UpdateXModelPoseBlend( s_tpChar.baseModel,
+                                  legsAnimHandle, legsAnimFrame,
+                                  torsoAnimHandle, torsoAnimFrame,
+                                  torsoRootBone );
+    } else if ( re.UpdateXModelPose && ( legsAnimHandle || torsoAnimHandle ) ) {
+        qhandle_t singleAnim = legsAnimHandle ? legsAnimHandle : torsoAnimHandle;
+        float singleFrame = legsAnimHandle ? legsAnimFrame : torsoAnimFrame;
+        re.UpdateXModelPose( s_tpChar.baseModel, singleAnim, singleFrame );
+    }
+
+    groundOffset = 0.0f;
+    if ( cl_thirdPersonAutoGround && cl_thirdPersonAutoGround->integer ) {
+        groundOffset = s_tpChar.baseFootOffset;
+    }
+
     Com_Memset( &ent, 0, sizeof( ent ) );
     ent.reType = RT_MODEL;
     ent.hModel = s_tpChar.baseModel;
     ent.renderfx = RF_LIGHTING_ORIGIN;
 
     VectorCopy( interpOrigin, ent.origin );
-    if ( cl_thirdPersonAutoGround && cl_thirdPersonAutoGround->integer ) {
-        ent.origin[2] += s_tpChar.baseFootOffset;
-    }
+    ent.origin[2] += groundOffset;
     ent.origin[2] += cl_thirdPersonZOffset ? cl_thirdPersonZOffset->value : 0.0f;
 
     VectorCopy( ent.origin, ent.oldorigin );
@@ -1903,53 +2067,11 @@ void CL_AddThirdPersonCharacter( const refdef_t *fd )
     angles[YAW] = s_tpChar.renderYaw + ( cl_thirdPersonYawOffset ? cl_thirdPersonYawOffset->value : 0.0f );
     AnglesToAxis( angles, ent.axis );
 
-    mergedAttachmentIndex = CL_TP_FindMergedAttachmentIndex();
-    hasMergedHeadEnt = qfalse;
-    if ( mergedAttachmentIndex >= 0 &&
-         s_tpChar.attachments[mergedAttachmentIndex].hModel ) {
-        if ( useTorsoBlend && re.UpdateDObjPoseBlend && legsAnimHandle ) {
-            re.UpdateDObjPoseBlend( s_tpChar.baseModel,
-                                    s_tpChar.attachments[mergedAttachmentIndex].hModel,
-                                    legsAnimHandle, legsAnimFrame,
-                                    torsoAnimHandle, torsoAnimFrame,
-                                    torsoRootBone );
-        } else if ( re.UpdateDObjPose && ( legsAnimHandle || torsoAnimHandle ) ) {
-            qhandle_t singleAnim = legsAnimHandle ? legsAnimHandle : torsoAnimHandle;
-            float singleFrame = legsAnimHandle ? legsAnimFrame : torsoAnimFrame;
-            re.UpdateDObjPose( s_tpChar.baseModel,
-                               s_tpChar.attachments[mergedAttachmentIndex].hModel,
-                               singleAnim, singleFrame );
-        }
-
-        Com_Memset( &mergedHeadEnt, 0, sizeof( mergedHeadEnt ) );
-        mergedHeadEnt.reType = RT_MODEL;
-        mergedHeadEnt.hModel = s_tpChar.attachments[mergedAttachmentIndex].hModel;
-        mergedHeadEnt.renderfx = ent.renderfx;
-        VectorCopy( ent.origin, mergedHeadEnt.origin );
-        VectorCopy( ent.origin, mergedHeadEnt.oldorigin );
-        VectorCopy( ent.lightingOrigin, mergedHeadEnt.lightingOrigin );
-        VectorCopy( ent.axis[0], mergedHeadEnt.axis[0] );
-        VectorCopy( ent.axis[1], mergedHeadEnt.axis[1] );
-        VectorCopy( ent.axis[2], mergedHeadEnt.axis[2] );
-        hasMergedHeadEnt = qtrue;
-    } else {
-        if ( useTorsoBlend && re.UpdateXModelPoseBlend && legsAnimHandle ) {
-            re.UpdateXModelPoseBlend( s_tpChar.baseModel,
-                                      legsAnimHandle, legsAnimFrame,
-                                      torsoAnimHandle, torsoAnimFrame,
-                                      torsoRootBone );
-        } else if ( re.UpdateXModelPose && ( legsAnimHandle || torsoAnimHandle ) ) {
-            qhandle_t singleAnim = legsAnimHandle ? legsAnimHandle : torsoAnimHandle;
-            float singleFrame = legsAnimHandle ? legsAnimFrame : torsoAnimFrame;
-            re.UpdateXModelPose( s_tpChar.baseModel, singleAnim, singleFrame );
-        }
-    }
-
     re.AddRefEntityToScene( &ent );
-    if ( hasMergedHeadEnt ) {
-        re.AddRefEntityToScene( &mergedHeadEnt );
-    }
-    CL_TP_AddAttachments( &ent, hasMergedHeadEnt ? &mergedHeadEnt : NULL, mergedAttachmentIndex );
+    CL_TP_AddAttachments( &ent,
+                          legsAnimHandle, legsAnimFrame,
+                          torsoAnimHandle, torsoAnimFrame,
+                          useTorsoBlend, torsoRootBone );
 }
 
 void CL_CharacterCod1_Init( void )
@@ -1967,7 +2089,7 @@ void CL_CharacterCod1_Init( void )
     cl_thirdPersonUseGsc        = Cvar_Get( "cl_thirdPersonUseGsc", "1", CVAR_ARCHIVE );
     cl_thirdPersonBlendTorso    = Cvar_Get( "cl_thirdPersonBlendTorso", "1", CVAR_ARCHIVE );
     cl_thirdPersonTorsoRoot     = Cvar_Get( "cl_thirdPersonTorsoRoot", "bip01 spine2", CVAR_ARCHIVE );
-    cl_thirdPersonAutoGround    = Cvar_Get( "cl_thirdPersonAutoGround", "1", CVAR_ARCHIVE );
+    cl_thirdPersonAutoGround    = Cvar_Get( "cl_thirdPersonAutoGround", "0", CVAR_ARCHIVE );
     cl_thirdPersonYawLerpSpeed  = Cvar_Get( "cl_thirdPersonYawLerpSpeed", "540", CVAR_ARCHIVE );
     cl_thirdPersonDebug         = Cvar_Get( "cl_thirdPersonDebug", "0", CVAR_TEMP );
 
