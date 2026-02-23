@@ -405,6 +405,9 @@ static void CL_WeaponInfo_f( void )
     }
     Com_Printf( "=== %s ===\n", name );
     Com_Printf( "  type/class : %s / %s\n", wd.weaponType, wd.weaponClass );
+    if ( wd.playerAnimTypeName[0] ) {
+        Com_Printf( "  animType   : %s (%d)\n", wd.playerAnimTypeName, wd.playerAnimType );
+    }
     Com_Printf( "  gunModel   : %s\n", wd.gunModel  );
     Com_Printf( "  handModel  : %s\n", wd.handModel );
     Com_Printf( "  worldModel : %s\n", wd.worldModel);
