@@ -286,10 +286,9 @@ void CL_DrawViewModel( stereoFrame_t stereo )
         Com_Printf( "anim=%d frame=%.1f\n", cl_weapon.currentAnim, animFrame );
 
     /* ---- Camera / view setup ----
-     * CoD uses tag_camera on the hand model as the eye position.
-     * The animation bakes in all stance offsets, so we just use tag_camera
-     * directly as both the camera origin and model rendering origin. */
-    vec3_t       modelOrigin, cameraOrigin;
+     * CoD: use tag_camera on hand model as the eye position.
+     * tag_camera IS the eye position after animation (stance offsets baked in). */
+    vec3_t       cameraOrigin, modelOrigin;
     vec3_t       entityAxis[3];
     orientation_t tagCamera;
     qboolean     hasTagCamera;
@@ -297,7 +296,7 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     VectorCopy( cl.snap.ps.viewangles, viewAngles );
     AnglesToAxis( viewAngles, axis );
 
-    /* Get tag_camera from the animated hand model - this IS the eye position */
+    /* Get tag_camera from animated hand model - this IS the eye position */
     hasTagCamera = qfalse;
     if ( re.LerpTag && cl_weapon.handModel ) {
         hasTagCamera = re.LerpTag( &tagCamera, cl_weapon.handModel,
@@ -305,19 +304,20 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     }
 
     if ( hasTagCamera ) {
-        /* Use tag_camera's world position and orientation */
-        MatrixToVectors( (const float(*)[4])tagCamera.axis, entityAxis );
-        VectorCopy( tagCamera.origin, modelOrigin );
+        /* Camera = tag_camera's world position */
         VectorCopy( tagCamera.origin, cameraOrigin );
+        /* Model rendered at same origin with tag_camera's orientation */
+        VectorCopy( cameraOrigin, modelOrigin );
+        AxisCopy( tagCamera.axis, entityAxis );
         if ( cl_animDebug && cl_animDebug->integer )
-            Com_Printf( "Using tag_camera: origin=%.1f %.1f %.1f\n",
-                       modelOrigin[0], modelOrigin[1], modelOrigin[2] );
+            Com_Printf( "tag_camera: %.1f,%.1f,%.1f\n",
+                       cameraOrigin[0], cameraOrigin[1], cameraOrigin[2] );
     } else {
-        /* Fallback: use player eye position (won't match CoD positioning) */
-        Com_Printf( "WARNING: No tag_camera found on hand model!\n" );
-        VectorCopy( cl.snap.ps.origin, modelOrigin );
-        modelOrigin[2] += cl.snap.ps.viewheight;
-        VectorCopy( modelOrigin, cameraOrigin );
+        /* Fallback: use player eye position */
+        Com_Printf( "WARNING: No tag_camera on hand model!\n" );
+        VectorCopy( cl.snap.ps.origin, cameraOrigin );
+        cameraOrigin[2] += cl.snap.ps.viewheight;
+        VectorCopy( cameraOrigin, modelOrigin );
         AnglesToAxis( viewAngles, entityAxis );
     }
 
@@ -337,7 +337,7 @@ void CL_DrawViewModel( stereoFrame_t stereo )
                         * (float)refdef.height / (float)refdef.width )
                    * (float)(180.0 / M_PI);
 
-    /* Camera stays at eye position with raw view angles */
+    /* Camera at tag_camera position but follows player view angles */
     VectorCopy( cameraOrigin, refdef.vieworg );
     AnglesToAxis( viewAngles, refdef.viewaxis );
 
