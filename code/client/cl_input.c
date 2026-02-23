@@ -271,9 +271,8 @@ void IN_Button14Up(void) {IN_KeyUp(&in_buttons[14]);}
 void IN_Button15Down(void) {IN_KeyDown(&in_buttons[15]);}
 void IN_Button15Up(void) {IN_KeyUp(&in_buttons[15]);}
 
-// CoD1: +gostand - stand up if crouching, jump if already standing
-// DEFAULT_VIEWHEIGHT from bg_public.h is 26
-#define DEFAULT_VIEWHEIGHT 26
+// CoD1: +gostand - stand up if crouching, jump if already standing.
+// Uses DEFAULT_VIEWHEIGHT from bg_public.h.
 
 void IN_GoStandDown(void) {
 	// If already standing (or close to standing height), trigger jump instead

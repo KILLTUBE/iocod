@@ -1941,7 +1941,9 @@ static qboolean CL_Character_PositionAttachmentBySharedTag( refEntity_t *ent,
     childInvAxis[2][1] = childTag.axis[1][2];
     childInvAxis[2][2] = childTag.axis[2][2];
 
-    MatrixMultiply( parentTagWorldAxis, childInvAxis, ent->axis );
+    /* Solve child->world so child tag aligns to parent tag:
+     * childTagLocal * childWorld = parentTagWorld  => childWorld = inv(childTagLocal) * parentTagWorld */
+    MatrixMultiply( childInvAxis, parentTagWorldAxis, ent->axis );
 
     VectorClear( childTagWorldOffset );
     VectorMA( childTagWorldOffset, childTag.origin[0], ent->axis[0], childTagWorldOffset );
@@ -2174,10 +2176,6 @@ void CL_AddCharacterCod1Entities( const refdef_t *fd )
             groundOffset = 0.0f;
         }
 
-        if ( !foundFootGroundTag && groundOffset <= 0.0f ) {
-            /* q3-style player origins sit above feet; this keeps CoD rigs above ground. */
-            groundOffset = 24.0f;
-        }
     }
 
     Com_Memset( &ent, 0, sizeof( ent ) );
