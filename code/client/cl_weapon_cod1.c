@@ -279,6 +279,11 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     VectorCopy( cl.snap.ps.viewangles, viewAngles );
     AnglesToAxis( viewAngles, axis );
 
+    /* Apply gun offsets */
+    if ( cg_gunX && cg_gunX->value != 0.0f ) VectorMA( viewOrigin, cg_gunX->value, axis[0], viewOrigin );
+    if ( cg_gunY && cg_gunY->value != 0.0f ) VectorMA( viewOrigin, cg_gunY->value, axis[1], viewOrigin );
+    if ( cg_gunZ && cg_gunZ->value != 0.0f ) VectorMA( viewOrigin, cg_gunZ->value, axis[2], viewOrigin );
+
     /* Full-screen refdef with no world (just our weapon entities) */
     Com_Memset( &refdef, 0, sizeof(refdef) );
     refdef.x      = 0;
@@ -302,43 +307,20 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     re.ClearScene();
 
     if ( cl_weapon.handModel ) {
-        orientation_t camTag;
-        vec3_t        handOrigin;
-
-        /* Determine the model world origin by aligning tag_camera (or tag_view)
-         * with the camera eye.  CoD1 viewhands models have a tag_camera bone at
-         * the camera attachment point; the rest of the geometry (arms, weapon)
-         * extends from there in model-local space.
-         *
-         * Formula: handOrigin = viewOrigin - rotate(camTag.origin, viewAxis)
-         * so that (handOrigin + rotate(camTag.origin)) == viewOrigin. */
-        VectorCopy( viewOrigin, handOrigin );
-        if ( re.LerpTag &&
-             ( re.LerpTag( &camTag, cl_weapon.handModel, 0, 0, 0, "tag_camera" ) ||
-               re.LerpTag( &camTag, cl_weapon.handModel, 0, 0, 0, "tag_view"   ) ) ) {
-            VectorMA( handOrigin, -camTag.origin[0], axis[0], handOrigin );
-            VectorMA( handOrigin, -camTag.origin[1], axis[1], handOrigin );
-            VectorMA( handOrigin, -camTag.origin[2], axis[2], handOrigin );
-        }
-
-        /* Apply manual gun offsets (cg_gunX/Y/Z) to the final placement */
-        if ( cg_gunX && cg_gunX->value != 0.0f ) VectorMA( handOrigin, cg_gunX->value, axis[0], handOrigin );
-        if ( cg_gunY && cg_gunY->value != 0.0f ) VectorMA( handOrigin, cg_gunY->value, axis[1], handOrigin );
-        if ( cg_gunZ && cg_gunZ->value != 0.0f ) VectorMA( handOrigin, cg_gunZ->value, axis[2], handOrigin );
-
-        AddViewmodelEnt( cl_weapon.handModel, handOrigin, axis );
+        /* Place the hands model at the eye position.  The model's tag_camera
+         * bone is at the model root (origin), so viewOrigin aligns correctly. */
+        AddViewmodelEnt( cl_weapon.handModel, viewOrigin, axis );
 
         if ( cl_weapon.gunModel ) {
             orientation_t tag;
-            /* re.LerpTag now returns the ANIMATED tag_weapon position because
+            /* re.LerpTag returns the ANIMATED tag_weapon position because
              * R_UpdateXModelPose updated the mdvTag entries above. */
             if ( re.LerpTag( &tag, cl_weapon.handModel, 0, 0, 0, "tag_weapon" ) ) {
                 vec3_t gunOrigin;
                 vec3_t gunAxis[3];
 
-                /* Transform tag_weapon from model-local space to world space.
-                 * Use handOrigin (not viewOrigin) as the model's world position. */
-                VectorCopy( handOrigin, gunOrigin );
+                /* Transform tag_weapon from model-local space to world space */
+                VectorCopy( viewOrigin, gunOrigin );
                 VectorMA( gunOrigin, tag.origin[0], axis[0], gunOrigin );
                 VectorMA( gunOrigin, tag.origin[1], axis[1], gunOrigin );
                 VectorMA( gunOrigin, tag.origin[2], axis[2], gunOrigin );
@@ -347,17 +329,12 @@ void CL_DrawViewModel( stereoFrame_t stereo )
 
                 AddViewmodelEnt( cl_weapon.gunModel, gunOrigin, gunAxis );
             } else {
-                /* tag_weapon not found (no animation or static model): put gun at eye */
-                AddViewmodelEnt( cl_weapon.gunModel, handOrigin, axis );
+                /* tag_weapon not found: put gun at eye */
+                AddViewmodelEnt( cl_weapon.gunModel, viewOrigin, axis );
             }
         }
     } else if ( cl_weapon.gunModel ) {
-        vec3_t gunOrigin;
-        VectorCopy( viewOrigin, gunOrigin );
-        if ( cg_gunX && cg_gunX->value != 0.0f ) VectorMA( gunOrigin, cg_gunX->value, axis[0], gunOrigin );
-        if ( cg_gunY && cg_gunY->value != 0.0f ) VectorMA( gunOrigin, cg_gunY->value, axis[1], gunOrigin );
-        if ( cg_gunZ && cg_gunZ->value != 0.0f ) VectorMA( gunOrigin, cg_gunZ->value, axis[2], gunOrigin );
-        AddViewmodelEnt( cl_weapon.gunModel, gunOrigin, axis );
+        AddViewmodelEnt( cl_weapon.gunModel, viewOrigin, axis );
     }
 
     re.RenderScene( &refdef );
