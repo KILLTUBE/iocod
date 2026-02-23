@@ -1163,8 +1163,32 @@ static void CL_Character_LoadAnimations( void )
             }
         }
 
-        if ( !s_tpChar.legAnims[i] && cl_thirdPersonDebug && cl_thirdPersonDebug->integer ) {
+        if ( !s_tpChar.legAnims[i] &&
+             i != TP_LEG_ANIM_JUMP &&
+             cl_thirdPersonDebug && cl_thirdPersonDebug->integer ) {
             Com_Printf( "thirdperson: missing legs xanim '%s'\n", s_tpLegAnimNames[i] );
+        }
+    }
+
+    // Some assets expose jump via animscript aliases instead of a dedicated
+    // primitive xanim file. Keep jump state valid by falling back to an
+    // available stand locomotion clip.
+    if ( !s_tpChar.legAnims[TP_LEG_ANIM_JUMP] ) {
+        if ( s_tpChar.legAnims[TP_LEG_ANIM_STAND_FWD] ) {
+            s_tpChar.legAnims[TP_LEG_ANIM_JUMP] = s_tpChar.legAnims[TP_LEG_ANIM_STAND_FWD];
+            if ( cl_thirdPersonDebug && cl_thirdPersonDebug->integer ) {
+                Com_Printf( "thirdperson: jump legs xanim fallback -> '%s'\n",
+                            s_tpLegAnimNames[TP_LEG_ANIM_STAND_FWD] );
+            }
+        } else if ( s_tpChar.legAnims[TP_LEG_ANIM_STAND_IDLE] ) {
+            s_tpChar.legAnims[TP_LEG_ANIM_JUMP] = s_tpChar.legAnims[TP_LEG_ANIM_STAND_IDLE];
+            if ( cl_thirdPersonDebug && cl_thirdPersonDebug->integer ) {
+                Com_Printf( "thirdperson: jump legs xanim fallback -> '%s'\n",
+                            s_tpLegAnimNames[TP_LEG_ANIM_STAND_IDLE] );
+            }
+        } else if ( cl_thirdPersonDebug && cl_thirdPersonDebug->integer ) {
+            Com_Printf( "thirdperson: missing legs xanim '%s' (no fallback)\n",
+                        s_tpLegAnimNames[TP_LEG_ANIM_JUMP] );
         }
     }
 
