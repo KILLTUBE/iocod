@@ -1200,20 +1200,44 @@ static qboolean CL_Character_AttachmentListsEqual( const tpAttachment_t *a, int 
     return qtrue;
 }
 
+static qboolean CL_Character_AttachmentListHasHead( const tpAttachment_t *attachments, int count )
+{
+    int i;
+
+    if ( !attachments || count <= 0 ) {
+        return qfalse;
+    }
+
+    for ( i = 0; i < count; ++i ) {
+        if ( CL_Character_IsHeadLikeModel( attachments[i].modelPath ) ) {
+            return qtrue;
+        }
+    }
+
+    return qfalse;
+}
+
 static void CL_Character_LoadCharacterAssets( void )
 {
     char desiredModelPath[MAX_QPATH];
     char desiredScriptPath[MAX_QPATH];
     tpAttachment_t desiredAttachments[TP_MAX_ATTACHMENTS];
+    char parsedModelPath[MAX_QPATH];
+    tpAttachment_t parsedAttachments[TP_MAX_ATTACHMENTS];
+    int parsedAttachmentCount;
     int desiredAttachmentCount;
     qboolean fromScript;
+    qboolean parsedFromScript;
     qboolean hasHeadAttachment;
     int i;
 
     desiredModelPath[0] = '\0';
     desiredScriptPath[0] = '\0';
+    parsedModelPath[0] = '\0';
+    parsedAttachmentCount = 0;
     desiredAttachmentCount = 0;
     fromScript = qfalse;
+    parsedFromScript = qfalse;
     hasHeadAttachment = qfalse;
 
     if ( cl_thirdPersonModel && cl_thirdPersonModel->string[0] ) {
@@ -1233,11 +1257,43 @@ static void CL_Character_LoadCharacterAssets( void )
             }
         }
 
+        parsedFromScript = CL_Character_ParseCharacterScript( desiredScriptPath,
+                                                              parsedModelPath,
+                                                              parsedAttachments,
+                                                              &parsedAttachmentCount );
+
         if ( !fromScript ) {
-            fromScript = CL_Character_ParseCharacterScript( desiredScriptPath,
-                                                     desiredModelPath,
-                                                     desiredAttachments,
-                                                     &desiredAttachmentCount );
+            fromScript = parsedFromScript;
+            if ( parsedFromScript ) {
+                int p;
+                if ( parsedModelPath[0] ) {
+                    Q_strncpyz( desiredModelPath, parsedModelPath, sizeof( desiredModelPath ) );
+                }
+                desiredAttachmentCount = 0;
+                for ( p = 0; p < parsedAttachmentCount && p < TP_MAX_ATTACHMENTS; ++p ) {
+                    desiredAttachments[desiredAttachmentCount++] = parsedAttachments[p];
+                }
+            }
+        } else if ( parsedFromScript ) {
+            qboolean gscHasHead = CL_Character_AttachmentListHasHead( desiredAttachments, desiredAttachmentCount );
+            qboolean parsedHasHead = CL_Character_AttachmentListHasHead( parsedAttachments, parsedAttachmentCount );
+            int p;
+
+            if ( !desiredModelPath[0] && parsedModelPath[0] ) {
+                Q_strncpyz( desiredModelPath, parsedModelPath, sizeof( desiredModelPath ) );
+            }
+
+            if ( parsedAttachmentCount > 0 &&
+                 ( desiredAttachmentCount <= 0 ||
+                   ( !gscHasHead && parsedHasHead ) ||
+                   parsedAttachmentCount > desiredAttachmentCount ) ) {
+                for ( p = 0; p < parsedAttachmentCount; ++p ) {
+                    CL_Character_AddAttachment( desiredAttachments,
+                                                &desiredAttachmentCount,
+                                                parsedAttachments[p].modelPath,
+                                                parsedAttachments[p].tagName );
+                }
+            }
         }
     }
 
@@ -1301,6 +1357,38 @@ static void CL_Character_LoadCharacterAssets( void )
         }
 
         s_tpChar.numAttachments++;
+    }
+
+    if ( !hasHeadAttachment && s_tpChar.numAttachments < TP_MAX_ATTACHMENTS ) {
+        static const char *fallbackHeads[] = {
+            "xmodel/basehead_axis_a_01",
+            "xmodel/basehead_axis_b_01",
+            "xmodel/basehead_a_01",
+            "xmodel/basehead_01"
+        };
+        int h;
+
+        for ( h = 0; h < (int)ARRAY_LEN( fallbackHeads ); ++h ) {
+            qhandle_t fallbackHeadHandle = re.RegisterModel( fallbackHeads[h] );
+            if ( !fallbackHeadHandle ) {
+                continue;
+            }
+
+            Q_strncpyz( s_tpChar.attachments[s_tpChar.numAttachments].modelPath,
+                        fallbackHeads[h],
+                        sizeof( s_tpChar.attachments[s_tpChar.numAttachments].modelPath ) );
+            Q_strncpyz( s_tpChar.attachments[s_tpChar.numAttachments].tagName,
+                        "tag_head",
+                        sizeof( s_tpChar.attachments[s_tpChar.numAttachments].tagName ) );
+            s_tpChar.attachments[s_tpChar.numAttachments].hModel = fallbackHeadHandle;
+            s_tpChar.numAttachments++;
+            hasHeadAttachment = qtrue;
+
+            if ( cl_thirdPersonDebug && cl_thirdPersonDebug->integer ) {
+                Com_Printf( "thirdperson: fallback head '%s' attached\n", fallbackHeads[h] );
+            }
+            break;
+        }
     }
 
     if ( !hasHeadAttachment && cl_thirdPersonDebug && cl_thirdPersonDebug->integer ) {
@@ -1708,6 +1796,43 @@ static float CL_Character_ComputeAnimFrame( qhandle_t animHandle, int animStartT
     return frame;
 }
 
+static qboolean CL_Character_GetLowestTagZ( qhandle_t model,
+                                            const char *const *tagNames,
+                                            int numTags,
+                                            float *outZ )
+{
+    orientation_t tag;
+    qboolean found;
+    float minZ;
+    int i;
+
+    if ( !model || !tagNames || numTags <= 0 || !outZ || !re.LerpTag ) {
+        return qfalse;
+    }
+
+    found = qfalse;
+    minZ = 0.0f;
+    for ( i = 0; i < numTags; ++i ) {
+        if ( !tagNames[i] || !tagNames[i][0] ) {
+            continue;
+        }
+        if ( !re.LerpTag( &tag, model, 0, 0, 1.0f, tagNames[i] ) ) {
+            continue;
+        }
+        if ( !found || tag.origin[2] < minZ ) {
+            minZ = tag.origin[2];
+            found = qtrue;
+        }
+    }
+
+    if ( found ) {
+        *outZ = minZ;
+        return qtrue;
+    }
+
+    return qfalse;
+}
+
 static qboolean CL_Character_PositionOnTag( refEntity_t *ent, const refEntity_t *parent,
                                      const char *tagName )
 {
@@ -1938,6 +2063,16 @@ static void CL_Character_EnsureAssets( void )
 
 void CL_AddCharacterCod1Entities( const refdef_t *fd )
 {
+    static const char *footGroundTags[] = {
+        "bip01 l toe0",
+        "bip01 r toe0",
+        "bip01 l foot",
+        "bip01 r foot",
+        "bip01 l calf",
+        "bip01 r calf",
+        "bip01 l leg",
+        "bip01 r leg"
+    };
     refEntity_t ent;
     vec3_t angles;
     vec3_t interpOrigin;
@@ -1954,6 +2089,8 @@ void CL_AddCharacterCod1Entities( const refdef_t *fd )
     float legsAnimFrame;
     float torsoAnimFrame;
     float groundOffset;
+    float footGroundZ;
+    qboolean foundFootGroundTag;
     qboolean useTorsoBlend;
     const char *torsoRootBone;
 
@@ -2021,8 +2158,26 @@ void CL_AddCharacterCod1Entities( const refdef_t *fd )
     }
 
     groundOffset = 0.0f;
+    foundFootGroundTag = qfalse;
     if ( cl_thirdPersonAutoGround && cl_thirdPersonAutoGround->integer ) {
-        groundOffset = s_tpChar.baseFootOffset;
+        foundFootGroundTag = CL_Character_GetLowestTagZ( s_tpChar.baseModel,
+                                                         footGroundTags,
+                                                         (int)ARRAY_LEN( footGroundTags ),
+                                                         &footGroundZ );
+        if ( foundFootGroundTag ) {
+            groundOffset = -footGroundZ;
+        } else {
+            groundOffset = s_tpChar.baseFootOffset;
+        }
+
+        if ( groundOffset < 0.0f || groundOffset > 256.0f ) {
+            groundOffset = 0.0f;
+        }
+
+        if ( !foundFootGroundTag && groundOffset <= 0.0f ) {
+            /* q3-style player origins sit above feet; this keeps CoD rigs above ground. */
+            groundOffset = 24.0f;
+        }
     }
 
     Com_Memset( &ent, 0, sizeof( ent ) );
