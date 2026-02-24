@@ -1764,6 +1764,15 @@ static int GScr_Fn_PrecacheMenu( gsc_Context *ctx ) { (void)ctx; return 0; }
 static int GScr_Fn_PrecacheStatusIcon( gsc_Context *ctx ) { (void)ctx; return 0; }
 static int GScr_Fn_PrecacheHeadIcon( gsc_Context *ctx ) { (void)ctx; return 0; }
 static int GScr_Fn_PrecacheItem( gsc_Context *ctx ) { (void)ctx; return 0; }
+static int GScr_Fn_PrecacheModel( gsc_Context *ctx )
+{
+    const char *model = gsc_get_string( ctx, 0 );
+
+    if ( model && model[0] ) {
+        G_ModelIndex( (char *)model );
+    }
+    return 0;
+}
 static int GScr_Fn_PrecacheShader( gsc_Context *ctx ) { (void)ctx; return 0; }
 static int GScr_Fn_PrecacheString( gsc_Context *ctx ) { (void)ctx; return 0; }
 static int GScr_Fn_PrecacheTurret( gsc_Context *ctx ) { (void)ctx; return 0; }
@@ -1985,6 +1994,7 @@ static void G_Scr_RegisterFunctions( void )
     gsc_register_function( g_scrCtx, NULL, "precachestatusicon", GScr_Fn_PrecacheStatusIcon );
     gsc_register_function( g_scrCtx, NULL, "precacheheadicon", GScr_Fn_PrecacheHeadIcon );
     gsc_register_function( g_scrCtx, NULL, "precacheitem", GScr_Fn_PrecacheItem );
+    gsc_register_function( g_scrCtx, NULL, "precachemodel", GScr_Fn_PrecacheModel );
     gsc_register_function( g_scrCtx, NULL, "precacheshader", GScr_Fn_PrecacheShader );
     gsc_register_function( g_scrCtx, NULL, "precachestring", GScr_Fn_PrecacheString );
     gsc_register_function( g_scrCtx, NULL, "precacheturret", GScr_Fn_PrecacheTurret );
