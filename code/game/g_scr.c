@@ -537,26 +537,28 @@ static void G_Scr_PushHudElemObject( gsc_Context *ctx, G_ScrHudScope_t scope, in
     int            obj;
 
     hud = G_Scr_Hud_Alloc();
-    if ( !hud ) {
-        return;
-    }
-
-    hud->scope = scope;
-    hud->owner = owner;
 
     obj = gsc_add_tagged_object( ctx, "#hudelem" );
     gsc_object_set_proxy( ctx, obj, g_scrHudElemProxyIdx );
-    gsc_object_set_userdata( ctx, obj, (void *)(intptr_t)hud->id );
 
-    gsc_add_float( ctx, hud->x );
+    if ( hud ) {
+        hud->scope = scope;
+        hud->owner = owner;
+        gsc_object_set_userdata( ctx, obj, (void *)(intptr_t)hud->id );
+    } else {
+        /* Safe fallback: still return an object so scripts don't crash on field writes. */
+        gsc_object_set_userdata( ctx, obj, NULL );
+    }
+
+    gsc_add_float( ctx, hud ? hud->x : 0.0f );
     gsc_object_set_field( ctx, obj, "x" );
-    gsc_add_float( ctx, hud->y );
+    gsc_add_float( ctx, hud ? hud->y : 0.0f );
     gsc_object_set_field( ctx, obj, "y" );
-    gsc_add_float( ctx, hud->scale );
+    gsc_add_float( ctx, hud ? hud->scale : 0.35f );
     gsc_object_set_field( ctx, obj, "fontscale" );
     gsc_add_vec3( ctx, white );
     gsc_object_set_field( ctx, obj, "color" );
-    gsc_add_float( ctx, hud->color[3] );
+    gsc_add_float( ctx, hud ? hud->color[3] : 1.0f );
     gsc_object_set_field( ctx, obj, "alpha" );
 }
 
@@ -1565,11 +1567,13 @@ static int GScr_Fn_NewClientHudElem( gsc_Context *ctx )
     if ( !ownerEnt ) {
         ownerEnt = G_Scr_GetSelf( ctx );
     }
-    if ( !G_Scr_GetClientNumForEntity( ownerEnt, &clientNum ) ) {
-        return 0;
-    }
 
-    G_Scr_PushHudElemObject( ctx, G_SCR_HUD_SCOPE_CLIENT, clientNum );
+    if ( G_Scr_GetClientNumForEntity( ownerEnt, &clientNum ) ) {
+        G_Scr_PushHudElemObject( ctx, G_SCR_HUD_SCOPE_CLIENT, clientNum );
+    } else {
+        /* CoD scripts may call this without owner during setup; keep it non-fatal. */
+        G_Scr_PushHudElemObject( ctx, G_SCR_HUD_SCOPE_ALL, -1 );
+    }
     return ( gsc_top( ctx ) > topBefore ) ? 1 : 0;
 }
 
@@ -1858,9 +1862,6 @@ static int GScr_Fn_GetEntArray( gsc_Context *ctx )
         gsc_object_set_field( ctx, arrObj, idxKey );
         count++;
     }
-
-    gsc_add_int( ctx, count );
-    gsc_object_set_field( ctx, arrObj, "size" );
     return 1;
 }
 
