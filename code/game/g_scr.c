@@ -51,11 +51,10 @@ Player object globals: "player_N" (N = clientNum, 0-based).
 static gsc_Context *g_scrCtx;
 static qboolean     g_scrActive;
 
-/* Stack index of the shared entity proxy object.  Stays at bottom of stack
-   for the lifetime of the context.                                         */
-static int          g_scrEntityProxyIdx;
-static int          g_scrPlayerProxyIdx;
-static int          g_scrHudElemProxyIdx;
+/* Stable proxy object handles (raw VM object pointers). */
+static void        *g_scrEntityProxyObj;
+static void        *g_scrPlayerProxyObj;
+static void        *g_scrHudElemProxyObj;
 
 /* Per-client: raw pointer to the GSC object so we can push it later.
    NULL if no object exists for this slot.                                  */
@@ -396,6 +395,29 @@ static void G_Scr_ClearGlobal( const char *name )
     gsc_set_global( g_scrCtx, name );
 }
 
+static qboolean G_Scr_SetObjectProxy( gsc_Context *ctx, int objIdx, void *proxyObj )
+{
+    int topBefore;
+
+    if ( !ctx || !proxyObj ) {
+        return qfalse;
+    }
+
+    topBefore = gsc_top( ctx );
+    gsc_push_object( ctx, proxyObj );
+
+    if ( gsc_top( ctx ) <= topBefore || gsc_type( ctx, -1 ) != GSC_TYPE_OBJECT ) {
+        if ( gsc_top( ctx ) > topBefore ) {
+            gsc_pop( ctx, 1 );
+        }
+        return qfalse;
+    }
+
+    gsc_object_set_proxy( ctx, objIdx, gsc_top( ctx ) - 1 );
+    gsc_pop( ctx, 1 );
+    return qtrue;
+}
+
 static void G_Scr_SetEntityObjectFields( gsc_Context *ctx, int entObj, gentity_t *ent )
 {
     int entNum = -1;
@@ -436,9 +458,9 @@ static void G_Scr_CreateEntityObject( gentity_t *ent, qboolean keepOnStack )
 
     entObj = gsc_add_tagged_object( g_scrCtx, "#entity" );
     if ( entNum < MAX_CLIENTS ) {
-        gsc_object_set_proxy( g_scrCtx, entObj, g_scrPlayerProxyIdx );
+        G_Scr_SetObjectProxy( g_scrCtx, entObj, g_scrPlayerProxyObj );
     } else {
-        gsc_object_set_proxy( g_scrCtx, entObj, g_scrEntityProxyIdx );
+        G_Scr_SetObjectProxy( g_scrCtx, entObj, g_scrEntityProxyObj );
     }
     gsc_object_set_userdata( g_scrCtx, entObj, ent );
     G_Scr_SetEntityObjectFields( g_scrCtx, entObj, ent );
@@ -539,7 +561,7 @@ static void G_Scr_PushHudElemObject( gsc_Context *ctx, G_ScrHudScope_t scope, in
     hud = G_Scr_Hud_Alloc();
 
     obj = gsc_add_tagged_object( ctx, "#hudelem" );
-    gsc_object_set_proxy( ctx, obj, g_scrHudElemProxyIdx );
+    G_Scr_SetObjectProxy( ctx, obj, g_scrHudElemProxyObj );
 
     if ( hud ) {
         hud->scope = scope;
@@ -2008,9 +2030,6 @@ static void G_Scr_RegisterFunctions( void )
 /* =========================================================================
    Create the shared entity proxy and the level/game/anim globals.
 
-   Stack layout after this function (permanent — never popped):
-     [0] = shared entity proxy object  (g_scrEntityProxyIdx)
-
    Globals set:
      level, game, anim  (tagged empty objects, CoD compat)
      self               (initially = level object)
@@ -2033,7 +2052,7 @@ static void G_Scr_CreateGlobals( void )
 
     /* ---- base entity proxy ---- */
     entProxyObj = gsc_add_tagged_object( g_scrCtx, "#ent_proxy" );
-    g_scrEntityProxyIdx = entProxyObj;
+    g_scrEntityProxyObj = gsc_get_ptr( g_scrCtx, entProxyObj );
 
     entMethodsObj = gsc_add_object( g_scrCtx );
     G_Scr_AddMethod( entMethodsObj, "getname",         GScr_Meth_GetName );
@@ -2067,7 +2086,7 @@ static void G_Scr_CreateGlobals( void )
 
     /* ---- player proxy (inherits from ent proxy) ---- */
     playerProxyObj = gsc_add_tagged_object( g_scrCtx, "#player_proxy" );
-    g_scrPlayerProxyIdx = playerProxyObj;
+    g_scrPlayerProxyObj = gsc_get_ptr( g_scrCtx, playerProxyObj );
     gsc_object_set_proxy( g_scrCtx, playerProxyObj, entProxyObj );
 
     playerMethodsObj = gsc_add_object( g_scrCtx );
@@ -2116,7 +2135,7 @@ static void G_Scr_CreateGlobals( void )
 
     /* ---- HUD element proxy ---- */
     hudProxyObj = gsc_add_tagged_object( g_scrCtx, "#hudelem_proxy" );
-    g_scrHudElemProxyIdx = hudProxyObj;
+    g_scrHudElemProxyObj = gsc_get_ptr( g_scrCtx, hudProxyObj );
 
     hudMethodsObj = gsc_add_object( g_scrCtx );
     G_Scr_AddMethod( hudMethodsObj, "settext",       GScr_Meth_Hud_SetText );
@@ -2274,6 +2293,9 @@ void G_Scr_Init( void )
     g_scrCtx     = NULL;
     g_scrActive  = qfalse;
     g_scrSources = NULL;
+    g_scrEntityProxyObj = NULL;
+    g_scrPlayerProxyObj = NULL;
+    g_scrHudElemProxyObj = NULL;
     Com_Memset( g_scrPlayerObjPtrs, 0, sizeof( g_scrPlayerObjPtrs ) );
     Com_Memset( g_scrEntityObjAlive, 0, sizeof( g_scrEntityObjAlive ) );
     G_Scr_Hud_ResetAll( qfalse );
@@ -2460,6 +2482,9 @@ void G_Scr_Shutdown( void )
     Com_Memset( g_scrPlayerObjPtrs, 0, sizeof( g_scrPlayerObjPtrs ) );
     Com_Memset( g_scrEntityObjAlive, 0, sizeof( g_scrEntityObjAlive ) );
     Com_Memset( g_scrHudElems, 0, sizeof( g_scrHudElems ) );
+    g_scrEntityProxyObj = NULL;
+    g_scrPlayerProxyObj = NULL;
+    g_scrHudElemProxyObj = NULL;
     g_scrCallbackFile[0] = '\0';
     g_scrActive = qfalse;
 }
