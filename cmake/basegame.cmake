@@ -74,6 +74,28 @@ set(GAME_BINARY_SOURCES ${SOURCE_DIR}/game/g_syscalls.c)
 set(GAME_QVM_SOURCES ${SOURCE_DIR}/game/g_syscalls.asm)
 
 if(BUILD_STANDALONE)
+    # GSC scripting sources — same set used by client.cmake for the client binary
+    set(GAME_GSC_SOURCES
+        ${SOURCE_DIR}/thirdparty/gsc/visitor.c
+        ${SOURCE_DIR}/thirdparty/gsc/compiler.c
+        ${SOURCE_DIR}/thirdparty/gsc/traverse.c
+        ${SOURCE_DIR}/thirdparty/gsc/parse.c
+        ${SOURCE_DIR}/thirdparty/gsc/vm.c
+        ${SOURCE_DIR}/thirdparty/gsc/precedence.c
+        ${SOURCE_DIR}/thirdparty/gsc/library.c
+        ${SOURCE_DIR}/thirdparty/gsc/main.c
+    )
+
+    list(APPEND GAME_SOURCES
+        ${SOURCE_DIR}/game/g_scr.c
+        ${GAME_GSC_SOURCES}
+    )
+
+    # Vendored GSC emits many warnings under ioq3 flags — suppress them
+    set_source_files_properties(${GAME_GSC_SOURCES} PROPERTIES COMPILE_OPTIONS "-w")
+endif()
+
+if(BUILD_STANDALONE)
     # Standalone (CoD1) mode: use the missionpack UI which reads menus.txt
     # and supports assetGlobalDef, CoD1 menu commands, etc.
     set(UI_SOURCES

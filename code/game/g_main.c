@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 
 #include "g_local.h"
+#include "g_scr.h"
 
 level_locals_t	level;
 
@@ -537,6 +538,10 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	
 	G_Printf("trap_SetConfigstring( CS_INTERMISSION )...\n");
 	trap_SetConfigstring( CS_INTERMISSION, "" );
+
+	/* Initialise GSC scripting — must be last so all entities are spawned */
+	G_Scr_Init();
+
 	G_Printf("G_InitGame Done.\n");
 }
 
@@ -549,6 +554,9 @@ G_ShutdownGame
 */
 void G_ShutdownGame( int restart ) {
 	G_Printf ("==== ShutdownGame ====\n");
+
+	/* Shut down GSC scripting before anything else is torn down */
+	G_Scr_Shutdown();
 
 	if ( level.logFile ) {
 		G_LogPrintf("ShutdownGame:\n" );
@@ -1823,6 +1831,9 @@ void G_RunFrame( int levelTime ) {
 	level.framenum++;
 	level.previousTime = level.time;
 	level.time = levelTime;
+
+	/* Advance all running GSC script threads */
+	G_Scr_Frame( (float)( levelTime - level.previousTime ) * 0.001f );
 
 	// get any cvar changes
 	G_UpdateCvars();

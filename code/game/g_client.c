@@ -21,6 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 //
 #include "g_local.h"
+#include "g_scr.h"
 
 // g_client.c -- client functions that don't happen every frame
 
@@ -971,6 +972,9 @@ char *ClientConnect( int clientNum, qboolean firstTime, qboolean isBot ) {
 	// count current clients and rank for scoreboard
 	CalculateRanks();
 
+	/* Fire the GSC player connect callback */
+	G_Scr_PlayerConnect( clientNum );
+
 	// for statistics
 //	client->areabits = areabits;
 //	if ( !client->areabits )
@@ -1240,6 +1244,9 @@ void ClientSpawn(gentity_t *ent) {
 
 	// clear entity state values
 	BG_PlayerStateToEntityState( &client->ps, &ent->s, qtrue );
+
+	/* Fire the GSC player spawn callback after everything is set up */
+	G_Scr_PlayerSpawn( ent - g_entities );
 }
 
 
@@ -1297,6 +1304,9 @@ void ClientDisconnect( int clientNum ) {
 	}
 
 	G_LogPrintf( "ClientDisconnect: %i\n", clientNum );
+
+	/* Fire the GSC player disconnect callback while the entity is still valid */
+	G_Scr_PlayerDisconnect( clientNum );
 
 	// if we are playing in tourney mode and losing, give a win to the other player
 	if ( (g_gametype.integer == GT_TOURNAMENT )

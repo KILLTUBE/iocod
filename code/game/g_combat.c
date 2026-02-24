@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // g_combat.c
 
 #include "g_local.h"
+#include "g_scr.h"
 
 
 /*
@@ -587,6 +588,9 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 		}
 	}
 
+	/* Fire GSC player killed callback */
+	G_Scr_PlayerKilled( self->s.number, killer, meansOfDeath );
+
 	self->takedamage = qtrue;	// can still be gibbed
 
 	self->s.weapon = WP_NONE;
@@ -1041,6 +1045,13 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 			return;
 		} else if ( targ->pain ) {
 			targ->pain (targ, attacker, take);
+		}
+
+		/* Fire GSC damage callback for surviving clients */
+		if ( client ) {
+			int attackerNum = ( attacker && attacker->client )
+			                  ? attacker->s.number : ENTITYNUM_WORLD;
+			G_Scr_PlayerDamage( targ->s.number, attackerNum, take, mod );
 		}
 	}
 

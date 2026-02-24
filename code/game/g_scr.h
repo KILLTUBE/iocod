@@ -1,0 +1,38 @@
+/*
+===========================================================================
+GSC scripting integration for the game module.
+
+In STANDALONE builds, the GSC library is compiled in and the functions
+below are real implementations.  In non-standalone builds every call
+expands to a no-op so no GSC code is ever pulled into the game module.
+===========================================================================
+*/
+#pragma once
+
+#ifdef STANDALONE
+
+void G_Scr_Init( void );
+void G_Scr_Shutdown( void );
+void G_Scr_Frame( float dt );
+
+/* Player lifecycle callbacks - mirror CoD's CodeCallback_* convention */
+void G_Scr_PlayerConnect( int clientNum );
+void G_Scr_PlayerDisconnect( int clientNum );
+void G_Scr_PlayerSpawn( int clientNum );
+void G_Scr_PlayerKilled( int clientNum, int attackerNum, int mod );
+
+/* Called on damage so scripts can handle CodeCallback_PlayerDamage */
+void G_Scr_PlayerDamage( int clientNum, int attackerNum, int damage, int mod );
+
+#else /* !STANDALONE */
+
+#define G_Scr_Init()                  ((void)0)
+#define G_Scr_Shutdown()              ((void)0)
+#define G_Scr_Frame(dt)               ((void)0)
+#define G_Scr_PlayerConnect(n)        ((void)0)
+#define G_Scr_PlayerDisconnect(n)     ((void)0)
+#define G_Scr_PlayerSpawn(n)          ((void)0)
+#define G_Scr_PlayerKilled(a,b,c)     ((void)0)
+#define G_Scr_PlayerDamage(a,b,c,d)   ((void)0)
+
+#endif /* STANDALONE */
