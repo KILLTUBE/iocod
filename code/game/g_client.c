@@ -965,6 +965,12 @@ char *ClientConnect( int clientNum, qboolean firstTime, qboolean isBot ) {
 	}
 	G_ReadSessionData( client );
 
+	if ( G_Scr_IsActive() ) {
+		client->sess.sessionTeam = TEAM_SPECTATOR;
+		client->sess.spectatorState = SPECTATOR_FREE;
+		client->sess.spectatorClient = -1;
+	}
+
 	// get and distribute relevant parameters
 	G_LogPrintf( "ClientConnect: %i\n", clientNum );
 	ClientUserinfoChanged( clientNum );
@@ -1031,13 +1037,20 @@ void ClientBegin( int clientNum ) {
 	flags = client->ps.eFlags;
 	memset( &client->ps, 0, sizeof( client->ps ) );
 	client->ps.eFlags = flags;
+	client->ps.clientNum = clientNum;
 
-	// locate ent at a spawn point
-	ClientSpawn( ent );
+	if ( G_Scr_IsActive() ) {
+		client->ps.pm_type = PM_SPECTATOR;
+		client->sess.spectatorState = SPECTATOR_FREE;
+		G_Scr_PlayerBegin( clientNum );
+	} else {
+		// locate ent at a spawn point
+		ClientSpawn( ent );
 
-	if ( client->sess.sessionTeam != TEAM_SPECTATOR ) {
-		if ( g_gametype.integer != GT_TOURNAMENT  ) {
-			trap_SendServerCommand( -1, va("print \"%s" S_COLOR_WHITE " entered the game\n\"", client->pers.netname) );
+		if ( client->sess.sessionTeam != TEAM_SPECTATOR ) {
+			if ( g_gametype.integer != GT_TOURNAMENT  ) {
+				trap_SendServerCommand( -1, va("print \"%s" S_COLOR_WHITE " entered the game\n\"", client->pers.netname) );
+			}
 		}
 	}
 	G_LogPrintf( "ClientBegin: %i\n", clientNum );
@@ -1352,4 +1365,3 @@ void ClientDisconnect( int clientNum ) {
 		BotAIShutdownClient( clientNum, qfalse );
 	}
 }
-

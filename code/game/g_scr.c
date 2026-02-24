@@ -103,6 +103,7 @@ static char         g_scrCallbackFile[ MAX_QPATH ];
 /* Local forward declaration from g_spawn.c (not exposed in g_local.h). */
 qboolean G_CallSpawn( gentity_t *ent );
 static void G_Scr_CreatePlayerObj( int clientNum );
+static void G_Scr_NotifyPlayer( int clientNum, const char *eventName, int numArgs );
 
 /* =========================================================================
    Source-buffer tracking — freed after gsc_link completes
@@ -629,6 +630,117 @@ static int G_Scr_NoopZero( gsc_Context *ctx )
     return 1;
 }
 
+static qboolean G_Scr_ShouldAutoMenuResponse( void )
+{
+    char value[ 16 ];
+
+    trap_Cvar_VariableStringBuffer( "scr_menu_autoresponse", value, sizeof( value ) );
+    if ( !value[0] ) {
+        trap_Cvar_Set( "scr_menu_autoresponse", "1" );
+        return qtrue;
+    }
+
+    return atoi( value ) != 0;
+}
+
+static qboolean G_Scr_GetDefaultWeaponForMenu( const char *menu, char *out, int outSize )
+{
+    if ( !menu || !menu[0] ) {
+        return qfalse;
+    }
+
+    if ( Q_stristr( menu, "american" ) ) {
+        Q_strncpyz( out, "m1carbine_mp", outSize );
+        return qtrue;
+    }
+
+    if ( Q_stristr( menu, "british" ) ) {
+        Q_strncpyz( out, "enfield_mp", outSize );
+        return qtrue;
+    }
+
+    if ( Q_stristr( menu, "russian" ) ) {
+        Q_strncpyz( out, "mosin_nagant_mp", outSize );
+        return qtrue;
+    }
+
+    if ( Q_stristr( menu, "german" ) ) {
+        Q_strncpyz( out, "kar98k_mp", outSize );
+        return qtrue;
+    }
+
+    return qfalse;
+}
+
+static qboolean G_Scr_GetAutoMenuResponse( const char *menu, char *out, int outSize )
+{
+    if ( !menu || !menu[0] ) {
+        return qfalse;
+    }
+
+    if ( !Q_stricmpn( menu, "serverinfo_", 11 ) ) {
+        Q_strncpyz( out, "close", outSize );
+        return qtrue;
+    }
+
+    if ( !Q_stricmpn( menu, "team_", 5 ) ) {
+        Q_strncpyz( out, "autoassign", outSize );
+        return qtrue;
+    }
+
+    if ( !Q_stricmpn( menu, "weapon_", 7 ) ) {
+        return G_Scr_GetDefaultWeaponForMenu( menu, out, outSize );
+    }
+
+    return qfalse;
+}
+
+static void G_Scr_ApplyPlayerSessionFromObject( gsc_Context *ctx, gentity_t *ent )
+{
+    const char *sessionTeam;
+    int         selfObj;
+
+    if ( !ctx || !ent || !ent->client ) {
+        return;
+    }
+
+    selfObj = gsc_get_object( ctx, -1 );
+    if ( selfObj < 0 ) {
+        return;
+    }
+
+    gsc_object_get_field( ctx, selfObj, "sessionteam" );
+    if ( gsc_type( ctx, -1 ) == GSC_TYPE_STRING ||
+         gsc_type( ctx, -1 ) == GSC_TYPE_INTERNED_STRING ) {
+        sessionTeam = gsc_to_string( ctx, -1 );
+        if ( sessionTeam ) {
+            if ( !Q_stricmp( sessionTeam, "spectator" ) ) {
+                ent->client->sess.sessionTeam = TEAM_SPECTATOR;
+                ent->client->sess.spectatorState = SPECTATOR_FREE;
+            } else if ( !Q_stricmp( sessionTeam, "allies" ) ||
+                        !Q_stricmp( sessionTeam, "red" ) ) {
+                ent->client->sess.sessionTeam = TEAM_RED;
+                ent->client->sess.spectatorState = SPECTATOR_NOT;
+            } else if ( !Q_stricmp( sessionTeam, "axis" ) ||
+                        !Q_stricmp( sessionTeam, "blue" ) ) {
+                ent->client->sess.sessionTeam = TEAM_BLUE;
+                ent->client->sess.spectatorState = SPECTATOR_NOT;
+            } else {
+                ent->client->sess.sessionTeam = TEAM_FREE;
+                ent->client->sess.spectatorState = SPECTATOR_NOT;
+            }
+        }
+    }
+    gsc_pop( ctx, 1 );
+
+    gsc_object_get_field( ctx, selfObj, "spectatorclient" );
+    if ( gsc_type( ctx, -1 ) == GSC_TYPE_INTEGER ||
+         gsc_type( ctx, -1 ) == GSC_TYPE_FLOAT ) {
+        ent->client->sess.spectatorClient = (int)gsc_to_int( ctx, -1 );
+    }
+    gsc_pop( ctx, 1 );
+}
+
 static qboolean G_Scr_ClassnameMatches( const char *wanted, const char *actual )
 {
     if ( !wanted || !wanted[0] || !actual || !actual[0] ) {
@@ -810,6 +922,7 @@ static int GScr_Meth_Spawn( gsc_Context *ctx )
     gentity_t *ent = G_Scr_GetSelf( ctx );
     if ( ent && ent->client &&
          ent->client->pers.connected == CON_CONNECTED ) {
+        G_Scr_ApplyPlayerSessionFromObject( ctx, ent );
         ClientSpawn( ent );
         if ( gsc_numargs( ctx ) >= 2 &&
              gsc_get_type( ctx, 0 ) == GSC_TYPE_VECTOR &&
@@ -933,26 +1046,83 @@ static int GScr_Meth_IsTouching( gsc_Context *ctx )
 
 static int GScr_Meth_SetClientCvar( gsc_Context *ctx )
 {
-    (void)ctx;
+    int         clientNum;
+    const char *name;
+    const char *value;
+    gentity_t  *ent = G_Scr_GetSelf( ctx );
+
+    if ( !ent || !ent->client || !G_Scr_GetClientNumForEntity( ent, &clientNum ) ) {
+        return 0;
+    }
+
+    if ( gsc_numargs( ctx ) < 2 ) {
+        return 0;
+    }
+
+    name = gsc_get_string( ctx, 0 );
+    value = gsc_get_string( ctx, 1 );
+    if ( !name || !name[0] || !value ) {
+        return 0;
+    }
+
+    trap_SendServerCommand( clientNum,
+                            va( "scr_setcvar \"%s\" \"%s\"", name, value ) );
     return 0;
 }
 
 static int GScr_Meth_OpenMenu( gsc_Context *ctx )
 {
-    (void)ctx;
+    char        autoResponse[ 64 ];
+    int         clientNum;
+    const char *menuName;
+    gentity_t  *ent = G_Scr_GetSelf( ctx );
+
+    if ( !ent || !ent->client || !G_Scr_GetClientNumForEntity( ent, &clientNum ) ) {
+        gsc_add_int( ctx, 0 );
+        return 1;
+    }
+
+    if ( gsc_numargs( ctx ) < 1 ) {
+        gsc_add_int( ctx, 0 );
+        return 1;
+    }
+
+    menuName = gsc_get_string( ctx, 0 );
+    if ( !menuName || !menuName[0] ) {
+        gsc_add_int( ctx, 0 );
+        return 1;
+    }
+
+    trap_SendServerCommand( clientNum, va( "scr_menu open \"%s\"", menuName ) );
+
+    if ( G_Scr_ShouldAutoMenuResponse() &&
+         G_Scr_GetAutoMenuResponse( menuName, autoResponse, sizeof( autoResponse ) ) ) {
+        G_Scr_PlayerMenuResponse( clientNum, menuName, autoResponse );
+    }
+
     gsc_add_int( ctx, 1 );
     return 1;
 }
 
 static int GScr_Meth_CloseMenu( gsc_Context *ctx )
 {
-    (void)ctx;
+    int        clientNum;
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+
+    if ( ent && ent->client && G_Scr_GetClientNumForEntity( ent, &clientNum ) ) {
+        trap_SendServerCommand( clientNum, "scr_menu close" );
+    }
     return 0;
 }
 
 static int GScr_Meth_CloseInGameMenu( gsc_Context *ctx )
 {
-    (void)ctx;
+    int        clientNum;
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+
+    if ( ent && ent->client && G_Scr_GetClientNumForEntity( ent, &clientNum ) ) {
+        trap_SendServerCommand( clientNum, "scr_menu closeingame" );
+    }
     return 0;
 }
 
@@ -1007,7 +1177,7 @@ static int GScr_Meth_GetCurrentOffhand( gsc_Context *ctx )   { return G_Scr_Noop
 static int GScr_Meth_HasWeapon( gsc_Context *ctx )           { return G_Scr_NoopFalse( ctx ); }
 static int GScr_Meth_SwitchToWeapon( gsc_Context *ctx )      { return G_Scr_NoopReturn1( ctx ); }
 static int GScr_Meth_SwitchToOffhand( gsc_Context *ctx )     { return G_Scr_NoopReturn1( ctx ); }
-static int GScr_Meth_SetClientDvar( gsc_Context *ctx )       { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_SetClientDvar( gsc_Context *ctx )       { return GScr_Meth_SetClientCvar( ctx ); }
 static int GScr_Meth_FreezeControls( gsc_Context *ctx )      { return G_Scr_NoopReturn0( ctx ); }
 static int GScr_Meth_DisableWeapon( gsc_Context *ctx )       { return G_Scr_NoopReturn0( ctx ); }
 static int GScr_Meth_EnableWeapon( gsc_Context *ctx )        { return G_Scr_NoopReturn0( ctx ); }
@@ -2696,6 +2866,11 @@ void G_Scr_Frame( float dt )
     G_Scr_Hud_UpdateTimers();
 }
 
+qboolean G_Scr_IsActive( void )
+{
+    return g_scrActive && g_scrCtx;
+}
+
 /* =========================================================================
    Entity lifecycle callbacks
    ========================================================================= */
@@ -2741,6 +2916,27 @@ void G_Scr_EntityFreed( gentity_t *ent )
    Player lifecycle callbacks
    ========================================================================= */
 
+static void G_Scr_NotifyPlayer( int clientNum, const char *eventName, int numArgs )
+{
+    if ( !g_scrActive || !g_scrCtx || !eventName || !eventName[0] ) {
+        return;
+    }
+
+    if ( clientNum < 0 || clientNum >= MAX_CLIENTS ) {
+        return;
+    }
+
+    if ( !g_scrPlayerObjPtrs[ clientNum ] ) {
+        G_Scr_CreatePlayerObj( clientNum );
+    }
+
+    if ( !g_scrPlayerObjPtrs[ clientNum ] ) {
+        return;
+    }
+
+    gsc_notify( g_scrCtx, g_scrPlayerObjPtrs[ clientNum ], eventName, numArgs );
+}
+
 void G_Scr_PlayerConnect( int clientNum )
 {
     if ( !g_scrActive || !g_scrCtx ) {
@@ -2749,6 +2945,35 @@ void G_Scr_PlayerConnect( int clientNum )
     G_Scr_CreatePlayerObj( clientNum );
     G_Scr_Hud_SendAllToClient( clientNum );
     G_Scr_ExecPlayerCallback( clientNum, "CodeCallback_PlayerConnect" );
+}
+
+void G_Scr_PlayerBegin( int clientNum )
+{
+    if ( !g_scrActive || !g_scrCtx ) {
+        return;
+    }
+
+    if ( clientNum < 0 || clientNum >= MAX_CLIENTS ) {
+        return;
+    }
+
+    G_Scr_Hud_SendAllToClient( clientNum );
+    G_Scr_NotifyPlayer( clientNum, "begin", 0 );
+}
+
+void G_Scr_PlayerMenuResponse( int clientNum, const char *menu, const char *response )
+{
+    if ( !g_scrActive || !g_scrCtx ) {
+        return;
+    }
+
+    if ( clientNum < 0 || clientNum >= MAX_CLIENTS ) {
+        return;
+    }
+
+    gsc_add_string( g_scrCtx, menu ? menu : "" );
+    gsc_add_string( g_scrCtx, response ? response : "" );
+    G_Scr_NotifyPlayer( clientNum, "menuresponse", 2 );
 }
 
 void G_Scr_PlayerDisconnect( int clientNum )
@@ -2760,6 +2985,7 @@ void G_Scr_PlayerDisconnect( int clientNum )
         return;
     }
 
+    G_Scr_PlayerMenuResponse( clientNum, "disconnect", "-1" );
     G_Scr_ExecPlayerCallback( clientNum, "CodeCallback_PlayerDisconnect" );
 
     /* Advance any disconnect-triggered threads */

@@ -14,9 +14,12 @@ expands to a no-op so no GSC code is ever pulled into the game module.
 void G_Scr_Init( void );
 void G_Scr_Shutdown( void );
 void G_Scr_Frame( float dt );
+qboolean G_Scr_IsActive( void );
 
 /* Player lifecycle callbacks - mirror CoD's CodeCallback_* convention */
 void G_Scr_PlayerConnect( int clientNum );
+void G_Scr_PlayerBegin( int clientNum );
+void G_Scr_PlayerMenuResponse( int clientNum, const char *menu, const char *response );
 void G_Scr_PlayerDisconnect( int clientNum );
 void G_Scr_PlayerSpawn( int clientNum );
 void G_Scr_PlayerKilled( int clientNum, int attackerNum, int mod );
@@ -33,7 +36,10 @@ void G_Scr_EntityFreed( gentity_t *ent );
 #define G_Scr_Init()                  ((void)0)
 #define G_Scr_Shutdown()              ((void)0)
 #define G_Scr_Frame(dt)               ((void)0)
+#define G_Scr_IsActive()              (qfalse)
 #define G_Scr_PlayerConnect(n)        ((void)0)
+#define G_Scr_PlayerBegin(n)          ((void)0)
+#define G_Scr_PlayerMenuResponse(a,b,c) ((void)0)
 #define G_Scr_PlayerDisconnect(n)     ((void)0)
 #define G_Scr_PlayerSpawn(n)          ((void)0)
 #define G_Scr_PlayerKilled(a,b,c)     ((void)0)

@@ -21,6 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 //
 #include "g_local.h"
+#include "g_scr.h"
 
 #ifdef MISSIONPACK
 #include "../../ui/menudef.h"			// for the voice chats
@@ -1264,6 +1265,41 @@ void Cmd_GameCommand_f( gentity_t *ent ) {
 
 /*
 ==================
+Cmd_MenuResponse_f
+==================
+*/
+static void Cmd_MenuResponse_f( gentity_t *ent ) {
+	char	menuName[MAX_TOKEN_CHARS];
+	char	response[MAX_TOKEN_CHARS];
+	char	serverIdArg[MAX_TOKEN_CHARS];
+	char	serverIdCurrent[64];
+	int		clientNum;
+
+	if ( !ent || !ent->client || !G_Scr_IsActive() ) {
+		return;
+	}
+
+	clientNum = ent - g_entities;
+
+	if ( trap_Argc() == 4 ) {
+		trap_Argv( 1, serverIdArg, sizeof( serverIdArg ) );
+		trap_Cvar_VariableStringBuffer( "sv_serverid", serverIdCurrent, sizeof( serverIdCurrent ) );
+		if ( atoi( serverIdArg ) != atoi( serverIdCurrent ) ) {
+			return;
+		}
+
+		trap_Argv( 2, menuName, sizeof( menuName ) );
+		trap_Argv( 3, response, sizeof( response ) );
+	} else {
+		menuName[0] = '\0';
+		Q_strncpyz( response, "bad", sizeof( response ) );
+	}
+
+	G_Scr_PlayerMenuResponse( clientNum, menuName, response );
+}
+
+/*
+==================
 Cmd_Where_f
 ==================
 */
@@ -1770,6 +1806,11 @@ void ClientCommand( int clientNum ) {
 #endif
 	if (Q_stricmp (cmd, "score") == 0) {
 		Cmd_Score_f (ent);
+		return;
+	}
+
+	if (Q_stricmp (cmd, "mr") == 0 || Q_stricmp (cmd, "menuresponse") == 0) {
+		Cmd_MenuResponse_f( ent );
 		return;
 	}
 

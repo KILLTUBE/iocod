@@ -64,6 +64,44 @@ void CG_ScrHud_Reset( void )
 	memset( cgs.scrHudElems, 0, sizeof( cgs.scrHudElems ) );
 }
 
+static void CG_ScrSetCvar_ServerCommand( void )
+{
+	const char *name;
+	const char *value;
+
+	if ( trap_Argc() < 3 ) {
+		return;
+	}
+
+	name = CG_Argv( 1 );
+	value = CG_Argv( 2 );
+	if ( !name || !name[0] || !value ) {
+		return;
+	}
+
+	trap_Cvar_Set( name, value );
+}
+
+static void CG_ScrMenu_ServerCommand( void )
+{
+	const char *op;
+
+	if ( trap_Argc() < 2 ) {
+		return;
+	}
+
+	op = CG_Argv( 1 );
+	if ( !op || !op[0] ) {
+		return;
+	}
+
+	if ( !Q_stricmp( op, "open" ) && trap_Argc() >= 3 ) {
+		trap_Cvar_Set( "g_scriptMainMenu", CG_Argv( 2 ) );
+	} else if ( !Q_stricmp( op, "close" ) || !Q_stricmp( op, "closeingame" ) ) {
+		trap_Cvar_Set( "g_scriptMainMenu", "" );
+	}
+}
+
 static void CG_ScrHud_ServerCommand( void )
 {
 	const char *op = CG_Argv( 1 );
@@ -1083,6 +1121,14 @@ static void CG_ServerCommand( void ) {
 #ifdef STANDALONE
 	if ( !strcmp( cmd, "scr_hud" ) ) {
 		CG_ScrHud_ServerCommand();
+		return;
+	}
+	if ( !strcmp( cmd, "scr_setcvar" ) ) {
+		CG_ScrSetCvar_ServerCommand();
+		return;
+	}
+	if ( !strcmp( cmd, "scr_menu" ) ) {
+		CG_ScrMenu_ServerCommand();
 		return;
 	}
 #endif
