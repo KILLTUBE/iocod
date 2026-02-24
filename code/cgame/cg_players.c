@@ -1413,12 +1413,18 @@ static void CG_PlayerAngles( centity_t *cent, vec3_t legs[3], vec3_t torso[3], v
 		dir = 0;
 	} else {
 		dir = cent->currentState.angles2[YAW];
-		if ( dir < 0 || dir > 7 ) {
-			CG_Error( "Bad player movement angle" );
-		}
 	}
-	legsAngles[YAW] = headAngles[YAW] + movementOffsets[ dir ];
-	torsoAngles[YAW] = headAngles[YAW] + 0.25 * movementOffsets[ dir ];
+	// CoD-style: signed char (-75 to +75) is used as direct angle offset
+	// Q3-style: 0-7 is used as index into movementOffsets
+	if ( dir < 0 || dir > 7 ) {
+		// CoD-style signed angle offset
+		legsAngles[YAW] = headAngles[YAW] + (float)dir;
+		torsoAngles[YAW] = headAngles[YAW] + 0.25f * (float)dir;
+	} else {
+		// Q3-style discrete direction
+		legsAngles[YAW] = headAngles[YAW] + movementOffsets[ dir ];
+		torsoAngles[YAW] = headAngles[YAW] + 0.25 * movementOffsets[ dir ];
+	}
 
 	// torso
 	CG_SwingAngles( torsoAngles[YAW], 25, 90, cg_swingSpeed.value, &cent->pe.torso.yawAngle, &cent->pe.torso.yawing );

@@ -500,7 +500,6 @@ static void PM_LadderMove( void ) {
 	float	fSideSpeed, fSpeedDrop;
 	float	right2d[2], right2dLen;
 	float	dot, vz2, vxy2;
-	int		moveyaw;
 
 	// Jump while on ladder: exit ladder and go airborne
 	if ( PM_CheckJump() ) {
@@ -600,8 +599,18 @@ static void PM_LadderMove( void ) {
 
 	PM_StepSlideMove( qfalse );
 
-	// Set the movementDir so clients can rotate the legs for strafing
-	PM_SetMovementDir();
+	// Yaw movement direction for animations (clamped to +-75 from ladder face).
+	// CoD2: writes to ps->movementDir as signed char (not delta_angles).
+	// NOTE: CG must handle signed values as direct angle offsets.
+	{
+		vec3_t ladderAngles;
+		int moveyaw;
+		vectoangles( pml.ladderNormal, ladderAngles );
+		moveyaw = (int)AngleDelta( ladderAngles[YAW] + 180.0f, pm->ps->viewangles[YAW] );
+		if ( moveyaw >  75 ) moveyaw =  75;
+		if ( moveyaw < -75 ) moveyaw = -75;
+		pm->ps->movementDir = (signed char)moveyaw;
+	}
 }
 
 /*
