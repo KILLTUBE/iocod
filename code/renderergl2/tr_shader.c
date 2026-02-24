@@ -1373,6 +1373,47 @@ static qboolean ParseStage( shaderStage_t *stage, char **text )
 
 			continue;
 		}
+		//
+		// CoD1: nextbundle - additional texture bundle inline in stage, skip it
+		//
+		else if ( !Q_stricmp( token, "nextbundle" ) )
+		{
+			int depth = 0;
+			while ( 1 ) {
+				token = COM_ParseExt( text, qtrue );
+				if ( !token[0] ) break;
+				if ( token[0] == '{' ) depth++;
+				else if ( token[0] == '}' ) {
+					if ( depth == 0 ) break; /* end of stage */
+					depth--;
+				}
+			}
+			break; /* stage closing '}' consumed */
+		}
+		//
+		// CoD1: requires <hardware-expression> - hardware capability check, skip rest of line
+		//
+		else if ( !Q_stricmp( token, "requires" ) )
+		{
+			while ( COM_ParseExt( text, qfalse )[0] ) {}
+			continue;
+		}
+		//
+		// CoD1: waterMap <params> - water surface map, skip rest of line
+		//
+		else if ( !Q_stricmp( token, "waterMap" ) )
+		{
+			while ( COM_ParseExt( text, qfalse )[0] ) {}
+			continue;
+		}
+		//
+		// CoD1: texEnvCombine { } - GPU combiner block, skip it
+		//
+		else if ( !Q_stricmp( token, "texEnvCombine" ) )
+		{
+			SkipBracedSection( text, 0 );
+			continue;
+		}
 		else
 		{
 			ri.Printf( PRINT_WARNING, "WARNING: unknown parameter '%s' in shader '%s'\n", token, shader.name );
@@ -2027,6 +2068,30 @@ static qboolean ParseShader( char **text )
 		else if ( !Q_stricmp( token, "sort" ) )
 		{
 			ParseSort( text );
+			continue;
+		}
+		//
+		// CoD1: nofog - disable fog on this shader, no arguments
+		//
+		else if ( !Q_stricmp( token, "nofog" ) )
+		{
+			continue;
+		}
+		//
+		// CoD1: sunfile <filename> - external sun lighting reference, skip argument
+		//
+		else if ( !Q_stricmp( token, "sunfile" ) )
+		{
+			COM_ParseExt( text, qfalse );
+			continue;
+		}
+		//
+		// CoD1: nopicmip - already handled above, but also allow lowercase alias
+		// CoD1: requires <expr> at shader level - skip rest of line
+		//
+		else if ( !Q_stricmp( token, "requires" ) )
+		{
+			while ( COM_ParseExt( text, qfalse )[0] ) {}
 			continue;
 		}
 		else

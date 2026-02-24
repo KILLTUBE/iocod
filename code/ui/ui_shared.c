@@ -5000,18 +5000,18 @@ qboolean ItemParse_cvar( itemDef_t *item, int handle ) {
 }
 
 qboolean ItemParse_maxChars( itemDef_t *item, int handle ) {
-	editFieldDef_t *editPtr;
 	int maxChars;
 
-	Item_ValidateTypeData(item);
-	if (!item->typeData)
-		return qfalse;
-
+	/* Parse the value first so we always consume it, even if typeData can't be set */
 	if (!PC_Int_Parse(handle, &maxChars)) {
 		return qfalse;
 	}
-	editPtr = (editFieldDef_t*)item->typeData;
-	editPtr->maxChars = maxChars;
+
+	Item_ValidateTypeData(item);
+	if (item->typeData) {
+		editFieldDef_t *editPtr = (editFieldDef_t*)item->typeData;
+		editPtr->maxChars = maxChars;
+	}
 	return qtrue;
 }
 

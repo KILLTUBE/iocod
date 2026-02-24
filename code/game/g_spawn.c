@@ -122,6 +122,8 @@ typedef struct {
 void SP_info_player_start (gentity_t *ent);
 void SP_info_player_deathmatch (gentity_t *ent);
 void SP_info_player_intermission (gentity_t *ent);
+void SP_cod_mp_spawn (gentity_t *ent);
+void SP_cod_mp_intermission (gentity_t *ent);
 
 void SP_func_plat (gentity_t *ent);
 void SP_func_static (gentity_t *ent);
@@ -261,6 +263,18 @@ spawn_t	spawns[] = {
 	{"team_neutralobelisk", SP_team_neutralobelisk},
 #endif
 	{"item_botroam", SP_item_botroam},
+
+	// CoD1 MP spawn points
+	{"mp_deathmatch_spawn",             SP_cod_mp_spawn},
+	{"mp_teamdeathmatch_spawn",         SP_cod_mp_spawn},
+	{"mp_searchanddestroy_spawn_allied",SP_cod_mp_spawn},
+	{"mp_searchanddestroy_spawn_axis",  SP_cod_mp_spawn},
+	{"mp_retrieval_spawn_allied",       SP_cod_mp_spawn},
+	{"mp_retrieval_spawn_axis",         SP_cod_mp_spawn},
+	{"mp_deathmatch_intermission",      SP_cod_mp_intermission},
+	{"mp_teamdeathmatch_intermission",  SP_cod_mp_intermission},
+	{"mp_searchanddestroy_intermission",SP_cod_mp_intermission},
+	{"mp_retrieval_intermission",       SP_cod_mp_intermission},
 
 	// CoD mappings
 	{"script_brushmodel", SP_func_static},

@@ -56,6 +56,16 @@ void SP_info_player_start(gentity_t *ent) {
 	SP_info_player_deathmatch( ent );
 }
 
+/* CoD1 MP spawn points - all treated as info_player_deathmatch */
+void SP_cod_mp_spawn( gentity_t *ent ) {
+	ent->classname = "info_player_deathmatch";
+	SP_info_player_deathmatch( ent );
+}
+
+void SP_cod_mp_intermission( gentity_t *ent ) {
+	/* CoD1 intermission cameras - ignore for now */
+}
+
 /*QUAKED info_player_intermission (1 0 1) (-16 -16 -24) (16 16 32)
 The intermission will be viewed from this point.  Target an info_notnull for the view direction.
 */
