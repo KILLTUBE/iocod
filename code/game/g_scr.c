@@ -97,6 +97,23 @@ typedef struct {
 
 static G_ScrHudElem_t g_scrHudElems[ G_SCR_MAX_HUDELEMS ];
 
+#define G_SCR_MAX_ATTACHMENTS 16
+
+typedef struct {
+    qboolean inuse;
+    char     model[ MAX_QPATH ];
+    char     tag[ 64 ];
+    int      ignoreCollision;
+} G_ScrAttachSlot_t;
+
+typedef struct {
+    int              count;
+    G_ScrAttachSlot_t slot[ G_SCR_MAX_ATTACHMENTS ];
+} G_ScrAttachState_t;
+
+static G_ScrAttachState_t g_scrAttachStates[ MAX_GENTITIES ];
+static char               g_scrViewModels[ MAX_GENTITIES ][ MAX_QPATH ];
+
 /* The GSC file namespace (path without .gsc) where CodeCallback_* live.   */
 static char         g_scrCallbackFile[ MAX_QPATH ];
 
@@ -431,6 +448,43 @@ static qboolean G_Scr_GetEntityNum( const gentity_t *ent, int *outEntNum )
         *outEntNum = entNum;
     }
     return qtrue;
+}
+
+static void G_Scr_ClearEntityRuntimeState( int entNum )
+{
+    if ( entNum < 0 || entNum >= MAX_GENTITIES ) {
+        return;
+    }
+
+    Com_Memset( &g_scrAttachStates[ entNum ], 0, sizeof( g_scrAttachStates[ entNum ] ) );
+    g_scrViewModels[ entNum ][ 0 ] = '\0';
+}
+
+static G_ScrAttachState_t *G_Scr_GetAttachStateForSelf( gsc_Context *ctx, int *outEntNum )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    int        entNum;
+
+    if ( !G_Scr_GetEntityNum( ent, &entNum ) ) {
+        return NULL;
+    }
+
+    if ( outEntNum ) {
+        *outEntNum = entNum;
+    }
+
+    return &g_scrAttachStates[ entNum ];
+}
+
+static const char *G_Scr_GetOptionalStringArg( gsc_Context *ctx, int arg, const char *fallback )
+{
+    int type = gsc_get_type( ctx, arg );
+
+    if ( type == GSC_TYPE_STRING || type == GSC_TYPE_INTERNED_STRING ) {
+        return gsc_get_string( ctx, arg );
+    }
+
+    return fallback ? fallback : "";
 }
 
 static void G_Scr_GetEntityGlobalName( int entNum, char *name, int nameSize )
@@ -1526,11 +1580,176 @@ static int GScr_Meth_SetEnterTime( gsc_Context *ctx )        { return G_Scr_Noop
 static int GScr_Meth_PingPlayer( gsc_Context *ctx )          { return G_Scr_NoopReturn0( ctx ); }
 static int GScr_Meth_SayAll( gsc_Context *ctx )              { return G_Scr_NoopReturn0( ctx ); }
 static int GScr_Meth_SayTeam( gsc_Context *ctx )             { return G_Scr_NoopReturn0( ctx ); }
-static int GScr_Meth_SetViewModel( gsc_Context *ctx )        { return G_Scr_NoopReturn0( ctx ); }
-static int GScr_Meth_GetViewModel( gsc_Context *ctx )        { return G_Scr_NoopNoneString( ctx ); }
-static int GScr_Meth_Attach( gsc_Context *ctx )              { return G_Scr_NoopReturn0( ctx ); }
-static int GScr_Meth_Detach( gsc_Context *ctx )              { return G_Scr_NoopReturn0( ctx ); }
-static int GScr_Meth_DetachAll( gsc_Context *ctx )           { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_SetViewModel( gsc_Context *ctx )
+{
+    int         entNum;
+    const char *viewModel;
+
+    if ( !G_Scr_GetAttachStateForSelf( ctx, &entNum ) || gsc_numargs( ctx ) < 1 ) {
+        return 0;
+    }
+
+    viewModel = G_Scr_GetOptionalStringArg( ctx, 0, "" );
+    Q_strncpyz( g_scrViewModels[ entNum ], viewModel, sizeof( g_scrViewModels[ entNum ] ) );
+    return 0;
+}
+
+static int GScr_Meth_GetViewModel( gsc_Context *ctx )
+{
+    int entNum;
+
+    if ( !G_Scr_GetAttachStateForSelf( ctx, &entNum ) ||
+         !g_scrViewModels[ entNum ][ 0 ] ) {
+        gsc_add_string( ctx, "none" );
+        return 1;
+    }
+
+    gsc_add_string( ctx, g_scrViewModels[ entNum ] );
+    return 1;
+}
+
+static int GScr_Meth_Attach( gsc_Context *ctx )
+{
+    G_ScrAttachState_t *state;
+    const char         *model;
+    const char         *tag;
+    int                 ignoreCollision;
+    int                 i;
+
+    state = G_Scr_GetAttachStateForSelf( ctx, NULL );
+    if ( !state || gsc_numargs( ctx ) < 1 ) {
+        return 0;
+    }
+
+    model = G_Scr_GetOptionalStringArg( ctx, 0, "" );
+    if ( !model[ 0 ] ) {
+        return 0;
+    }
+
+    tag = G_Scr_GetOptionalStringArg( ctx, 1, "" );
+    ignoreCollision = G_Scr_GetIntArg( ctx, 2, 0 );
+
+    for ( i = 0; i < state->count; i++ ) {
+        if ( state->slot[ i ].inuse &&
+             !Q_stricmp( state->slot[ i ].model, model ) &&
+             !Q_stricmp( state->slot[ i ].tag, tag ) ) {
+            state->slot[ i ].ignoreCollision = ignoreCollision;
+            return 0;
+        }
+    }
+
+    if ( state->count >= G_SCR_MAX_ATTACHMENTS ) {
+        return 0;
+    }
+
+    state->slot[ state->count ].inuse = qtrue;
+    Q_strncpyz( state->slot[ state->count ].model, model, sizeof( state->slot[ state->count ].model ) );
+    Q_strncpyz( state->slot[ state->count ].tag, tag, sizeof( state->slot[ state->count ].tag ) );
+    state->slot[ state->count ].ignoreCollision = ignoreCollision;
+    state->count++;
+    return 0;
+}
+
+static int GScr_Meth_Detach( gsc_Context *ctx )
+{
+    G_ScrAttachState_t *state;
+    const char         *model;
+    const char         *tag;
+    qboolean            useTag;
+    int                 i, j;
+
+    state = G_Scr_GetAttachStateForSelf( ctx, NULL );
+    if ( !state || gsc_numargs( ctx ) < 1 ) {
+        return 0;
+    }
+
+    model = G_Scr_GetOptionalStringArg( ctx, 0, "" );
+    if ( !model[ 0 ] ) {
+        return 0;
+    }
+
+    tag = G_Scr_GetOptionalStringArg( ctx, 1, "" );
+    useTag = tag[ 0 ] ? qtrue : qfalse;
+
+    for ( i = 0; i < state->count; ) {
+        qboolean matchModel = !Q_stricmp( state->slot[ i ].model, model );
+        qboolean matchTag = !useTag || !Q_stricmp( state->slot[ i ].tag, tag );
+
+        if ( matchModel && matchTag ) {
+            for ( j = i; j + 1 < state->count; j++ ) {
+                state->slot[ j ] = state->slot[ j + 1 ];
+            }
+            state->count--;
+            Com_Memset( &state->slot[ state->count ], 0, sizeof( state->slot[ state->count ] ) );
+            continue;
+        }
+        i++;
+    }
+
+    return 0;
+}
+
+static int GScr_Meth_DetachAll( gsc_Context *ctx )
+{
+    G_ScrAttachState_t *state = G_Scr_GetAttachStateForSelf( ctx, NULL );
+
+    if ( state ) {
+        Com_Memset( state, 0, sizeof( *state ) );
+    }
+
+    return 0;
+}
+
+static int GScr_Meth_GetAttachSize( gsc_Context *ctx )
+{
+    G_ScrAttachState_t *state = G_Scr_GetAttachStateForSelf( ctx, NULL );
+
+    gsc_add_int( ctx, state ? state->count : 0 );
+    return 1;
+}
+
+static int GScr_Meth_GetAttachModelName( gsc_Context *ctx )
+{
+    G_ScrAttachState_t *state = G_Scr_GetAttachStateForSelf( ctx, NULL );
+    int                 idx = G_Scr_GetIntArg( ctx, 0, -1 );
+
+    if ( !state || idx < 0 || idx >= state->count ) {
+        gsc_add_string( ctx, "" );
+        return 1;
+    }
+
+    gsc_add_string( ctx, state->slot[ idx ].model );
+    return 1;
+}
+
+static int GScr_Meth_GetAttachTagName( gsc_Context *ctx )
+{
+    G_ScrAttachState_t *state = G_Scr_GetAttachStateForSelf( ctx, NULL );
+    int                 idx = G_Scr_GetIntArg( ctx, 0, -1 );
+
+    if ( !state || idx < 0 || idx >= state->count ) {
+        gsc_add_string( ctx, "" );
+        return 1;
+    }
+
+    gsc_add_string( ctx, state->slot[ idx ].tag );
+    return 1;
+}
+
+static int GScr_Meth_GetAttachIgnoreCollision( gsc_Context *ctx )
+{
+    G_ScrAttachState_t *state = G_Scr_GetAttachStateForSelf( ctx, NULL );
+    int                 idx = G_Scr_GetIntArg( ctx, 0, -1 );
+
+    if ( !state || idx < 0 || idx >= state->count ) {
+        gsc_add_int( ctx, 0 );
+        return 1;
+    }
+
+    gsc_add_int( ctx, state->slot[ idx ].ignoreCollision );
+    return 1;
+}
+
 static int GScr_Meth_PlaySound( gsc_Context *ctx )           { return G_Scr_NoopReturn0( ctx ); }
 static int GScr_Meth_PlayLocalSound( gsc_Context *ctx )      { return G_Scr_NoopReturn0( ctx ); }
 static int GScr_Meth_PlayLoopSound( gsc_Context *ctx )       { return G_Scr_NoopReturn0( ctx ); }
@@ -2852,6 +3071,10 @@ static void G_Scr_CreateGlobals( void )
     G_Scr_AddMethod( entMethodsObj, "attach",          GScr_Meth_Attach );
     G_Scr_AddMethod( entMethodsObj, "detach",          GScr_Meth_Detach );
     G_Scr_AddMethod( entMethodsObj, "detachall",       GScr_Meth_DetachAll );
+    G_Scr_AddMethod( entMethodsObj, "getattachsize",   GScr_Meth_GetAttachSize );
+    G_Scr_AddMethod( entMethodsObj, "getattachmodelname", GScr_Meth_GetAttachModelName );
+    G_Scr_AddMethod( entMethodsObj, "getattachtagname", GScr_Meth_GetAttachTagName );
+    G_Scr_AddMethod( entMethodsObj, "getattachignorecollision", GScr_Meth_GetAttachIgnoreCollision );
     G_Scr_AddMethod( entMethodsObj, "playsound",       GScr_Meth_PlaySound );
     G_Scr_AddMethod( entMethodsObj, "playlocalsound",  GScr_Meth_PlayLocalSound );
     G_Scr_AddMethod( entMethodsObj, "playloopsound",   GScr_Meth_PlayLoopSound );
@@ -3102,6 +3325,8 @@ void G_Scr_Init( void )
     g_scrHudElemProxyObj = NULL;
     Com_Memset( g_scrPlayerObjPtrs, 0, sizeof( g_scrPlayerObjPtrs ) );
     Com_Memset( g_scrEntityObjAlive, 0, sizeof( g_scrEntityObjAlive ) );
+    Com_Memset( g_scrAttachStates, 0, sizeof( g_scrAttachStates ) );
+    Com_Memset( g_scrViewModels, 0, sizeof( g_scrViewModels ) );
     G_Scr_Hud_ResetAll( qfalse );
     g_scrCallbackFile[0] = '\0';
 
@@ -3286,6 +3511,8 @@ void G_Scr_Shutdown( void )
     Com_Memset( g_scrPlayerObjPtrs, 0, sizeof( g_scrPlayerObjPtrs ) );
     Com_Memset( g_scrEntityObjAlive, 0, sizeof( g_scrEntityObjAlive ) );
     Com_Memset( g_scrHudElems, 0, sizeof( g_scrHudElems ) );
+    Com_Memset( g_scrAttachStates, 0, sizeof( g_scrAttachStates ) );
+    Com_Memset( g_scrViewModels, 0, sizeof( g_scrViewModels ) );
     g_scrEntityProxyObj = NULL;
     g_scrPlayerProxyObj = NULL;
     g_scrHudElemProxyObj = NULL;
@@ -3326,6 +3553,7 @@ void G_Scr_EntitySpawned( gentity_t *ent )
         return;
     }
 
+    G_Scr_ClearEntityRuntimeState( entNum );
     G_Scr_CreateEntityObject( ent, qfalse );
 }
 
@@ -3341,6 +3569,8 @@ void G_Scr_EntityFreed( gentity_t *ent )
     if ( !G_Scr_GetEntityNum( ent, &entNum ) || entNum < MAX_CLIENTS ) {
         return;
     }
+
+    G_Scr_ClearEntityRuntimeState( entNum );
 
     if ( !g_scrEntityObjAlive[ entNum ] ) {
         return;
@@ -3381,6 +3611,7 @@ void G_Scr_PlayerConnect( int clientNum )
     if ( !g_scrActive || !g_scrCtx ) {
         return;
     }
+    G_Scr_ClearEntityRuntimeState( clientNum );
     G_Scr_CreatePlayerObj( clientNum );
     G_Scr_Hud_SendAllToClient( clientNum );
     G_Scr_ExecPlayerCallback( clientNum, "CodeCallback_PlayerConnect" );
@@ -3423,6 +3654,8 @@ void G_Scr_PlayerDisconnect( int clientNum )
     if ( !g_scrActive || !g_scrCtx ) {
         return;
     }
+
+    G_Scr_ClearEntityRuntimeState( clientNum );
 
     G_Scr_PlayerMenuResponse( clientNum, "disconnect", "-1" );
     G_Scr_ExecPlayerCallback( clientNum, "CodeCallback_PlayerDisconnect" );
