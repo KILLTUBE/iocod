@@ -52,11 +52,15 @@ float	pm_waterSwimScale = 0.5f;		// swim speed scale (CoD1: pm_waterSwimScale)
 float	pm_waterWadeScale = 0.7f;		// wade (shallow water) speed scale
 float	pm_ducked_accelerate = 12.0f;	// acceleration while crouched
 float	pm_prone_accelerate = 19.0f;	// acceleration while prone
-float	pm_ladderPushOff = 128.0f;		// velocity when jumping off a ladder
 int		pm_ladderJumpTime = 300;		// ms before ladder re-grab allowed after jump
 float	pm_ladderfriction = 16.0f;		// friction while on ladder
 float	pm_ladderPushVel = 128.0f;		// velocity when jumping off ladder
 float	pm_shellshockScale = 0.4f;		// movement scale during shellshock
+
+// CoD2 jump slowdown parameters
+int		pm_jump_slowdownEnable = 1;	// enable jump slowdown from landing
+float	pm_jump_height = 39.0f;		// max jump height for velocity clamping
+int		pm_jump_slowdown_time = 1800;	// ms that jump slowdown lasts after landing
 
 int		c_pmove = 0;
 
@@ -364,6 +368,30 @@ static void PM_SetMovementDir( void ) {
 	}
 }
 
+/*
+=============
+PM_JumpSlowdownFactor
+
+CoD2: Returns jump slowdown factor (1.0 to 2.5) based on pm_time.
+Higher value = more jump height reduction.
+=============
+*/
+static float PM_JumpSlowdownFactor( void ) {
+	if ( !pm_jump_slowdownEnable ) {
+		return 1.0f;
+	}
+
+	// pm_time decreases from pm_jump_slowdown_time to 0
+	// When pm_time > 1699ms, factor = 2.5 (max slowdown)
+	// When pm_time <= 1699ms, factor scales from 1.0 to 2.5
+	if ( pm->ps->pm_time > 1699 ) {
+		return 2.5f;
+	}
+	// Scale: 1.0 + (pm_time * 1.5 / 2550) = 1.0 + pm_time * 0.00058823527
+	return 1.0f + (pm->ps->pm_time * 1.5f * 0.00058823527f);
+}
+
+
 
 /*
 =============
@@ -377,6 +405,12 @@ static qboolean PM_CheckJump( void ) {
 
 	if ( pm->cmd.upmove < 10 ) {
 		// not holding jump
+		return qfalse;
+	}
+
+	// CoD1/2: not allowed to jump if just landed (PMF_TIME_LAND)
+	// This prevents bunny hopping
+	if ( pm->ps->pm_flags & PMF_TIME_LAND ) {
 		return qfalse;
 	}
 
@@ -399,7 +433,14 @@ static qboolean PM_CheckJump( void ) {
 
 	pm->ps->groundEntityNum = ENTITYNUM_NONE;
 	// CoD1: velocity = sqrt(2 * jump_height * gravity), jump_height = 39 units
-	pm->ps->velocity[2] = (float)sqrt( 2.0f * JUMP_HEIGHT * (float)pm->ps->gravity );
+	// CoD2: apply slowdown if PMF_TIME_SLOWDOWN is set
+	{
+		float jumpVel = (float)sqrt( 2.0f * JUMP_HEIGHT * (float)pm->ps->gravity );
+		if ( pm->ps->pm_flags & PMF_TIME_SLOWDOWN ) {
+			jumpVel /= PM_JumpSlowdownFactor();
+		}
+		pm->ps->velocity[2] = jumpVel;
+	}
 	PM_AddEvent( EV_JUMP );
 
 	if ( pm->cmd.forwardmove >= 0 ) {
@@ -1347,14 +1388,29 @@ static void PM_GroundTrace( void ) {
 		if ( pm->debugLevel ) {
 			Com_Printf("%i:Land\n", c_pmove);
 		}
-		
+
 		PM_CrashLand();
 
-		// don't do landing time if we were just going down a slope
+		// CoD1/2: ALL landings set PMF_TIME_LAND to prevent bunny hopping
+		// Duration depends on impact velocity
+		pm->ps->pm_flags |= PMF_TIME_LAND;
 		if ( pml.previous_velocity[2] < -200 ) {
-			// don't allow another jump for a little while
-			pm->ps->pm_flags |= PMF_TIME_LAND;
+			// Hard landing: longer delay
 			pm->ps->pm_time = 250;
+		} else {
+			// Soft landing: brief delay
+			pm->ps->pm_time = 100;
+		}
+
+		// CoD2: jump slowdown - if landing with high downward velocity, apply slowdown
+		if ( pml.previous_velocity[2] < -200 && pm_jump_slowdownEnable ) {
+			// Store where we landed (use grapplePoint[2] since we don't use grapple)
+			pm->ps->grapplePoint[2] = pm->ps->origin[2];
+			pm->ps->pm_flags |= PMF_TIME_SLOWDOWN;
+			// Note: PMF_TIME_SLOWDOWN shares pm_time with PMF_TIME_LAND, set to full duration
+			if ( pm->ps->pm_time < pm_jump_slowdown_time ) {
+				pm->ps->pm_time = pm_jump_slowdown_time;
+			}
 		}
 	}
 
