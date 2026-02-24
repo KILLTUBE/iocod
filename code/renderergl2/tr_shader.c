@@ -3610,6 +3610,26 @@ shader_t *R_FindShaderEx( const char *name, int lightmapIndex, qboolean mipRawIm
 	//
 	// create the default shading commands
 	//
+#ifdef STANDALONE
+	/* CoD1: auto-detect alpha-masked surfaces (fences, railings, foliage) by DXT3/DXT5/DXT1a format.
+	 * These surfaces have no explicit shader definition; the alpha channel carries the cutout mask.
+	 * Replace the two-pass lightmap shader with a single vertex-lit + alphaFunc GE128 pass so
+	 * transparent holes are actually discarded rather than rendered as black. */
+	if ( shader.lightmapIndex >= 0 &&
+	     ( image->internalFormat == GL_COMPRESSED_RGBA_S3TC_DXT3_EXT ||
+	       image->internalFormat == GL_COMPRESSED_RGBA_S3TC_DXT5_EXT ||
+	       image->internalFormat == GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT ||
+	       image->internalFormat == GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT ||
+	       image->internalFormat == GL_COMPRESSED_RGBA_S3TC_DXT1_EXT ) )
+	{
+		stages[0].bundle[0].image[0] = image;
+		stages[0].active = qtrue;
+		stages[0].rgbGen = CGEN_EXACT_VERTEX;
+		stages[0].stateBits = GLS_DEFAULT | GLS_ATEST_GE_80;
+		shader.sort = SS_SEE_THROUGH;
+		return FinishShader();
+	}
+#endif
 	if ( shader.lightmapIndex == LIGHTMAP_NONE ) {
 		// dynamic colors at vertexes
 		stages[0].bundle[0].image[0] = image;
