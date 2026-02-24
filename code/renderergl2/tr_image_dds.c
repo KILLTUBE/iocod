@@ -633,7 +633,13 @@ void R_LoadDDS ( const char *filename, byte **pic, int *width, int *height, GLen
 		if (ddsHeader->pixelFormatFlags & DDSPF_FOURCC)
 		{
 			if (ddsHeader->fourCC == EncodeFourCC("DXT1"))
-				*picFormat = GL_COMPRESSED_RGB_S3TC_DXT1_EXT;
+			{
+				/* DXT1 with alpha flag uses 1-bit transparent pixels; use RGBA variant */
+				if (ddsHeader->pixelFormatFlags & DDSPF_ALPHAPIXELS)
+					*picFormat = GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
+				else
+					*picFormat = GL_COMPRESSED_RGB_S3TC_DXT1_EXT;
+			}
 			else if (ddsHeader->fourCC == EncodeFourCC("DXT2"))
 				*picFormat = GL_COMPRESSED_RGBA_S3TC_DXT3_EXT;
 			else if (ddsHeader->fourCC == EncodeFourCC("DXT3"))

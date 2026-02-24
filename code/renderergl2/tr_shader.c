@@ -1391,6 +1391,25 @@ static qboolean ParseStage( shaderStage_t *stage, char **text )
 			break; /* stage closing '}' consumed */
 		}
 		//
+		// CoD1: perlight - per-dynamic-light stage, skip it entirely
+		// Q3 has its own dynamic lighting; these stages would render as permanent additive passes
+		//
+		else if ( !Q_stricmp( token, "perlight" ) )
+		{
+			int depth = 0;
+			while ( 1 ) {
+				token = COM_ParseExt( text, qtrue );
+				if ( !token[0] ) break;
+				if ( token[0] == '{' ) depth++;
+				else if ( token[0] == '}' ) {
+					if ( depth == 0 ) break;
+					depth--;
+				}
+			}
+			stage->active = qfalse; /* signal caller to discard this stage */
+			break;
+		}
+		//
 		// CoD1: requires <hardware-expression> - hardware capability check, skip rest of line
 		//
 		else if ( !Q_stricmp( token, "requires" ) )
@@ -1407,9 +1426,41 @@ static qboolean ParseStage( shaderStage_t *stage, char **text )
 			continue;
 		}
 		//
+		// CoD1: cubemap <name> - cube map texture reference
+		//
+		else if ( !Q_stricmp( token, "cubemap" ) )
+		{
+			COM_ParseExt( text, qfalse ); /* consume texture name */
+			continue;
+		}
+		//
 		// CoD1: texEnvCombine { } - GPU combiner block, skip it
 		//
 		else if ( !Q_stricmp( token, "texEnvCombine" ) )
+		{
+			SkipBracedSection( text, 0 );
+			continue;
+		}
+		//
+		// CoD1: nvTexShader <expr> - NVIDIA texture shader combiner, skip rest of line
+		//
+		else if ( !Q_stricmp( token, "nvTexShader" ) )
+		{
+			SkipRestOfLine( text );
+			continue;
+		}
+		//
+		// CoD1: nvRegCombiners { } - NVIDIA register combiners block, skip it
+		//
+		else if ( !Q_stricmp( token, "nvRegCombiners" ) )
+		{
+			SkipBracedSection( text, 0 );
+			continue;
+		}
+		//
+		// CoD1: atiFragmentShader { } - ATI fragment shader block, skip it
+		//
+		else if ( !Q_stricmp( token, "atiFragmentShader" ) )
 		{
 			SkipBracedSection( text, 0 );
 			continue;
@@ -1857,8 +1908,13 @@ static qboolean ParseShader( char **text )
 			{
 				return qfalse;
 			}
-			stages[s].active = qtrue;
-			s++;
+			if ( stages[s].active ) {
+				s++; /* perlight and similar skipped stages leave active=false */
+			} else {
+				/* Clear slot so next stage starts clean */
+				Com_Memset( &stages[s], 0, sizeof( stages[s] ) );
+				stages[s].bundle[0].texMods = texMods[s];
+			}
 
 			continue;
 		}
