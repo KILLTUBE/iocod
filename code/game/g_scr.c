@@ -2148,21 +2148,7 @@ static const char *G_Scr_StringifyArg( gsc_Context *ctx, int arg, char *buf, int
         case GSC_TYPE_FUNCTION:
             return "[function]";
         case GSC_TYPE_OBJECT:
-        {
-            int obj = gsc_get_object( ctx, arg );
-            if ( obj >= 0 ) {
-                gsc_object_get_field( ctx, obj, "name" );
-                if ( gsc_type( ctx, -1 ) == GSC_TYPE_STRING ||
-                     gsc_type( ctx, -1 ) == GSC_TYPE_INTERNED_STRING ) {
-                    const char *name = gsc_to_string( ctx, -1 );
-                    Com_sprintf( buf, bufSize, "%s", name ? name : "" );
-                    gsc_pop( ctx, 1 );
-                    return buf;
-                }
-                gsc_pop( ctx, 1 );
-            }
             return "[object]";
-        }
         case GSC_TYPE_REFERENCE:
             return "[reference]";
         case GSC_TYPE_THREAD:
