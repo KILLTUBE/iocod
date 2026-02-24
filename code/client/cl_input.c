@@ -54,9 +54,6 @@ kbutton_t	in_up, in_down;
 kbutton_t	in_reload;
 kbutton_t	in_melee;
 
-/* ADS toggle state — set/cleared by the "ads" command in cl_weapon_cod1.c */
-qboolean	in_adsToggle = qfalse;
-
 #ifdef USE_VOIP
 kbutton_t	in_voiprecord;
 #endif
@@ -591,10 +588,6 @@ void CL_CmdButtons( usercmd_t *cmd ) {
 		cmd->buttons |= BUTTON_MELEE;
 	}
 	in_melee.wasPressed = qfalse;
-
-	if ( in_adsToggle ) {
-		cmd->buttons |= BUTTON_ADS;
-	}
 
 	if ( Key_GetCatcher( ) ) {
 		cmd->buttons |= BUTTON_TALK;

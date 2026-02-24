@@ -25,8 +25,6 @@ Cvars:
 #include "client.h"
 #include "../qcommon/bg_weapon_cod1.h"
 
-/* ADS toggle state lives in cl_input.c, driven by the "ads" command */
-extern qboolean in_adsToggle;
 
 /* ===========================================================================
    Cvars
@@ -314,7 +312,6 @@ static void CL_WeaponThink( void )
     curPmType = cl.snap.ps.pm_type;
     if ( curPmType == 0 && s_prevPmType != 0 ) {
         s_spawnSerial++;
-        in_adsToggle = qfalse;   /* always exit ADS on (re)spawn */
         startWeap = ( cl_startWeapon && cl_startWeapon->string[0] )
                     ? cl_startWeapon->string : "";
         if ( startWeap[0] ) {
@@ -331,7 +328,8 @@ static void CL_WeaponThink( void )
     wantFire   = ( cmd->buttons & BUTTON_ATTACK  ) ? qtrue : qfalse;
     wantReload = ( cmd->buttons & BUTTON_RELOAD  ) ? qtrue : qfalse;
     wantMelee  = ( cmd->buttons & BUTTON_MELEE   ) ? qtrue : qfalse;
-    wantAds    = in_adsToggle;   /* ADS is toggle, not hold */
+    /* CoD1 ADS: bind mouse2 "toggle cl_run" → cl_run=0 → BUTTON_WALKING set */
+    wantAds    = ( cmd->buttons & BUTTON_WALKING ) ? qtrue : qfalse;
 
     /* ---- ADS fraction interpolation ---- */
     {
@@ -355,59 +353,31 @@ static void CL_WeaponThink( void )
         if ( cl_weapon.adsFrac > 1.0f ) cl_weapon.adsFrac = 1.0f;
     }
 
-    /* ---- ADS state transitions ---- */
-    if ( wantAds && !cl_weapon.adsActive ) {
-        /* Entering ADS — only from idle states */
-        if ( IsIdleAnim( cl_weapon.currentAnim ) ) {
-            cl_weapon.adsActive = qtrue;
-            if ( cl_weapon.anims[WA_ADS_UP] )
-                SetAnim( WA_ADS_UP );
-        }
-    } else if ( !wantAds && cl_weapon.adsActive ) {
-        /* Leaving ADS */
-        cl_weapon.adsActive = qfalse;
-        if ( cl_weapon.anims[WA_ADS_DOWN] )
-            SetAnim( WA_ADS_DOWN );
-        else
-            SetAnim( WA_IDLE );
-    }
+    /* ---- ADS active flag ---
+     * adsActive just gates firing/reload/melee while in ADS.
+     * The animation is driven purely by adsFrac in CL_DrawViewModel —
+     * no WA_ADS_UP / WA_ADS_DOWN states needed in the state machine.
+     */
+    cl_weapon.adsActive = ( cl_weapon.adsFrac > 0.0f ) ? qtrue : qfalse;
 
-    /* Force ADS off when firing interrupts or player dies */
+    /* Force adsFrac to zero while firing/reloading/meleeing */
     if ( cl_weapon.currentAnim == WA_FIRE || cl_weapon.currentAnim == WA_RELOAD ||
          cl_weapon.currentAnim == WA_RELOAD_EMPTY || cl_weapon.currentAnim == WA_MELEE ) {
-        if ( cl_weapon.adsActive ) {
-            cl_weapon.adsActive = qfalse;
-            in_adsToggle        = qfalse;
-        }
+        cl_weapon.adsFrac   = 0.0f;
+        cl_weapon.adsActive = qfalse;
     }
 
     /* ---- Per-state logic ---- */
     switch ( cl_weapon.currentAnim )
     {
     case WA_RAISE:
-        /* Wait for raise to complete, then go idle */
-        if ( ElapsedSec() >= AnimDuration( WA_RAISE ) ) {
+        if ( ElapsedSec() >= AnimDuration( WA_RAISE ) )
             SetAnim( cl_weapon.clipAmmo > 0 ? WA_IDLE : WA_EMPTY_IDLE );
-        }
         break;
 
     case WA_DROP:
-        /* Wait for drop to complete */
         if ( ElapsedSec() >= AnimDuration( WA_DROP ) )
             cl_weapon.active = qfalse;
-        break;
-
-    case WA_ADS_UP:
-        /* Wait for ADS-up anim to finish, then go to hip-idle (ADS flag stays) */
-        if ( ElapsedSec() >= AnimDuration( WA_ADS_UP ) ) {
-            SetAnim( WA_IDLE );
-        }
-        break;
-
-    case WA_ADS_DOWN:
-        if ( ElapsedSec() >= AnimDuration( WA_ADS_DOWN ) ) {
-            SetAnim( cl_weapon.clipAmmo > 0 ? WA_IDLE : WA_EMPTY_IDLE );
-        }
         break;
 
     case WA_IDLE:
@@ -498,22 +468,58 @@ static void CL_WeaponThink( void )
    CL_WeaponCurrentAnimFrame
    =========================================================================== */
 
+/*
+ * CL_WeaponCurrentAnimFrame
+ *
+ * Returns the animation handle and frame to render for the current state.
+ * ADS (adsUp / adsDown) are driven purely by adsFrac — exactly like CoD2's
+ * XAnimSetGoalWeight / XAnimSetTime approach:
+ *
+ *   Entering ADS (wantAds=true):   play adsUp,   frame = adsFrac * (nf-1)
+ *   Exiting  ADS (wantAds=false):  play adsDown, frame = (1-adsFrac) * (nf-1)
+ *   Fully in ADS (adsFrac=1.0):    adsUp last frame held
+ *   Fully hip    (adsFrac=0.0):    normal currentAnim
+ */
 float CL_WeaponCurrentAnimFrame( void )
 {
-    qhandle_t h   = cl_weapon.anims[cl_weapon.currentAnim];
-    int       fps = re.XAnimFramerate ? re.XAnimFramerate(h) : 30;
-    int       nf  = re.XAnimNumFrames ? re.XAnimNumFrames(h) : 1;
+    qhandle_t h;
+    int       nf;
     float     elapsed, frame;
 
-    if ( fps <= 0 ) fps = 30;
-    if ( nf  <= 0 ) nf  = 1;
+    /* ADS: override anim selection based on adsFrac */
+    if ( cl_weapon.adsFrac > 0.0f ) {
+        usercmd_t *cmd = &cl.cmds[ (cl.cmdNumber - 1) & (CMD_BACKUP - 1) ];
+        qboolean wantAds = ( cmd->buttons & BUTTON_WALKING ) ? qtrue : qfalse;
+
+        if ( wantAds && cl_weapon.anims[WA_ADS_UP] ) {
+            h  = cl_weapon.anims[WA_ADS_UP];
+            nf = re.XAnimNumFrames ? re.XAnimNumFrames(h) : 1;
+            if ( nf < 1 ) nf = 1;
+            /* Drive frame from adsFrac: 0→first, 1→last (held) */
+            cl_weapon.currentAnim = WA_ADS_UP;
+            return cl_weapon.adsFrac * (float)( nf - 1 );
+        } else if ( !wantAds && cl_weapon.anims[WA_ADS_DOWN] ) {
+            h  = cl_weapon.anims[WA_ADS_DOWN];
+            nf = re.XAnimNumFrames ? re.XAnimNumFrames(h) : 1;
+            if ( nf < 1 ) nf = 1;
+            /* adsFrac going 1→0: play adsDown 0→last as adsFrac falls */
+            cl_weapon.currentAnim = WA_ADS_DOWN;
+            return ( 1.0f - cl_weapon.adsFrac ) * (float)( nf - 1 );
+        }
+        /* If no ADS anims, fall through to normal anim */
+    }
+
+    /* Normal (hip) animation */
+    h  = cl_weapon.anims[cl_weapon.currentAnim];
+    nf = re.XAnimNumFrames ? re.XAnimNumFrames(h) : 1;
+    if ( nf < 1 ) nf = 1;
 
     elapsed = (float)( cls.realtime - cl_weapon.animStartTime ) / 1000.0f;
-    frame   = elapsed * (float)fps;
+    frame   = elapsed * (float)( re.XAnimFramerate ? re.XAnimFramerate(h) : 30 );
+    if ( frame < 0 ) frame = 0;
 
     if ( IsIdleAnim( cl_weapon.currentAnim ) ) {
-        if ( nf > 1 ) frame = (float)fmod( (double)frame, (double)nf );
-        else          frame = 0.0f;
+        frame = ( nf > 1 ) ? (float)fmod( (double)frame, (double)nf ) : 0.0f;
     } else {
         if ( frame >= (float)nf ) frame = (float)( nf - 1 );
     }
@@ -526,22 +532,62 @@ float CL_WeaponCurrentAnimFrame( void )
 
 void CL_DrawWeaponHud( void )
 {
-    char   buf[32];
-    int    x, y;
-    float  color[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    char        buf[32];
+    int         cx, cy;
+    int         sw, sh;
+    float       white[4]  = { 1.0f, 1.0f, 1.0f, 1.0f };
+    float       yellow[4] = { 1.0f, 0.8f, 0.2f, 1.0f };
+    float       red[4]    = { 1.0f, 0.2f, 0.2f, 1.0f };
+    qhandle_t   whiteShader;
 
-    if ( !cl_weapon.active )          return;
-    if ( !cl.snap.valid )             return;
-    if ( cl.snap.ps.pm_type != 0 )   return;
+    if ( !cl.snap.valid )           return;
+    if ( cl.snap.ps.pm_type != 0 )  return;
 
-    /* Bottom-right corner ammo display */
-    x = cls.glconfig.vidWidth  - 120;
-    y = cls.glconfig.vidHeight - 40;
+    sw = cls.glconfig.vidWidth;
+    sh = cls.glconfig.vidHeight;
 
-    Com_sprintf( buf, sizeof(buf), "%d / %d",
-                 cl_weapon.clipAmmo, cl_weapon.reserveAmmo );
+    /* ---- Crosshair (simple + shape, hidden during ADS with overlay) ---- */
+    if ( !( cl_weapon.adsActive && cl_weapon.adsOverlay ) ) {
+        int hlen = 10, gap = 3, thick = 2;
+        whiteShader = re.RegisterShader( "white" );
+        re.SetColor( white );
+        cx = sw / 2;
+        cy = sh / 2;
+        /* horizontal arms */
+        re.DrawStretchPic( (float)(cx - hlen - gap), (float)(cy - thick/2),
+                           (float)hlen, (float)thick,
+                           0,0,1,1, whiteShader );
+        re.DrawStretchPic( (float)(cx + gap),        (float)(cy - thick/2),
+                           (float)hlen, (float)thick,
+                           0,0,1,1, whiteShader );
+        /* vertical arms */
+        re.DrawStretchPic( (float)(cx - thick/2), (float)(cy - hlen - gap),
+                           (float)thick, (float)hlen,
+                           0,0,1,1, whiteShader );
+        re.DrawStretchPic( (float)(cx - thick/2), (float)(cy + gap),
+                           (float)thick, (float)hlen,
+                           0,0,1,1, whiteShader );
+        re.SetColor( NULL );
+    }
 
-    SCR_DrawSmallStringExt( x, y, buf, color, qfalse, qtrue );
+    if ( !cl_weapon.active ) return;
+
+    /* ---- Ammo counter (bottom-right, CoD1 style) ---- */
+    {
+        float *ammoColor = white;
+        if ( cl_weapon.clipAmmo == 0 )
+            ammoColor = red;
+        else if ( cl_weapon.clipAmmo <= cl_weapon.def.clipSize / 4 )
+            ammoColor = yellow;
+
+        /* Clip count — large */
+        Com_sprintf( buf, sizeof(buf), "%d", cl_weapon.clipAmmo );
+        SCR_DrawBigString( sw - 140, sh - 52, buf, ammoColor[3], qtrue );
+
+        /* Separator + reserve — small */
+        Com_sprintf( buf, sizeof(buf), "/ %d", cl_weapon.reserveAmmo );
+        SCR_DrawSmallStringExt( sw - 80, sh - 36, buf, white, qfalse, qtrue );
+    }
 }
 
 /* ===========================================================================
@@ -768,15 +814,6 @@ static void CL_WeaponInfo_f( void )
     if ( wd.anims.adsUpAnim[0]  ) Com_Printf( "  adsUp    : %s\n", wd.anims.adsUpAnim  );
 }
 
-static void CL_ADS_f( void )
-{
-    /* Toggle aim-down-sights. Only meaningful when alive with an active weapon. */
-    if ( !cl_weapon.active ) return;
-    in_adsToggle = !in_adsToggle;
-    /* If toggling off while mid-transition, let the state machine
-     * handle the WA_ADS_DOWN animation on the next think frame. */
-}
-
 /* ===========================================================================
    Init / Shutdown
    =========================================================================== */
@@ -786,7 +823,8 @@ void CL_WeaponCod1_Init( void )
     cl_startWeapon = Cvar_Get( "cl_startWeapon", "mp44_mp", CVAR_ARCHIVE );
     cl_gunFov      = Cvar_Get( "cl_gunFov",      "65",      CVAR_ARCHIVE );
     cl_drawGun     = Cvar_Get( "cl_drawGun",     "1",       CVAR_ARCHIVE );
-    (void)Cvar_Get( "cl_drawGunPostHud", "1", CVAR_ARCHIVE );
+    /* 0 = suppress Q3 cgame 2D (weapon name, ammo counter, machinegun HUD) */
+    (void)Cvar_Get( "cl_drawGunPostHud", "0", CVAR_ARCHIVE );
     cl_animDebug   = Cvar_Get( "cl_animDebug",   "0",       CVAR_TEMP   );
     cl_gunX        = Cvar_Get( "cl_gunX",        "0",       CVAR_ARCHIVE );
     cl_gunY        = Cvar_Get( "cl_gunY",        "0",       CVAR_ARCHIVE );
@@ -795,7 +833,6 @@ void CL_WeaponCod1_Init( void )
     Cmd_AddCommand( "give",       CL_Give_f       );
     Cmd_AddCommand( "dropweapon", CL_DropWeapon_f );
     Cmd_AddCommand( "weaponinfo", CL_WeaponInfo_f );
-    Cmd_AddCommand( "ads",        CL_ADS_f        );
 
     Com_Memset( &cl_weapon, 0, sizeof(cl_weapon) );
     s_prevPmType    = -1;
@@ -808,8 +845,6 @@ void CL_WeaponCod1_Shutdown( void )
     Cmd_RemoveCommand( "give"       );
     Cmd_RemoveCommand( "dropweapon" );
     Cmd_RemoveCommand( "weaponinfo" );
-    Cmd_RemoveCommand( "ads"        );
-    in_adsToggle = qfalse;
     Com_Memset( &cl_weapon, 0, sizeof(cl_weapon) );
     s_prevPmType  = -1;
     s_lastThinkTime = 0;
