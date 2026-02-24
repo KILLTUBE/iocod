@@ -18,7 +18,7 @@ Each connected client gets a tagged GSC object "#entity" that shares a
 common proxy object.  The proxy's __call field is an object containing
 native functions registered as method names.  When a script calls
   self getName()
-the GSC VM looks up "getName" on the proxy and calls the C function.
+the GSC VM looks up "getname" on the proxy and calls the C function.
 The C function retrieves the gentity_t* from the object's userdata.
 
 Globals set in the GSC namespace:
@@ -450,7 +450,9 @@ static int GScr_Fn_GetNumPlayers( gsc_Context *ctx )
 }
 
 /* =========================================================================
-   Register all built-in functions
+   Register all built-in functions.
+   The GSC hash trie is case-insensitive, so one registration per function
+   covers all capitalisation variants.
    ========================================================================= */
 static void G_Scr_RegisterFunctions( void )
 {
@@ -462,55 +464,36 @@ static void G_Scr_RegisterFunctions( void )
 
     /* Type checking */
     gsc_register_function( g_scrCtx, NULL, "isdefined",    GScr_Fn_IsDefined );
-    gsc_register_function( g_scrCtx, NULL, "isDefined",    GScr_Fn_IsDefined );
 
     /* Math / random */
     gsc_register_function( g_scrCtx, NULL, "randomint",    GScr_Fn_RandomInt );
-    gsc_register_function( g_scrCtx, NULL, "randomInt",    GScr_Fn_RandomInt );
     gsc_register_function( g_scrCtx, NULL, "randomfloat",  GScr_Fn_RandomFloat );
-    gsc_register_function( g_scrCtx, NULL, "randomFloat",  GScr_Fn_RandomFloat );
 
-    /* Cvar / dvar */
+    /* Cvar / dvar — register both spellings since they're different names */
     gsc_register_function( g_scrCtx, NULL, "getdvar",      GScr_Fn_GetDvar );
-    gsc_register_function( g_scrCtx, NULL, "getDvar",      GScr_Fn_GetDvar );
     gsc_register_function( g_scrCtx, NULL, "getdvarint",   GScr_Fn_GetDvarInt );
-    gsc_register_function( g_scrCtx, NULL, "getDvarInt",   GScr_Fn_GetDvarInt );
     gsc_register_function( g_scrCtx, NULL, "setdvar",      GScr_Fn_SetDvar );
-    gsc_register_function( g_scrCtx, NULL, "setDvar",      GScr_Fn_SetDvar );
+    gsc_register_function( g_scrCtx, NULL, "getcvar",      GScr_Fn_GetCvar );   /* CoD1 alias */
+    gsc_register_function( g_scrCtx, NULL, "setcvar",      GScr_Fn_SetCvar );   /* CoD1 alias */
 
     /* Time */
     gsc_register_function( g_scrCtx, NULL, "gettime",      GScr_Fn_GetTime );
-    gsc_register_function( g_scrCtx, NULL, "getTime",      GScr_Fn_GetTime );
 
     /* Entity access */
     gsc_register_function( g_scrCtx, NULL, "getent",       GScr_Fn_GetEnt );
-    gsc_register_function( g_scrCtx, NULL, "getEnt",       GScr_Fn_GetEnt );
     gsc_register_function( g_scrCtx, NULL, "getentarray",  GScr_Fn_GetEntArray );
-    gsc_register_function( g_scrCtx, NULL, "getEntArray",  GScr_Fn_GetEntArray );
 
     /* Player counts */
-    gsc_register_function( g_scrCtx, NULL, "getmaxplayers",  GScr_Fn_GetMaxPlayers );
-    gsc_register_function( g_scrCtx, NULL, "getMaxPlayers",  GScr_Fn_GetMaxPlayers );
-    gsc_register_function( g_scrCtx, NULL, "getnumplayers",  GScr_Fn_GetNumPlayers );
-    gsc_register_function( g_scrCtx, NULL, "getNumPlayers",  GScr_Fn_GetNumPlayers );
+    gsc_register_function( g_scrCtx, NULL, "getmaxplayers", GScr_Fn_GetMaxPlayers );
+    gsc_register_function( g_scrCtx, NULL, "getnumplayers", GScr_Fn_GetNumPlayers );
 
-    /* CoD1 compat: cvar aliases used in gametype scripts */
-    gsc_register_function( g_scrCtx, NULL, "setcvar",        GScr_Fn_SetCvar );
-    gsc_register_function( g_scrCtx, NULL, "setCvar",        GScr_Fn_SetCvar );
-    gsc_register_function( g_scrCtx, NULL, "getcvar",        GScr_Fn_GetCvar );
-    gsc_register_function( g_scrCtx, NULL, "getCvar",        GScr_Fn_GetCvar );
+    /* Level control */
+    gsc_register_function( g_scrCtx, NULL, "exitlevel",    GScr_Fn_ExitLevel );
 
-    /* CoD1 compat: level control */
-    gsc_register_function( g_scrCtx, NULL, "exitlevel",      GScr_Fn_ExitLevel );
-    gsc_register_function( g_scrCtx, NULL, "exitLevel",      GScr_Fn_ExitLevel );
-
-    /* CoD1 compat: client-side/audio stubs (server doesn't process these) */
-    gsc_register_function( g_scrCtx, NULL, "ambientplay",    GScr_Fn_AmbientPlay );
-    gsc_register_function( g_scrCtx, NULL, "ambientPlay",    GScr_Fn_AmbientPlay );
-    gsc_register_function( g_scrCtx, NULL, "ambientstop",    GScr_Fn_AmbientStop );
-    gsc_register_function( g_scrCtx, NULL, "ambientStop",    GScr_Fn_AmbientStop );
-    gsc_register_function( g_scrCtx, NULL, "setcullfog",     GScr_Fn_SetCullFog );
-    gsc_register_function( g_scrCtx, NULL, "setCullFog",     GScr_Fn_SetCullFog );
+    /* Client-side / audio stubs (no-ops on the server) */
+    gsc_register_function( g_scrCtx, NULL, "ambientplay",  GScr_Fn_AmbientPlay );
+    gsc_register_function( g_scrCtx, NULL, "ambientstop",  GScr_Fn_AmbientStop );
+    gsc_register_function( g_scrCtx, NULL, "setcullfog",   GScr_Fn_SetCullFog );
 }
 
 /* =========================================================================
@@ -537,31 +520,31 @@ static void G_Scr_CreateGlobals( void )
 
     /* Register entity methods on the methods object */
     gsc_add_function( g_scrCtx, GScr_Meth_GetName );
-    gsc_object_set_field( g_scrCtx, methodsObj, "getName" );
+    gsc_object_set_field( g_scrCtx, methodsObj, "getname" );
 
     gsc_add_function( g_scrCtx, GScr_Meth_GetOrigin );
-    gsc_object_set_field( g_scrCtx, methodsObj, "getOrigin" );
+    gsc_object_set_field( g_scrCtx, methodsObj, "getorigin" );
 
     gsc_add_function( g_scrCtx, GScr_Meth_SetOrigin );
-    gsc_object_set_field( g_scrCtx, methodsObj, "setOrigin" );
+    gsc_object_set_field( g_scrCtx, methodsObj, "setorigin" );
 
     gsc_add_function( g_scrCtx, GScr_Meth_GetHealth );
-    gsc_object_set_field( g_scrCtx, methodsObj, "getHealth" );
+    gsc_object_set_field( g_scrCtx, methodsObj, "gethealth" );
 
     gsc_add_function( g_scrCtx, GScr_Meth_SetHealth );
-    gsc_object_set_field( g_scrCtx, methodsObj, "setHealth" );
+    gsc_object_set_field( g_scrCtx, methodsObj, "sethealth" );
 
     gsc_add_function( g_scrCtx, GScr_Meth_GetTeam );
-    gsc_object_set_field( g_scrCtx, methodsObj, "getTeam" );
+    gsc_object_set_field( g_scrCtx, methodsObj, "getteam" );
 
     gsc_add_function( g_scrCtx, GScr_Meth_GetClientNum );
-    gsc_object_set_field( g_scrCtx, methodsObj, "getClientNum" );
+    gsc_object_set_field( g_scrCtx, methodsObj, "getclientnum" );
 
     gsc_add_function( g_scrCtx, GScr_Meth_IsPlayer );
-    gsc_object_set_field( g_scrCtx, methodsObj, "isPlayer" );
+    gsc_object_set_field( g_scrCtx, methodsObj, "isplayer" );
 
     gsc_add_function( g_scrCtx, GScr_Meth_IsAlive );
-    gsc_object_set_field( g_scrCtx, methodsObj, "isAlive" );
+    gsc_object_set_field( g_scrCtx, methodsObj, "isalive" );
 
     gsc_add_function( g_scrCtx, GScr_Meth_Spawn );
     gsc_object_set_field( g_scrCtx, methodsObj, "spawn" );
