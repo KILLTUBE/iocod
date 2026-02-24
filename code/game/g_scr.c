@@ -114,6 +114,21 @@ typedef struct {
 static G_ScrAttachState_t g_scrAttachStates[ MAX_GENTITIES ];
 static char               g_scrViewModels[ MAX_GENTITIES ][ MAX_QPATH ];
 
+#define G_SCR_MAX_FX 256
+static char g_scrFxNames[ G_SCR_MAX_FX ][ MAX_QPATH ];
+static int  g_scrFxCount;
+
+#define G_SCR_MAX_OBJECTIVES 32
+typedef struct {
+    qboolean inuse;
+    vec3_t   origin;
+    char     icon[ MAX_QPATH ];
+    int      team;
+    int      entNum;
+} G_ScrObjective_t;
+
+static G_ScrObjective_t g_scrObjectives[ G_SCR_MAX_OBJECTIVES ];
+
 /* The GSC file namespace (path without .gsc) where CodeCallback_* live.   */
 static char         g_scrCallbackFile[ MAX_QPATH ];
 
@@ -2787,6 +2802,43 @@ static int GScr_Fn_PrecacheShader( gsc_Context *ctx ) { (void)ctx; return 0; }
 static int GScr_Fn_PrecacheString( gsc_Context *ctx ) { (void)ctx; return 0; }
 static int GScr_Fn_PrecacheTurret( gsc_Context *ctx ) { (void)ctx; return 0; }
 
+static int G_Scr_FindFxHandle( const char *path )
+{
+    int i;
+
+    if ( !path || !path[0] ) {
+        return 0;
+    }
+
+    for ( i = 0; i < g_scrFxCount; i++ ) {
+        if ( !Q_stricmp( g_scrFxNames[ i ], path ) ) {
+            return i + 1;
+        }
+    }
+
+    if ( g_scrFxCount >= G_SCR_MAX_FX ) {
+        return 0;
+    }
+
+    Q_strncpyz( g_scrFxNames[ g_scrFxCount ], path, sizeof( g_scrFxNames[ g_scrFxCount ] ) );
+    g_scrFxCount++;
+    return g_scrFxCount;
+}
+
+/* CoD FX compatibility: keep stable effect handles for script logic. */
+static int GScr_Fn_LoadFx( gsc_Context *ctx )
+{
+    const char *path = ( gsc_numargs( ctx ) > 0 ) ? gsc_get_string( ctx, 0 ) : "";
+    int         fxId = G_Scr_FindFxHandle( path );
+
+    gsc_add_int( ctx, fxId );
+    return 1;
+}
+
+/* Server has no renderer-side FX playback; keep as non-fatal no-op. */
+static int GScr_Fn_PlayFx( gsc_Context *ctx ) { (void)ctx; return 0; }
+static int GScr_Fn_PlayFxOnTag( gsc_Context *ctx ) { (void)ctx; return 0; }
+
 /* gettime() — returns level time in seconds */
 static int GScr_Fn_GetTime( gsc_Context *ctx )
 {
@@ -3001,6 +3053,9 @@ static void G_Scr_RegisterFunctions( void )
     gsc_register_function( g_scrCtx, NULL, "ambientplay",  GScr_Fn_AmbientPlay );
     gsc_register_function( g_scrCtx, NULL, "ambientstop",  GScr_Fn_AmbientStop );
     gsc_register_function( g_scrCtx, NULL, "setcullfog",   GScr_Fn_SetCullFog );
+    gsc_register_function( g_scrCtx, NULL, "loadfx",       GScr_Fn_LoadFx );
+    gsc_register_function( g_scrCtx, NULL, "playfx",       GScr_Fn_PlayFx );
+    gsc_register_function( g_scrCtx, NULL, "playfxontag",  GScr_Fn_PlayFxOnTag );
     gsc_register_function( g_scrCtx, NULL, "precachemenu", GScr_Fn_PrecacheMenu );
     gsc_register_function( g_scrCtx, NULL, "precachestatusicon", GScr_Fn_PrecacheStatusIcon );
     gsc_register_function( g_scrCtx, NULL, "precacheheadicon", GScr_Fn_PrecacheHeadIcon );
@@ -3327,6 +3382,8 @@ void G_Scr_Init( void )
     Com_Memset( g_scrEntityObjAlive, 0, sizeof( g_scrEntityObjAlive ) );
     Com_Memset( g_scrAttachStates, 0, sizeof( g_scrAttachStates ) );
     Com_Memset( g_scrViewModels, 0, sizeof( g_scrViewModels ) );
+    Com_Memset( g_scrFxNames, 0, sizeof( g_scrFxNames ) );
+    g_scrFxCount = 0;
     G_Scr_Hud_ResetAll( qfalse );
     g_scrCallbackFile[0] = '\0';
 
@@ -3513,6 +3570,8 @@ void G_Scr_Shutdown( void )
     Com_Memset( g_scrHudElems, 0, sizeof( g_scrHudElems ) );
     Com_Memset( g_scrAttachStates, 0, sizeof( g_scrAttachStates ) );
     Com_Memset( g_scrViewModels, 0, sizeof( g_scrViewModels ) );
+    Com_Memset( g_scrFxNames, 0, sizeof( g_scrFxNames ) );
+    g_scrFxCount = 0;
     g_scrEntityProxyObj = NULL;
     g_scrPlayerProxyObj = NULL;
     g_scrHudElemProxyObj = NULL;
