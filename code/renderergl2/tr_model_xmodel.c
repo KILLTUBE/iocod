@@ -373,15 +373,23 @@ static qboolean XModel_LoadSurfs(
 				sh = R_FindShader( altPath, LIGHTMAP_WHITEIMAGE, qtrue );
 				if ( sh->defaultShader ) sh = NULL;
 			}
-			if ( !sh ) {
-				char skinPath[MAX_QPATH];
-				Com_sprintf( skinPath, sizeof(skinPath), "skins/%s", matName );
-				sh = R_FindShader( skinPath, LIGHTMAP_WHITEIMAGE, qtrue );
-			}
-			/* CoD1 viewmodel geometry wraps around the camera; always use
-			 * two-sided rendering so inner surfaces are visible. */
-			sh->cullType = CT_TWO_SIDED;
-			shaderIdx[0] = sh->defaultShader ? 0 : sh->index;
+				if ( !sh ) {
+					char skinPath[MAX_QPATH];
+					Com_sprintf( skinPath, sizeof(skinPath), "skins/%s", matName );
+					sh = R_FindShader( skinPath, LIGHTMAP_WHITEIMAGE, qtrue );
+				}
+				/* mp_harbor truck metal has near-coplanar layers; enable polygon offset
+				 * for these specific materials to stabilize depth. */
+				if ( !sh->defaultShader && Q_stristr( lodName, "germmantruck" ) &&
+				     ( Q_stristr( matName, "metal@ford" ) ||
+				       Q_stristr( matName, "wheel_metal@fordhub" ) ||
+				       Q_stristr( matName, "tread_metal@fordtread" ) ) ) {
+					sh->polygonOffset = qtrue;
+				}
+				/* CoD1 viewmodel geometry wraps around the camera; always use
+				 * two-sided rendering so inner surfaces are visible. */
+				sh->cullType = CT_TWO_SIDED;
+				shaderIdx[0] = sh->defaultShader ? 0 : sh->index;
 		} else {
 			shaderIdx[0] = 0;
 		}
