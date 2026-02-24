@@ -24,7 +24,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #define	MIN_WALK_NORMAL	0.7f		// can't walk on very steep slopes
 
-#define	STEPSIZE		18
+#define	STEPSIZE		39			// CoD1: 39 (Q3: 18), confirmed from game.mp.i386.so rodata
+#define	JUMP_HEIGHT		39.0f		// CoD1 jump height in game units; velocity = sqrt(2*h*gravity)
 
 #define	JUMP_VELOCITY	270
 
@@ -51,6 +52,8 @@ typedef struct {
 	vec3_t		previous_origin;
 	vec3_t		previous_velocity;
 	int			previous_waterlevel;
+
+	vec3_t		ladderNormal;		// outward normal of ladder surface, set by PM_CheckLadder
 } pml_t;
 
 extern	pmove_t		*pm;
