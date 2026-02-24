@@ -271,7 +271,11 @@ extern int demo_protocols[];
 
 #define	PORT_MASTER			27950
 #define	PORT_UPDATE			27951
+#ifdef STANDALONE
+#define	PORT_SERVER			28960
+#else
 #define	PORT_SERVER			27960
+#endif
 #define	NUM_SERVER_PORTS	4		// broadcast scan this many ports after
 									// PORT_SERVER so a single machine can
 									// run multiple servers

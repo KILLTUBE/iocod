@@ -5845,7 +5845,8 @@ static cvarTable_t		cvarTable[] = {
 	{ &ui_blueteam5, "ui_blueteam5", "0", CVAR_ARCHIVE },
 	{ &ui_netSource, "ui_netSource", "1", CVAR_ARCHIVE },
 #ifdef STANDALONE
-	{ &ui_menuFiles, "ui_menuFiles", "ui_mp/menus.txt", CVAR_ARCHIVE },
+	/* Not CVAR_ARCHIVE: always use the built-in default so saved configs can't point at the wrong menu set */
+	{ &ui_menuFiles, "ui_menuFiles", "ui_mp/menus.txt", 0 },
 #else
 	{ &ui_menuFiles, "ui_menuFiles", "ui/menus.txt", CVAR_ARCHIVE },
 #endif
