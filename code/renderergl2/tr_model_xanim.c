@@ -712,10 +712,23 @@ int R_XAnimFramerate( qhandle_t h )
    Both entities must be rendered at the SAME origin/axis — the DObj bone
    evaluation places gun vertices in the correct position relative to the
    shared entity origin, with the tag_weapon offset already baked in.
+
+   Name-merging: CoD1 gun models root their skeleton at a bone named
+   "tag_weapon" — the same tag that exists in the hand model.  If we naively
+   add the gun's root as a child of the hand's tag_weapon, R_EvalXAnimBones
+   would apply the animation's "tag_weapon" track to BOTH bones, doubling the
+   rotation for every gun bone.  Instead, any gun root bone whose name already
+   exists in the hand skeleton is MERGED with that hand bone: the gun bone's
+   children are re-parented directly to the matching hand bone without adding
+   a duplicate entry.
    =========================================================================== */
 
 /* Static work buffer — avoids per-frame allocation; safe for single-threaded use */
 static xmBone_t s_dobjWork[ XMODEL_MAX_BONES * 2 ];
+
+/* Per-frame gun bone remap and local view for skinning */
+static int      s_gunRemap[ XMODEL_MAX_BONES ];  /* gun-local idx → combined idx */
+static xmBone_t s_gunBones[ XMODEL_MAX_BONES ];  /* gun-local view after evaluation */
 
 static int R_FindBoneByNames( const xmBone_t *bones, int numBones,
                               const char *const *names, int numNames )
@@ -755,14 +768,103 @@ static int R_SelectDObjAttachParent( const xmBone_t *handBones, int numH )
                               weaponAttachTags, (int)ARRAY_LEN( weaponAttachTags ) );
 }
 
+/*
+ * R_BuildDObjSkeleton
+ *
+ * Merges hand and gun bind-pose bones into s_dobjWork[0..total-1] and
+ * fills s_gunRemap[0..numG-1] with the mapping from gun-local bone index
+ * to combined-skeleton index.
+ *
+ * Gun root bones whose names already appear in the hand skeleton are merged
+ * (no duplicate added); their children are re-parented to the matching hand
+ * bone.  Gun root bones with no matching hand bone are parented to
+ * tagWeapon (the hand's weapon attachment tag).
+ *
+ * Returns the combined bone count.
+ */
+static int R_BuildDObjSkeleton( const xmBone_t *handBones, int numH,
+                                const xmBone_t *gunBones,  int numG )
+{
+    int i, j;
+    int total = numH;
+    int tagWeapon;
+
+    Com_Memcpy( s_dobjWork, handBones, sizeof(xmBone_t) * numH );
+
+    if ( numG <= 0 ) {
+        return total;
+    }
+
+    tagWeapon = R_SelectDObjAttachParent( s_dobjWork, numH );
+
+    /* Process gun bones in order (parent index is always < bone index) */
+    for ( i = 0; i < numG && i < XMODEL_MAX_BONES; i++ ) {
+        const xmBone_t *gb = &gunBones[i];
+
+        if ( gb->parent < 0 ) {
+            /* Gun root bone: check if a hand bone with the same name exists */
+            int handMatch = -1;
+            for ( j = 0; j < numH; j++ ) {
+                if ( !Q_stricmp( s_dobjWork[j].name, gb->name ) ) {
+                    handMatch = j;
+                    break;
+                }
+            }
+            if ( handMatch >= 0 ) {
+                /* Merge: reuse the hand bone — no new entry */
+                s_gunRemap[i] = handMatch;
+            } else {
+                /* New root: attach to the hand's weapon tag */
+                if ( total >= XMODEL_MAX_BONES * 2 ) {
+                    s_gunRemap[i] = -1;
+                    continue;
+                }
+                s_dobjWork[total] = *gb;
+                s_dobjWork[total].parent = tagWeapon;
+                s_gunRemap[i] = total++;
+            }
+        } else {
+            /* Non-root bone: parent was already remapped (parent < i) */
+            int gp = gb->parent;
+            int parentCombined = ( gp >= 0 && gp < i ) ? s_gunRemap[gp] : -1;
+            if ( total >= XMODEL_MAX_BONES * 2 ) {
+                s_gunRemap[i] = -1;
+                continue;
+            }
+            s_dobjWork[total] = *gb;
+            s_dobjWork[total].parent = parentCombined;
+            s_gunRemap[i] = total++;
+        }
+    }
+
+    return total;
+}
+
+/*
+ * R_GunBonesFromCombined
+ *
+ * After the combined skeleton has been evaluated, build a gun-local bone
+ * array (indexed 0..numG-1) by pulling each bone from its combined-space
+ * position via s_gunRemap.  This is the array passed to R_SkinAndTagModel
+ * so that gun skin-data boneIdx values (which are gun-local) map correctly.
+ */
+static void R_GunBonesFromCombined( int numG, int total )
+{
+    int i;
+    for ( i = 0; i < numG && i < XMODEL_MAX_BONES; i++ ) {
+        int ci = s_gunRemap[i];
+        if ( ci >= 0 && ci < total ) {
+            s_gunBones[i] = s_dobjWork[ci];
+        }
+    }
+}
+
 void R_UpdateDObjPose( qhandle_t handModel, qhandle_t gunModel,
                         qhandle_t animHandle, float frame )
 {
     int handIdx = (int)handModel;
     int gunIdx  = (int)gunModel;
     int numH, numG, total;
-    int i;
-    int tagWeapon = -1;
 
     if ( handIdx < 0 || handIdx >= BIND_TABLE_SIZE ) return;
     if ( !s_bindPose[handIdx] || s_bindCount[handIdx] <= 0 ) return;
@@ -772,34 +874,11 @@ void R_UpdateDObjPose( qhandle_t handModel, qhandle_t gunModel,
     if ( gunIdx >= 0 && gunIdx < BIND_TABLE_SIZE &&
          s_bindPose[gunIdx] && s_bindCount[gunIdx] > 0 ) {
         numG = s_bindCount[gunIdx];
+        if ( numG > XMODEL_MAX_BONES ) numG = XMODEL_MAX_BONES;
     }
 
-    total = numH + numG;
-    if ( total > XMODEL_MAX_BONES * 2 ) {
-        total = XMODEL_MAX_BONES * 2;
-        numG = total - numH;
-        if ( numG < 0 ) {
-            numG = 0;
-            total = numH;
-        }
-    }
-
-    Com_Memcpy( s_dobjWork, s_bindPose[handIdx], sizeof(xmBone_t) * numH );
-    if ( numG > 0 ) {
-        Com_Memcpy( s_dobjWork + numH, s_bindPose[gunIdx], sizeof(xmBone_t) * numG );
-    }
-
-    tagWeapon = R_SelectDObjAttachParent( s_dobjWork, numH );
-
-    for ( i = numH; i < total; i++ ) {
-        if ( s_dobjWork[i].parent < 0 ) {
-            if ( tagWeapon >= 0 ) {
-                s_dobjWork[i].parent = tagWeapon;
-            }
-        } else {
-            s_dobjWork[i].parent += numH;
-        }
-    }
+    total = R_BuildDObjSkeleton( s_bindPose[handIdx], numH,
+                                  numG > 0 ? s_bindPose[gunIdx] : NULL, numG );
 
     if ( animHandle > 0 ) {
         R_EvalXAnimBones( animHandle, frame, s_dobjWork, total );
@@ -811,8 +890,9 @@ void R_UpdateDObjPose( qhandle_t handModel, qhandle_t gunModel,
     R_SkinAndTagModel( handIdx, s_dobjWork, numH );
 
     if ( numG > 0 ) {
-        R_CachePoseForModel( gunIdx, s_dobjWork + numH, numG );
-        R_SkinAndTagModel( gunIdx, s_dobjWork + numH, numG );
+        R_GunBonesFromCombined( numG, total );
+        R_CachePoseForModel( gunIdx, s_gunBones, numG );
+        R_SkinAndTagModel( gunIdx, s_gunBones, numG );
     }
 }
 
@@ -824,8 +904,6 @@ void R_UpdateDObjPoseBlend( qhandle_t handModel, qhandle_t gunModel,
     int handIdx = (int)handModel;
     int gunIdx  = (int)gunModel;
     int numH, numG, total;
-    int i;
-    int tagWeapon = -1;
 
     if ( handIdx < 0 || handIdx >= BIND_TABLE_SIZE ) return;
     if ( !s_bindPose[handIdx] || s_bindCount[handIdx] <= 0 ) return;
@@ -835,34 +913,11 @@ void R_UpdateDObjPoseBlend( qhandle_t handModel, qhandle_t gunModel,
     if ( gunIdx >= 0 && gunIdx < BIND_TABLE_SIZE &&
          s_bindPose[gunIdx] && s_bindCount[gunIdx] > 0 ) {
         numG = s_bindCount[gunIdx];
+        if ( numG > XMODEL_MAX_BONES ) numG = XMODEL_MAX_BONES;
     }
 
-    total = numH + numG;
-    if ( total > XMODEL_MAX_BONES * 2 ) {
-        total = XMODEL_MAX_BONES * 2;
-        numG = total - numH;
-        if ( numG < 0 ) {
-            numG = 0;
-            total = numH;
-        }
-    }
-
-    Com_Memcpy( s_dobjWork, s_bindPose[handIdx], sizeof(xmBone_t) * numH );
-    if ( numG > 0 ) {
-        Com_Memcpy( s_dobjWork + numH, s_bindPose[gunIdx], sizeof(xmBone_t) * numG );
-    }
-
-    tagWeapon = R_SelectDObjAttachParent( s_dobjWork, numH );
-
-    for ( i = numH; i < total; i++ ) {
-        if ( s_dobjWork[i].parent < 0 ) {
-            if ( tagWeapon >= 0 ) {
-                s_dobjWork[i].parent = tagWeapon;
-            }
-        } else {
-            s_dobjWork[i].parent += numH;
-        }
-    }
+    total = R_BuildDObjSkeleton( s_bindPose[handIdx], numH,
+                                  numG > 0 ? s_bindPose[gunIdx] : NULL, numG );
 
     R_ComposeBlendedPose( s_dobjWork, total,
                           legsAnimHandle, legsFrame,
@@ -873,8 +928,9 @@ void R_UpdateDObjPoseBlend( qhandle_t handModel, qhandle_t gunModel,
     R_SkinAndTagModel( handIdx, s_dobjWork, numH );
 
     if ( numG > 0 ) {
-        R_CachePoseForModel( gunIdx, s_dobjWork + numH, numG );
-        R_SkinAndTagModel( gunIdx, s_dobjWork + numH, numG );
+        R_GunBonesFromCombined( numG, total );
+        R_CachePoseForModel( gunIdx, s_gunBones, numG );
+        R_SkinAndTagModel( gunIdx, s_gunBones, numG );
     }
 }
 
