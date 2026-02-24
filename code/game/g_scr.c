@@ -1781,11 +1781,51 @@ static int GScr_Meth_Hud_Destroy( gsc_Context *ctx )
    Global / free functions available to scripts
    ========================================================================= */
 
+static const char *G_Scr_StringifyArg( gsc_Context *ctx, int arg, char *buf, int bufSize )
+{
+    switch ( gsc_get_type( ctx, arg ) ) {
+        case GSC_TYPE_UNDEFINED:
+            return "undefined";
+        case GSC_TYPE_BOOLEAN:
+            return gsc_get_bool( ctx, arg ) ? "1" : "0";
+        case GSC_TYPE_FLOAT:
+            Com_sprintf( buf, bufSize, "%.3f", gsc_get_float( ctx, arg ) );
+            return buf;
+        case GSC_TYPE_INTEGER:
+            Com_sprintf( buf, bufSize, "%d", (int)gsc_get_int( ctx, arg ) );
+            return buf;
+        case GSC_TYPE_STRING:
+        case GSC_TYPE_INTERNED_STRING:
+            return gsc_get_string( ctx, arg );
+        case GSC_TYPE_VECTOR:
+        {
+            float v[ 3 ];
+            gsc_get_vec3( ctx, arg, v );
+            Com_sprintf( buf, bufSize, "(%.3f, %.3f, %.3f)", v[ 0 ], v[ 1 ], v[ 2 ] );
+            return buf;
+        }
+        case GSC_TYPE_FUNCTION:
+            return "[function]";
+        case GSC_TYPE_OBJECT:
+            return "[object]";
+        case GSC_TYPE_REFERENCE:
+            return "[reference]";
+        case GSC_TYPE_THREAD:
+            return "[thread]";
+        default:
+            break;
+    }
+
+    return "<unknown>";
+}
+
 static int GScr_Fn_Print( gsc_Context *ctx )
 {
-    int i, n = gsc_numargs( ctx );
+    int  i, n = gsc_numargs( ctx );
+    char buf[ 128 ];
+
     for ( i = 0; i < n; i++ ) {
-        G_Printf( "%s", gsc_get_string( ctx, i ) );
+        G_Printf( "%s", G_Scr_StringifyArg( ctx, i, buf, sizeof( buf ) ) );
     }
     G_Printf( "\n" );
     return 0;
@@ -1878,9 +1918,11 @@ static int GScr_Fn_SetArchive( gsc_Context *ctx )
 
 static int GScr_Fn_LogPrint( gsc_Context *ctx )
 {
-    int i, n = gsc_numargs( ctx );
+    int  i, n = gsc_numargs( ctx );
+    char buf[ 128 ];
+
     for ( i = 0; i < n; i++ ) {
-        G_LogPrintf( "%s", gsc_get_string( ctx, i ) );
+        G_LogPrintf( "%s", G_Scr_StringifyArg( ctx, i, buf, sizeof( buf ) ) );
     }
     return 0;
 }
