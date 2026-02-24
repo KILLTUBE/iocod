@@ -335,14 +335,20 @@ qboolean G_CallSpawn( gentity_t *ent ) {
 	}
 
 	// CoD Prefix Fallbacks
-	if ( !strncmp( ent->classname, "actor_", 6 ) ||
-		 !strncmp( ent->classname, "weapon_", 7 ) ||
-		 !strncmp( ent->classname, "node_", 5 ) ) {
-		// Try to spawn as a model if it has one, otherwise just placeholder
+	if ( !Q_stricmpn( ent->classname, "actor_", 6 ) ||
+		 !Q_stricmpn( ent->classname, "weapon_", 7 ) ||
+		 !Q_stricmpn( ent->classname, "mpweapon_", 9 ) ||
+		 !Q_stricmpn( ent->classname, "node_", 5 ) ||
+		 !Q_stricmpn( ent->classname, "script_", 7 ) ||
+		 !Q_stricmpn( ent->classname, "mp_", 3 ) ) {
+		/*
+		 * Keep unknown CoD entities alive so GSC can still find/use them by
+		 * classname/targetname. If they provide a model, render it.
+		 */
 		if ( ent->model && ent->model[0] ) {
 			 SP_misc_model( ent );
 		} else {
-			 SP_info_null( ent );
+			 SP_info_notnull( ent );
 		}
 		return qtrue;
 	}
@@ -697,4 +703,3 @@ void G_SpawnEntitiesFromString( void ) {
 
 	level.spawning = qfalse;			// any future calls to G_Spawn*() will be errors
 }
-

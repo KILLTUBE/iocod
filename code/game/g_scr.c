@@ -37,6 +37,7 @@ Player object globals: "player_N" (N = clientNum, 0-based).
 #include "g_scr.h"
 #include "../thirdparty/gsc/include/gsc.h"
 
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -91,6 +92,47 @@ static void G_Scr_FreeMem( void *ctx, void *ptr )
     free( ptr );
 }
 
+static void G_Scr_NormalizePathSlashes( char *path )
+{
+    int i;
+
+    for ( i = 0; path[i]; i++ ) {
+        if ( path[i] == '\\' ) {
+            path[i] = '/';
+        }
+    }
+}
+
+static void G_Scr_NormalizeMapName( const char *rawMapName, char *out, int outSize )
+{
+    char        cleaned[ MAX_QPATH ];
+    char        noExt[ MAX_QPATH ];
+    const char *name;
+
+    if ( !rawMapName ) {
+        out[0] = '\0';
+        return;
+    }
+
+    Q_strncpyz( cleaned, rawMapName, sizeof( cleaned ) );
+    G_Scr_NormalizePathSlashes( cleaned );
+
+    name = cleaned;
+    if ( !Q_stricmpn( name, "maps/", 5 ) ) {
+        name += 5;
+    }
+    if ( !Q_stricmpn( name, "mp/", 3 ) ) {
+        name += 3;
+    }
+
+    Q_strncpyz( out, name, outSize );
+
+    if ( !Q_stricmp( COM_GetExtension( out ), "bsp" ) ) {
+        COM_StripExtension( out, noExt, sizeof( noExt ) );
+        Q_strncpyz( out, noExt, outSize );
+    }
+}
+
 /*
 Reads a .gsc source file using the game module's file traps.
 The filename received from the GSC library has no extension; we append
@@ -102,6 +144,7 @@ static const char *G_Scr_ReadFile( void *ctx, const char *filename, int *status 
     fileHandle_t fh;
     int          len;
     char         path[ MAX_QPATH ];
+    char         altPath[ MAX_QPATH ];
     char        *buf;
     ScrSrc_t    *hdr;
 
@@ -109,11 +152,39 @@ static const char *G_Scr_ReadFile( void *ctx, const char *filename, int *status 
 
     /* Append .gsc if the caller didn't already include an extension */
     Q_strncpyz( path, filename, sizeof( path ) );
+    G_Scr_NormalizePathSlashes( path );
     if ( !COM_GetExtension( path )[0] ) {
         Q_strcat( path, sizeof( path ), ".gsc" );
     }
 
     len = trap_FS_FOpenFile( path, &fh, FS_READ );
+
+    if ( ( len <= 0 || !fh ) && !strncmp( path, "maps/mp/", 8 ) ) {
+        Com_sprintf( altPath, sizeof( altPath ), "maps/MP/%s", path + 8 );
+        len = trap_FS_FOpenFile( altPath, &fh, FS_READ );
+        if ( len > 0 && fh ) {
+            Q_strncpyz( path, altPath, sizeof( path ) );
+        }
+    } else if ( ( len <= 0 || !fh ) && !strncmp( path, "maps/MP/", 8 ) ) {
+        Com_sprintf( altPath, sizeof( altPath ), "maps/mp/%s", path + 8 );
+        len = trap_FS_FOpenFile( altPath, &fh, FS_READ );
+        if ( len > 0 && fh ) {
+            Q_strncpyz( path, altPath, sizeof( path ) );
+        }
+    }
+
+    if ( len <= 0 || !fh ) {
+        int i;
+        Q_strncpyz( altPath, path, sizeof( altPath ) );
+        for ( i = 0; altPath[i]; i++ ) {
+            altPath[i] = (char)tolower( (unsigned char)altPath[i] );
+        }
+        len = trap_FS_FOpenFile( altPath, &fh, FS_READ );
+        if ( len > 0 && fh ) {
+            Q_strncpyz( path, altPath, sizeof( path ) );
+        }
+    }
+
     if ( len <= 0 || !fh ) {
         if ( fh ) {
             trap_FS_FCloseFile( fh );
@@ -151,17 +222,20 @@ static qboolean G_Scr_CompileScript( const char *nameSpace )
 {
     int         status;
     const char *dep;
+    const char *failedName;
 
+    failedName = nameSpace;
     status = gsc_compile( g_scrCtx, nameSpace, 0 );
 
     while ( status == GSC_OK &&
             ( dep = gsc_next_compile_dependency( g_scrCtx ) ) != NULL ) {
+        failedName = dep;
         status = gsc_compile( g_scrCtx, dep, 0 );
     }
 
     if ( status != GSC_OK ) {
         G_Printf( "GSC: compile failed for '%s' (status %d)\n",
-                  nameSpace, status );
+                  failedName, status );
         return qfalse;
     }
     return qtrue;
@@ -685,11 +759,12 @@ void G_Scr_Init( void )
 {
     gsc_CreateOptions opts;
     char              serverinfo[ MAX_INFO_STRING ];
-    const char       *mapname;
+    const char       *mapnameRaw;
+    char              mapname[ MAX_QPATH ];
     char              gametype[ 16 ];
-    char              gametypeScript[ MAX_QPATH ];  /* maps/MP/gametypes/<gt>    */
-    char              callbackScript[ MAX_QPATH ];  /* maps/MP/gametypes/_cbsetup */
-    char              mapScript[ MAX_QPATH ];       /* maps/MP/<mapname>          */
+    char              gametypeScript[ MAX_QPATH ];  /* maps/mp/gametypes/<gt>    */
+    char              callbackScript[ MAX_QPATH ];  /* maps/mp/gametypes/_cbsetup */
+    char              mapScript[ MAX_QPATH ];       /* maps/mp/<mapname>          */
     char              mapScriptSP[ MAX_QPATH ];     /* maps/<mapname> (SP fallback) */
     int               status;
     qboolean          gametypeOk;
@@ -705,8 +780,9 @@ void G_Scr_Init( void )
 
     /* Determine map name and gametype */
     trap_GetServerinfo( serverinfo, sizeof( serverinfo ) );
-    mapname = Info_ValueForKey( serverinfo, "mapname" );
-    if ( !mapname || !mapname[0] ) {
+    mapnameRaw = Info_ValueForKey( serverinfo, "mapname" );
+    G_Scr_NormalizeMapName( mapnameRaw, mapname, sizeof( mapname ) );
+    if ( !mapname[0] ) {
         G_Printf( "GSC: no mapname in serverinfo, scripting disabled\n" );
         return;
     }
@@ -715,21 +791,22 @@ void G_Scr_Init( void )
 
     /*
      Script namespaces (no .gsc extension — the read_file callback adds it).
-     CoD1 MP maps live under  maps/MP/<mapname>.gsc
+     CoD1 MP maps live under  maps/mp/<mapname>.gsc
      CoD1 SP maps live under  maps/<mapname>.gsc
-     Gametypes live under     maps/MP/gametypes/<gametype>.gsc
-     _callbacksetup is at     maps/MP/gametypes/_callbacksetup.gsc
+     Gametypes live under     maps/mp/gametypes/<gametype>.gsc
+     _callbacksetup is at     maps/mp/gametypes/_callbacksetup.gsc
                                                                              */
     Com_sprintf( gametypeScript, sizeof( gametypeScript ),
-                 "maps/MP/gametypes/%s", gametype );
+                 "maps/mp/gametypes/%s", gametype );
     Com_sprintf( callbackScript, sizeof( callbackScript ),
-                 "maps/MP/gametypes/_callbacksetup" );
+                 "maps/mp/gametypes/_callbacksetup" );
     Com_sprintf( mapScript,      sizeof( mapScript ),
-                 "maps/MP/%s",   mapname );
+                 "maps/mp/%s",   mapname );
     Com_sprintf( mapScriptSP,    sizeof( mapScriptSP ),
                  "maps/%s",      mapname );
 
-    G_Printf( "GSC: map '%s'  gametype '%s'\n", mapname, gametype );
+    G_Printf( "GSC: map '%s' (raw '%s')  gametype '%s'\n",
+              mapname, mapnameRaw ? mapnameRaw : "", gametype );
 
     /* Create context */
     Com_Memset( &opts, 0, sizeof( opts ) );
@@ -737,9 +814,9 @@ void G_Scr_Init( void )
     opts.free_memory              = G_Scr_FreeMem;
     opts.read_file                = G_Scr_ReadFile;
     opts.verbose                  = 0;
-    opts.main_memory_size         = 32 * 1024 * 1024; /* 32 MB */
-    opts.temp_memory_size         = 4  * 1024 * 1024; /*  4 MB */
-    opts.string_table_memory_size = 2  * 1024 * 1024; /*  2 MB */
+    opts.main_memory_size         = 96 * 1024 * 1024; /* 96 MB */
+    opts.temp_memory_size         = 16 * 1024 * 1024; /* 16 MB */
+    opts.string_table_memory_size = 8  * 1024 * 1024; /*  8 MB */
     opts.default_self             = "self";
     opts.max_threads              = 128;
 

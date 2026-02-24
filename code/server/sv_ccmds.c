@@ -150,6 +150,34 @@ SV_Map_f
 Restart the server on a different map
 ==================
 */
+static qboolean SV_ResolveMapBSPPath( const char *map, char *resolved, int resolvedSize ) {
+	char	normalized[MAX_QPATH];
+
+	if ( !map || !map[0] ) {
+		return qfalse;
+	}
+
+	Q_strncpyz( normalized, map, sizeof( normalized ) );
+	if ( !Q_stricmp( COM_GetExtension( normalized ), "bsp" ) ) {
+		COM_StripExtension( map, normalized, sizeof( normalized ) );
+	}
+
+	Com_sprintf( resolved, resolvedSize, "maps/%s.bsp", normalized );
+	if ( FS_ReadFile( resolved, NULL ) != -1 ) {
+		return qtrue;
+	}
+
+	/* CoD MP maps are usually in maps/mp/<name>.bsp while mapname is <name>. */
+	if ( !strchr( normalized, '/' ) && !strchr( normalized, '\\' ) ) {
+		Com_sprintf( resolved, resolvedSize, "maps/mp/%s.bsp", normalized );
+		if ( FS_ReadFile( resolved, NULL ) != -1 ) {
+			return qtrue;
+		}
+	}
+
+	return qfalse;
+}
+
 static void SV_Map_f( void ) {
 	char		*cmd;
 	char		*map;
@@ -164,8 +192,8 @@ static void SV_Map_f( void ) {
 
 	// make sure the level exists before trying to change, so that
 	// a typo at the server console won't end the game
-	Com_sprintf (expanded, sizeof(expanded), "maps/%s.bsp", map);
-	if ( FS_ReadFile (expanded, NULL) == -1 ) {
+	if ( !SV_ResolveMapBSPPath( map, expanded, sizeof( expanded ) ) ) {
+		Com_sprintf( expanded, sizeof( expanded ), "maps/%s.bsp", map );
 		Com_Printf ("Can't find map %s\n", expanded);
 		return;
 	}
@@ -203,6 +231,11 @@ static void SV_Map_f( void ) {
 	// save the map name here cause on a map restart we reload the q3config.cfg
 	// and thus nuke the arguments of the map command
 	Q_strncpyz(mapname, map, sizeof(mapname));
+	if ( !Q_stricmp( COM_GetExtension( mapname ), "bsp" ) ) {
+		char stripped[MAX_QPATH];
+		COM_StripExtension( mapname, stripped, sizeof( stripped ) );
+		Q_strncpyz( mapname, stripped, sizeof( mapname ) );
+	}
 
 	// start up the map
 	SV_SpawnServer( mapname, killBots );
@@ -1591,4 +1624,3 @@ void SV_RemoveOperatorCommands( void ) {
 	Cmd_RemoveCommand ("say");
 #endif
 }
-

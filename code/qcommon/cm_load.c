@@ -915,6 +915,40 @@ CM_LoadMap
 Loads in the map and all submodels
 ==================
 */
+static qboolean CM_BuildCodMpFallbackMapPath( const char *name, char *out, int outSize ) {
+	const char	*relative;
+	char		mapName[MAX_QPATH];
+
+	if ( !name || Q_stricmpn( name, "maps/", 5 ) ) {
+		return qfalse;
+	}
+
+	relative = name + 5;
+	if ( !relative[0] ) {
+		return qfalse;
+	}
+
+	if ( !Q_stricmpn( relative, "mp/", 3 ) || !Q_stricmpn( relative, "MP/", 3 ) ) {
+		return qfalse;
+	}
+
+	if ( strchr( relative, '/' ) || strchr( relative, '\\' ) ) {
+		return qfalse;
+	}
+
+	if ( Q_stricmp( COM_GetExtension( relative ), "bsp" ) ) {
+		return qfalse;
+	}
+
+	COM_StripExtension( relative, mapName, sizeof( mapName ) );
+	if ( !mapName[0] ) {
+		return qfalse;
+	}
+
+	Com_sprintf( out, outSize, "maps/mp/%s.bsp", mapName );
+	return qtrue;
+}
+
 void CM_LoadMap( const char *name, qboolean clientload, int *checksum ) {
 	union {
 		int				*i;
@@ -923,6 +957,8 @@ void CM_LoadMap( const char *name, qboolean clientload, int *checksum ) {
 	int				i;
 	dheader_t		header;
 	int				length;
+	const char		*loadName;
+	char			fallbackName[MAX_QPATH];
 	static unsigned	last_checksum;
 
 	if ( !name || !name[0] ) {
@@ -957,11 +993,26 @@ void CM_LoadMap( const char *name, qboolean clientload, int *checksum ) {
 	//
 	// load the file
 	//
+	loadName = name;
 #ifndef BSPC
-	length = FS_ReadFile( name, &buf.v );
+	length = FS_ReadFile( loadName, &buf.v );
 #else
-	length = LoadQuakeFile((quakefile_t *) name, &buf.v);
+	length = LoadQuakeFile((quakefile_t *) loadName, &buf.v);
 #endif
+
+	if ( !buf.i ) {
+		if ( CM_BuildCodMpFallbackMapPath( name, fallbackName, sizeof( fallbackName ) ) ) {
+#ifndef BSPC
+			length = FS_ReadFile( fallbackName, &buf.v );
+#else
+			length = LoadQuakeFile((quakefile_t *) fallbackName, &buf.v);
+#endif
+			if ( buf.i ) {
+				loadName = fallbackName;
+				Com_Printf( "CM_LoadMap: '%s' not found, using '%s'\n", name, loadName );
+			}
+		}
+	}
 
 	if ( !buf.i ) {
 		Com_Error (ERR_DROP, "Couldn't load %s", name);
@@ -982,7 +1033,7 @@ void CM_LoadMap( const char *name, qboolean clientload, int *checksum ) {
 		FS_FreeFile( buf.v );
 	} else if ( header.version != BSP_VERSION ) {
 		Com_Error (ERR_DROP, "CM_LoadMap: %s has wrong version number (%i should be %i)"
-		, name, header.version, BSP_VERSION );
+		, loadName, header.version, BSP_VERSION );
 	} else {
 	cmod_base = (byte *)buf.i;
 
@@ -1193,5 +1244,4 @@ void CM_ModelBounds( clipHandle_t model, vec3_t mins, vec3_t maxs ) {
 	VectorCopy( cmod->mins, mins );
 	VectorCopy( cmod->maxs, maxs );
 }
-
 
