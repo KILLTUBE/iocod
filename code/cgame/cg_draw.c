@@ -1459,17 +1459,12 @@ static void CG_DrawTeamInfo( void ) {
 /*
 ===================
 CG_DrawIPrintLn
-CoD1 iprintln messages (left-bottom)
+CoD1 iprintln messages (left-bottom) - simple text only
 ===================
 */
 static void CG_DrawIPrintLn( void ) {
-	int h;
 	int i;
-	vec4_t		hcolor;
 	const int	chatHeight = IPRINTLN_HEIGHT;
-
-#define IPRINTLOC_Y 420 // bottom end (same as team chat)
-#define IPRINTLOC_X 0
 
 	if (cgs.iprintlnLastPos != cgs.iprintlnPos) {
 		/* Remove old messages after 8 seconds */
@@ -1477,27 +1472,11 @@ static void CG_DrawIPrintLn( void ) {
 			cgs.iprintlnLastPos++;
 		}
 
-		h = (cgs.iprintlnPos - cgs.iprintlnLastPos) * TINYCHAR_HEIGHT;
-
-		/* White background for visibility */
-		hcolor[0] = 0.0f;
-		hcolor[1] = 0.0f;
-		hcolor[2] = 0.0f;
-		hcolor[3] = 0.5f;
-
-		trap_R_SetColor( hcolor );
-		CG_DrawPic( IPRINTLOC_X, IPRINTLOC_Y - h, 640, h, cgs.media.teamStatusBar );
-		trap_R_SetColor( NULL );
-
-		/* White text */
-		hcolor[0] = hcolor[1] = hcolor[2] = 1.0f;
-		hcolor[3] = 1.0f;
-
+		/* Just draw simple text, no background */
 		for (i = cgs.iprintlnPos - 1; i >= cgs.iprintlnLastPos; i--) {
-			CG_DrawStringExt( IPRINTLOC_X + TINYCHAR_WIDTH,
-				IPRINTLOC_Y - (cgs.iprintlnPos - i)*TINYCHAR_HEIGHT,
-				cgs.iprintlnMsgs[i % chatHeight], hcolor, qfalse, qfalse,
-				TINYCHAR_WIDTH, TINYCHAR_HEIGHT, 0 );
+			int y = 420 - (cgs.iprintlnPos - i) * TINYCHAR_HEIGHT;
+			CG_DrawStringExt( 4, y, cgs.iprintlnMsgs[i % chatHeight], colorWhite,
+				qfalse, qfalse, TINYCHAR_WIDTH, TINYCHAR_HEIGHT, 0 );
 		}
 	}
 }
