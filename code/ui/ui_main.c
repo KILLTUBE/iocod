@@ -3548,6 +3548,19 @@ static void UI_RunMenuScript(char **args) {
 			int stat;
 			if ( Int_Parse( args, &stat ) )
 				trap_SetPbClStatus( stat );
+#ifdef STANDALONE
+		} else if (Q_stricmp(command, "setfromcvar") == 0) {
+			/* setfromcvar <destcvar> <srccvar>: copy srccvar's value into destcvar */
+			const char *dest, *src;
+			if (String_Parse(args, &dest) && String_Parse(args, &src)) {
+				trap_Cvar_Set(dest, UI_Cvar_VariableString(src));
+			}
+		} else if (Q_stricmp(command, "getLanguage") == 0) {
+			/* CoD1 language selection — no-op in iocod (English only) */
+		} else if (Q_stricmp(command, "startSinglePlayer") == 0) {
+			/* CoD1 SP launch — not supported in iocod MP-only build */
+			Com_Printf("Single-player mode is not supported in iocod\n");
+#endif
 		}
 		else {
 			Com_Printf("unknown UI script %s\n", command);

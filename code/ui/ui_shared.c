@@ -4999,6 +4999,23 @@ qboolean ItemParse_cvar( itemDef_t *item, int handle ) {
 	return qtrue;
 }
 
+#ifdef STANDALONE
+/* CoD1 extension: "origin x y" — 2D offset used for sub-window anchoring; parse and ignore */
+qboolean ItemParse_origin( itemDef_t *item, int handle ) {
+	float x, y;
+	if (!PC_Float_Parse(handle, &x)) return qfalse;
+	if (!PC_Float_Parse(handle, &y)) return qfalse;
+	return qtrue;
+}
+
+/* CoD1 extension: "maxCharsGotoNext <itemname>" — auto-advance focus; parse and ignore */
+qboolean ItemParse_maxCharsGotoNext( itemDef_t *item, int handle ) {
+	const char *s;
+	if (!PC_String_Parse(handle, &s)) return qfalse;
+	return qtrue;
+}
+#endif
+
 qboolean ItemParse_maxChars( itemDef_t *item, int handle ) {
 	int maxChars;
 
@@ -5289,6 +5306,10 @@ keywordHash_t itemParseKeywords[] = {
 	{"cvar", ItemParse_cvar, NULL},
 	{"maxChars", ItemParse_maxChars, NULL},
 	{"maxPaintChars", ItemParse_maxPaintChars, NULL},
+#ifdef STANDALONE
+	{"origin", ItemParse_origin, NULL},
+	{"maxCharsGotoNext", ItemParse_maxCharsGotoNext, NULL},
+#endif
 	{"focusSound", ItemParse_focusSound, NULL},
 	{"cvarFloat", ItemParse_cvarFloat, NULL},
 	{"cvarStrList", ItemParse_cvarStrList, NULL},
