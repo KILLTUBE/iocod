@@ -914,6 +914,10 @@ void CL_FirstSnapshot( void ) {
 	}
 	clc.state = CA_ACTIVE;
 
+#ifdef STANDALONE
+	Cvar_Set( "cl_ingame", "1" );
+#endif
+
 	// set the timedelta so we are exactly on this first frame
 	cl.serverTimeDelta = cl.snap.serverTime - cls.realtime;
 	cl.oldServerTime = cl.snap.serverTime;

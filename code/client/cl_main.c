@@ -1457,6 +1457,10 @@ void CL_Disconnect( qboolean showMainMenu ) {
 
 	clc.state = CA_DISCONNECTED;
 
+#ifdef STANDALONE
+	Cvar_Set( "cl_ingame", "0" );
+#endif
+
 	// allow cheats locally
 	Cvar_Set( "sv_cheats", "1" );
 
@@ -3656,6 +3660,11 @@ void CL_Init( void ) {
 	Cvar_CheckRange(j_up_axis, 0, MAX_JOYSTICK_AXIS-1, qtrue);
 
 	cl_motdString = Cvar_Get( "cl_motdString", "", CVAR_ROM );
+
+#ifdef STANDALONE
+	/* CoD1 MP menus toggle items based on cl_ingame (0=at main menu, 1=in-game) */
+	Cvar_Get( "cl_ingame", "0", 0 );
+#endif
 
 	Cvar_Get( "cl_maxPing", "800", CVAR_ARCHIVE );
 
