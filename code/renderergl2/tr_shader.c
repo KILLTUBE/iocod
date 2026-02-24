@@ -3615,7 +3615,9 @@ shader_t *R_FindShaderEx( const char *name, int lightmapIndex, qboolean mipRawIm
 	 * These surfaces have no explicit shader definition; the alpha channel carries the cutout mask.
 	 * Replace the two-pass lightmap shader with a single vertex-lit + alphaFunc GE128 pass so
 	 * transparent holes are actually discarded rather than rendered as black. */
-	if ( shader.lightmapIndex >= 0 &&
+	if ( ( shader.lightmapIndex >= 0 ||
+	       shader.lightmapIndex == LIGHTMAP_BY_VERTEX ||
+	       shader.lightmapIndex == LIGHTMAP_WHITEIMAGE ) &&
 	     ( image->internalFormat == GL_COMPRESSED_RGBA_S3TC_DXT3_EXT ||
 	       image->internalFormat == GL_COMPRESSED_RGBA_S3TC_DXT5_EXT ||
 	       image->internalFormat == GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT ||
