@@ -55,6 +55,7 @@ float	pm_prone_accelerate = 19.0f;	// acceleration while prone
 float	pm_ladderPushOff = 128.0f;		// velocity when jumping off a ladder
 int		pm_ladderJumpTime = 300;		// ms before ladder re-grab allowed after jump
 float	pm_ladderfriction = 16.0f;		// friction while on ladder
+float	pm_ladderPushVel = 128.0f;		// velocity when jumping off ladder
 float	pm_shellshockScale = 0.4f;		// movement scale during shellshock
 
 int		c_pmove = 0;
@@ -501,11 +502,29 @@ static void PM_LadderMove( void ) {
 	float	right2d[2], right2dLen;
 	float	dot, vz2, vxy2;
 
-	// Jump while on ladder: exit ladder and go airborne
+	// Jump while on ladder: push away from ladder and go airborne
 	if ( PM_CheckJump() ) {
+		vec3_t jumpDir;
+
 		pm->ps->pm_flags &= ~PMF_ON_LADDER;
 		pm->ps->pm_flags |= PMF_TIME_LADDER;
 		pm->ps->pm_time = pm_ladderJumpTime;
+
+		// CoD2: if looking toward ladder, reflect jump direction off surface
+		// otherwise jump in view direction. Either way, push away from ladder.
+		VectorCopy( pml.forward, jumpDir );
+		if ( DotProduct( jumpDir, pml.ladderNormal ) < 0.0f ) {
+			// Looking at ladder: reflect off surface
+			float d = -2.0f * DotProduct( jumpDir, pml.ladderNormal );
+			VectorMA( jumpDir, d, pml.ladderNormal, jumpDir );
+			VectorNormalize( jumpDir );
+		}
+
+		// Set velocity away from ladder
+		pm->ps->velocity[0] = pm_ladderPushVel * jumpDir[0];
+		pm->ps->velocity[1] = pm_ladderPushVel * jumpDir[1];
+		pm->ps->velocity[2] = pm_ladderPushVel * jumpDir[2];
+
 		PM_AirMove();
 		return;
 	}
@@ -1366,7 +1385,6 @@ static void PM_CheckLadder( void ) {
 	trace_t	trace;
 	vec3_t	lmins, lmaxs;
 	float	traceDist;
-	qboolean airborneOnLadder;
 
 	if ( pm->ps->pm_flags & PMF_TIME_LADDER ) {
 		return;
@@ -1386,11 +1404,9 @@ static void PM_CheckLadder( void ) {
 
 	traceDist = pml.walking ? 8.0f : 30.0f;
 
-	// When airborne while on ladder, search toward the stored ladder surface
-	// to prevent falling off when not pressing forward.
-	airborneOnLadder = ( pm->ps->pm_flags & PMF_ON_LADDER ) &&
-	                   ( pm->ps->groundEntityNum == ENTITYNUM_NONE );
-	if ( airborneOnLadder && VectorLength( pml.ladderNormal ) > 0.1f ) {
+	// When already on ladder, always search toward the stored ladder surface
+	// to prevent falling off when looking away.
+	if ( ( pm->ps->pm_flags & PMF_ON_LADDER ) && VectorLength( pml.ladderNormal ) > 0.1f ) {
 		VectorNegate( pml.ladderNormal, checkDir );
 	} else {
 		checkDir[0] = pml.forward[0];
