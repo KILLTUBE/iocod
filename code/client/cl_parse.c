@@ -475,21 +475,58 @@ void CL_ParseGamestate( msg_t *msg ) {
 	// wipe local client state
 	CL_ClearState();
 
-	// a gamestate always marks a server command sequence
+	// a gamestate always marks a server command sequence.
+	// In CoD1 (compat) mode this long also serves as the reliableAcknowledge
+	// since CoD1 doesn't send a global ack at the start of every message.
 	clc.serverCommandSequence = MSG_ReadLong( msg );
+#ifdef LEGACY_PROTOCOL
+	if (clc.compat)
+		clc.reliableAcknowledge = clc.serverCommandSequence;
+#endif
 
 	// parse all the configstrings and baselines
 	cl.gameState.dataCount = 1;	// leave a 0 at the beginning for uninitialized configstrings
 	while ( 1 ) {
+		int		len;
+
 		cmd = MSG_ReadByte( msg );
+
+#ifdef LEGACY_PROTOCOL
+		if (clc.compat) {
+			// CoD1 svc values inside gamestate: configstring=2, baseline=3, EOF=7
+			if (cmd == 7) {
+				break; // svc_EOF
+			}
+			if (cmd == 2) { // svc_configstring
+				i = MSG_ReadShort( msg );
+				if ( i < 0 || i >= MAX_CONFIGSTRINGS ) {
+					Com_Error( ERR_DROP, "CL_ParseGamestate: CoD1 configstring index %d out of range", i );
+				}
+				s = MSG_ReadBigString( msg );
+				len = strlen( s );
+				if ( len + 1 + cl.gameState.dataCount > MAX_GAMESTATE_CHARS ) {
+					Com_Error( ERR_DROP, "MAX_GAMESTATE_CHARS exceeded" );
+				}
+				cl.gameState.stringOffsets[ i ] = cl.gameState.dataCount;
+				Com_Memcpy( cl.gameState.stringData + cl.gameState.dataCount, s, len + 1 );
+				cl.gameState.dataCount += len + 1;
+				continue;
+			}
+			if (cmd == 3) { // svc_baseline — CoD1 entity format not yet implemented
+				// TODO: implement CoD1 entity delta decoding
+				Com_Error( ERR_DROP, "CL_ParseGamestate: CoD1 entity baselines not yet supported" );
+			}
+			Com_Error( ERR_DROP, "CL_ParseGamestate: bad CoD1 command byte %i (readcount %i / %i)",
+				cmd, msg->readcount, msg->cursize );
+			break;
+		}
+#endif
 
 		if ( cmd == svc_EOF ) {
 			break;
 		}
-		
-		if ( cmd == svc_configstring ) {
-			int		len;
 
+		if ( cmd == svc_configstring ) {
 			i = MSG_ReadShort( msg );
 			if ( i < 0 || i >= MAX_CONFIGSTRINGS ) {
 				Com_Error( ERR_DROP, "configstring > MAX_CONFIGSTRINGS" );
@@ -867,11 +904,18 @@ void CL_ParseServerMessage( msg_t *msg ) {
 
 	MSG_Bitstream(msg);
 
-	// get the reliable sequence acknowledge number
-	clc.reliableAcknowledge = MSG_ReadLong( msg );
-	// 
-	if ( clc.reliableAcknowledge < clc.reliableSequence - MAX_RELIABLE_COMMANDS ) {
-		clc.reliableAcknowledge = clc.reliableSequence;
+#ifdef LEGACY_PROTOCOL
+	// CoD1 (compat) servers do NOT send reliableAcknowledge at the message start.
+	// Instead it appears as the first field inside svc_gamestate, and per-command
+	// sequence numbers are embedded in each svc_serverCommand.
+	if (!clc.compat)
+#endif
+	{
+		// Q3: reliable sequence acknowledge comes first in every message
+		clc.reliableAcknowledge = MSG_ReadLong( msg );
+		if ( clc.reliableAcknowledge < clc.reliableSequence - MAX_RELIABLE_COMMANDS ) {
+			clc.reliableAcknowledge = clc.reliableSequence;
+		}
 	}
 
 	//
@@ -885,6 +929,40 @@ void CL_ParseServerMessage( msg_t *msg ) {
 
 		cmd = MSG_ReadByte( msg );
 
+#ifdef LEGACY_PROTOCOL
+		if (clc.compat) {
+			// CoD1 svc_EOF = 7 (Q3 uses 8; CoD has no svc_bad=0 slot)
+			if (cmd == 7) {
+				SHOWNET( msg, "END OF MESSAGE" );
+				break;
+			}
+			switch (cmd) {
+			default:
+				Com_Error(ERR_DROP, "CL_ParseServerMessage: Illegible CoD1 message %d", cmd);
+				break;
+			case 0: // svc_nop
+				break;
+			case 1: // svc_gamestate
+				SHOWNET(msg, "svc_gamestate");
+				CL_ParseGamestate( msg );
+				break;
+			case 4: // svc_serverCommand — seq(long) + string (same as Q3 CL_ParseCommandString)
+				SHOWNET(msg, "svc_serverCommand");
+				CL_ParseCommandString( msg );
+				break;
+			case 5: // svc_download
+				SHOWNET(msg, "svc_download");
+				CL_ParseDownload( msg );
+				break;
+			case 6: // svc_snapshot
+				SHOWNET(msg, "svc_snapshot");
+				CL_ParseSnapshot( msg );
+				break;
+			}
+			continue;
+		}
+#endif
+
 		if (cmd == svc_EOF) {
 			SHOWNET( msg, "END OF MESSAGE" );
 			break;
@@ -897,12 +975,12 @@ void CL_ParseServerMessage( msg_t *msg ) {
 				SHOWNET( msg, svc_strings[cmd] );
 			}
 		}
-	
+
 	// other commands
 		switch ( cmd ) {
 		default:
 			Com_Error (ERR_DROP,"CL_ParseServerMessage: Illegible server message");
-			break;			
+			break;
 		case svc_nop:
 			break;
 		case svc_serverCommand:
