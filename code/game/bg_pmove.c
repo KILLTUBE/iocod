@@ -35,18 +35,28 @@ float	pm_stopspeed = 100.0f;
 float	pm_duckScale = 0.25f;
 float	pm_swimScale = 0.50f;
 
-float	pm_accelerate = 10.0f;
+float	pm_accelerate = 9.0f;			// CoD1: 9.0 (Q3: 10.0)
 float	pm_airaccelerate = 1.0f;
 float	pm_wateraccelerate = 4.0f;
 float	pm_flyaccelerate = 8.0f;
 
-float	pm_friction = 6.0f;
+float	pm_friction = 5.5f;			// CoD1: 5.5 (Q3: 6.0)
 float	pm_waterfriction = 1.0f;
 float	pm_flightfriction = 3.0f;
 float	pm_spectatorfriction = 5.0f;
 
 float	pm_ladderScale = 0.5f;
 float	pm_ladderaccelerate = 20.0f;
+
+// CoD1-specific movement parameters (extracted from game.mp.i386.so)
+float	pm_waterSwimScale = 0.5f;		// swim speed scale (CoD1: pm_waterSwimScale)
+float	pm_waterWadeScale = 0.7f;		// wade (shallow water) speed scale
+float	pm_ducked_accelerate = 12.0f;	// acceleration while crouched
+float	pm_prone_accelerate = 19.0f;	// acceleration while prone
+float	pm_ladderPushOff = 128.0f;		// velocity when jumping off a ladder
+int		pm_ladderJumpTime = 300;		// ms before ladder re-grab allowed after jump
+float	pm_ladderfriction = 16.0f;		// friction while on ladder
+float	pm_shellshockScale = 0.4f;		// movement scale during shellshock
 
 int		c_pmove = 0;
 

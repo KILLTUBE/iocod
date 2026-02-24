@@ -69,6 +69,17 @@ extern	float	pm_flyaccelerate;
 extern	float	pm_friction;
 extern	float	pm_waterfriction;
 extern	float	pm_flightfriction;
+extern	float	pm_spectatorfriction;
+
+// CoD1-specific movement parameters
+extern	float	pm_waterSwimScale;
+extern	float	pm_waterWadeScale;
+extern	float	pm_ducked_accelerate;
+extern	float	pm_prone_accelerate;
+extern	float	pm_ladderPushOff;
+extern	int		pm_ladderJumpTime;
+extern	float	pm_ladderfriction;
+extern	float	pm_shellshockScale;
 
 extern	int		c_pmove;
 
