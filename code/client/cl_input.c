@@ -52,6 +52,8 @@ kbutton_t	in_lookup, in_lookdown, in_moveleft, in_moveright;
 kbutton_t	in_strafe, in_speed;
 kbutton_t	in_up, in_down;
 kbutton_t	in_reload;
+kbutton_t	in_melee;
+kbutton_t	in_ads;
 
 #ifdef USE_VOIP
 kbutton_t	in_voiprecord;
@@ -218,6 +220,11 @@ void IN_MoverightUp(void) {IN_KeyUp(&in_moveright);}
 
 void IN_ReloadDown(void) {IN_KeyDown(&in_reload);}
 void IN_ReloadUp(void) {IN_KeyUp(&in_reload);}
+
+void IN_MeleeDown(void) {IN_KeyDown(&in_melee);}
+void IN_MeleeUp(void)   {IN_KeyUp(&in_melee);}
+void IN_ADSDown(void)   {IN_KeyDown(&in_ads);}
+void IN_ADSUp(void)     {IN_KeyUp(&in_ads);}
 
 void IN_SpeedDown(void) {IN_KeyDown(&in_speed);}
 void IN_SpeedUp(void) {IN_KeyUp(&in_speed);}
@@ -579,6 +586,16 @@ void CL_CmdButtons( usercmd_t *cmd ) {
 		cmd->buttons |= BUTTON_RELOAD;
 	}
 	in_reload.wasPressed = qfalse;
+
+	if ( in_melee.active || in_melee.wasPressed ) {
+		cmd->buttons |= BUTTON_MELEE;
+	}
+	in_melee.wasPressed = qfalse;
+
+	if ( in_ads.active ) {
+		cmd->buttons |= BUTTON_ADS;
+	}
+	in_ads.wasPressed = qfalse;
 
 	if ( Key_GetCatcher( ) ) {
 		cmd->buttons |= BUTTON_TALK;
@@ -1035,6 +1052,10 @@ void CL_InitInput( void ) {
 	Cmd_AddCommand ("-button14", IN_Button14Up);
 	Cmd_AddCommand ("+reload", IN_ReloadDown);
 	Cmd_AddCommand ("-reload", IN_ReloadUp);
+	Cmd_AddCommand ("+melee", IN_MeleeDown);
+	Cmd_AddCommand ("-melee", IN_MeleeUp);
+	Cmd_AddCommand ("+ads", IN_ADSDown);
+	Cmd_AddCommand ("-ads", IN_ADSUp);
 	Cmd_AddCommand ("+mlook", IN_MLookDown);
 	Cmd_AddCommand ("-mlook", IN_MLookUp);
 
@@ -1124,6 +1145,10 @@ void CL_ShutdownInput(void)
 	Cmd_RemoveCommand("-button14");
 	Cmd_RemoveCommand("+reload");
 	Cmd_RemoveCommand("-reload");
+	Cmd_RemoveCommand("+melee");
+	Cmd_RemoveCommand("-melee");
+	Cmd_RemoveCommand("+ads");
+	Cmd_RemoveCommand("-ads");
 	Cmd_RemoveCommand("+mlook");
 	Cmd_RemoveCommand("-mlook");
 

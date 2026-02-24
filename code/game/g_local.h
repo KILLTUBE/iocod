@@ -316,7 +316,13 @@ struct gclient_s {
 	int			invulnerabilityTime;
 #endif
 
+#ifdef STANDALONE
+	// CoD1 weapon system
+	int		nextMeleeTime;		/* earliest level.time for next melee */
+#endif
+
 	char		*areabits;
+
 };
 
 
@@ -556,6 +562,14 @@ qboolean CheckGauntletAttack( gentity_t *ent );
 void Weapon_HookFree (gentity_t *ent);
 void Weapon_HookThink (gentity_t *ent);
 
+
+#ifdef STANDALONE
+//
+// g_weapon_cod1.c
+//
+void SP_weapon_cod1( gentity_t *ent );
+void G_MeleeDamage( gentity_t *attacker );
+#endif
 
 //
 // g_client.c

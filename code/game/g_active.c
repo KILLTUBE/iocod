@@ -994,6 +994,17 @@ void ClientThink_real( gentity_t *ent ) {
 	client->buttons = ucmd->buttons;
 	client->latched_buttons |= client->buttons & ~client->oldbuttons;
 
+#ifdef STANDALONE
+	// CoD1 melee: trigger on button-press edge when alive
+	if ( (client->latched_buttons & BUTTON_MELEE) &&
+	     client->ps.pm_type == PM_NORMAL &&
+	     level.time >= client->nextMeleeTime ) {
+		G_MeleeDamage( ent );
+		client->nextMeleeTime = level.time + 800;
+		client->latched_buttons &= ~BUTTON_MELEE;
+	}
+#endif
+
 	// check for respawning
 	if ( client->ps.stats[STAT_HEALTH] <= 0 ) {
 		// wait for the attack button to be pressed

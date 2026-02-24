@@ -357,6 +357,17 @@ rescan:
 		return qtrue;
 	}
 
+	// CoD1: server sends weapon pickup notifications
+#ifdef STANDALONE
+	if ( !strcmp( cmd, "weapon" ) ) {
+		extern void CL_WeaponPickup( const char *name, int clipAmmo, int reserveAmmo );
+		CL_WeaponPickup( Cmd_Argv(1),
+		                 argc >= 3 ? atoi(Cmd_Argv(2)) : -1,
+		                 argc >= 4 ? atoi(Cmd_Argv(3)) : -1 );
+		return qfalse;  // don't pass to cgame
+	}
+#endif
+
 	// we may want to put a "connect to other server" command here
 
 	// cgame can now act on the command
@@ -810,6 +821,7 @@ void CL_CGameRendering( stereoFrame_t stereo ) {
 	 * Optional second 2D pass keeps HUD above the weapon.
 	 */
 	CL_DrawViewModel( stereo );
+	CL_DrawWeaponHud();
 	if ( Cvar_VariableIntegerValue( "cl_drawGunPostHud" ) ) {
 		VM_Call( cgvm, CG_DRAW_2D_ONLY, stereo );
 		VM_Debug( 0 );

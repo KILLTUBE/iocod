@@ -1235,6 +1235,10 @@ typedef struct playerState_s {
 
 #define BUTTON_RELOAD		32768
 
+// CoD1 weapon buttons (bits above 15, safe since usercmd_t.buttons is int)
+#define BUTTON_MELEE		65536		// melee attack
+#define BUTTON_ADS			131072		// aim down sights (hold)
+
 #define	BUTTON_ANY			16384			// any key whatsoever (updated from 2048)
 
 #define	MOVE_RUN			120			// if forwardmove or rightmove are >= MOVE_RUN,

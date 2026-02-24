@@ -335,9 +335,15 @@ qboolean G_CallSpawn( gentity_t *ent ) {
 	}
 
 	// CoD Prefix Fallbacks
+#ifdef STANDALONE
+	// CoD1 weapon entities: spawnable pickups
+	if ( !Q_stricmpn( ent->classname, "weapon_",   7 ) ||
+	     !Q_stricmpn( ent->classname, "mpweapon_", 9 ) ) {
+		SP_weapon_cod1( ent );
+		return qtrue;
+	}
+#endif
 	if ( !Q_stricmpn( ent->classname, "actor_", 6 ) ||
-		 !Q_stricmpn( ent->classname, "weapon_", 7 ) ||
-		 !Q_stricmpn( ent->classname, "mpweapon_", 9 ) ||
 		 !Q_stricmpn( ent->classname, "node_", 5 ) ||
 		 !Q_stricmpn( ent->classname, "script_", 7 ) ||
 		 !Q_stricmpn( ent->classname, "mp_", 3 ) ) {
