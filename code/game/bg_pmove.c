@@ -525,8 +525,9 @@ static void PM_LadderMove( void ) {
 	vTempRight[1] = pml.right[1];
 	vTempRight[2] = 0.0f;
 	VectorNormalize( vTempRight );
-	// Project right onto ladder plane (remove component along ladder normal)
-	ProjectPointOnPlane( pml.right, pml.ladderNormal, vTempRight );
+	// Project the horizontal right vector onto the ladder surface plane so
+	// strafing stays tangent to the wall. Q3: ProjectPointOnPlane(dst, p, normal).
+	ProjectPointOnPlane( pml.right, vTempRight, pml.ladderNormal );
 
 	scale = PM_CmdScale( &pm->cmd );
 	VectorClear( wishvel );
@@ -1388,16 +1389,17 @@ static void PM_CheckLadder( void ) {
 	// to prevent falling off when not pressing forward.
 	airborneOnLadder = ( pm->ps->pm_flags & PMF_ON_LADDER ) &&
 	                   ( pm->ps->groundEntityNum == ENTITYNUM_NONE );
-	if ( airborneOnLadder ) {
+	if ( airborneOnLadder && VectorLength( pml.ladderNormal ) > 0.1f ) {
 		VectorNegate( pml.ladderNormal, checkDir );
 	} else {
 		checkDir[0] = pml.forward[0];
 		checkDir[1] = pml.forward[1];
 		checkDir[2] = 0.0f;
 		if ( VectorNormalize( checkDir ) == 0 ) {
-			// Looking straight up/down with no stored normal: give up
-			if ( !(pm->ps->pm_flags & PMF_ON_LADDER) ) return;
-			VectorNegate( pml.ladderNormal, checkDir );
+			// Looking straight up/down — can't determine direction, clear ladder
+			pm->ps->pm_flags &= ~PMF_ON_LADDER;
+			VectorClear( pml.ladderNormal );
+			return;
 		}
 	}
 
