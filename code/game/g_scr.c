@@ -456,6 +456,98 @@ static void G_Scr_SetEntityObjectFields( gsc_Context *ctx, int entObj, gentity_t
 
     gsc_add_int( ctx, entNum );
     gsc_object_set_field( ctx, entObj, "entitynum" );
+
+    if ( ent->client ) {
+        const char *sessionState;
+        int         maxHealth;
+
+        gsc_add_string( ctx, ent->client->pers.netname );
+        gsc_object_set_field( ctx, entObj, "name" );
+
+        gsc_object_get_field( ctx, entObj, "pers" );
+        if ( gsc_type( ctx, -1 ) != GSC_TYPE_OBJECT ) {
+            gsc_pop( ctx, 1 );
+            gsc_add_object( ctx );
+            gsc_object_set_field( ctx, entObj, "pers" );
+        } else {
+            gsc_pop( ctx, 1 );
+        }
+
+        sessionState = "dead";
+        if ( ent->client->sess.sessionTeam == TEAM_SPECTATOR ) {
+            sessionState = "spectator";
+        } else if ( ent->health > 0 ) {
+            sessionState = "playing";
+        }
+
+        maxHealth = ent->client->pers.maxHealth;
+        if ( maxHealth <= 0 ) {
+            maxHealth = 100;
+        }
+
+        gsc_object_get_field( ctx, entObj, "sessionteam" );
+        if ( gsc_type( ctx, -1 ) == GSC_TYPE_UNDEFINED ) {
+            gsc_pop( ctx, 1 );
+            gsc_add_string( ctx, G_Scr_TeamToString( ent->client->sess.sessionTeam ) );
+            gsc_object_set_field( ctx, entObj, "sessionteam" );
+        } else {
+            gsc_pop( ctx, 1 );
+        }
+
+        gsc_object_get_field( ctx, entObj, "sessionstate" );
+        if ( gsc_type( ctx, -1 ) == GSC_TYPE_UNDEFINED ) {
+            gsc_pop( ctx, 1 );
+            gsc_add_string( ctx, sessionState );
+            gsc_object_set_field( ctx, entObj, "sessionstate" );
+        } else {
+            gsc_pop( ctx, 1 );
+        }
+
+        gsc_object_get_field( ctx, entObj, "spectatorclient" );
+        if ( gsc_type( ctx, -1 ) == GSC_TYPE_UNDEFINED ) {
+            gsc_pop( ctx, 1 );
+            gsc_add_int( ctx, ent->client->sess.spectatorClient );
+            gsc_object_set_field( ctx, entObj, "spectatorclient" );
+        } else {
+            gsc_pop( ctx, 1 );
+        }
+
+        gsc_object_get_field( ctx, entObj, "score" );
+        if ( gsc_type( ctx, -1 ) == GSC_TYPE_UNDEFINED ) {
+            gsc_pop( ctx, 1 );
+            gsc_add_int( ctx, ent->client->ps.persistant[ PERS_SCORE ] );
+            gsc_object_set_field( ctx, entObj, "score" );
+        } else {
+            gsc_pop( ctx, 1 );
+        }
+
+        gsc_object_get_field( ctx, entObj, "deaths" );
+        if ( gsc_type( ctx, -1 ) == GSC_TYPE_UNDEFINED ) {
+            gsc_pop( ctx, 1 );
+            gsc_add_int( ctx, ent->client->ps.persistant[ PERS_KILLED ] );
+            gsc_object_set_field( ctx, entObj, "deaths" );
+        } else {
+            gsc_pop( ctx, 1 );
+        }
+
+        gsc_object_get_field( ctx, entObj, "maxhealth" );
+        if ( gsc_type( ctx, -1 ) == GSC_TYPE_UNDEFINED ) {
+            gsc_pop( ctx, 1 );
+            gsc_add_int( ctx, maxHealth );
+            gsc_object_set_field( ctx, entObj, "maxhealth" );
+        } else {
+            gsc_pop( ctx, 1 );
+        }
+
+        gsc_object_get_field( ctx, entObj, "health" );
+        if ( gsc_type( ctx, -1 ) == GSC_TYPE_UNDEFINED ) {
+            gsc_pop( ctx, 1 );
+            gsc_add_int( ctx, ent->health );
+            gsc_object_set_field( ctx, entObj, "health" );
+        } else {
+            gsc_pop( ctx, 1 );
+        }
+    }
 }
 
 static void G_Scr_CreateEntityObject( gentity_t *ent, qboolean keepOnStack )
@@ -1807,7 +1899,21 @@ static const char *G_Scr_StringifyArg( gsc_Context *ctx, int arg, char *buf, int
         case GSC_TYPE_FUNCTION:
             return "[function]";
         case GSC_TYPE_OBJECT:
+        {
+            int obj = gsc_get_object( ctx, arg );
+            if ( obj >= 0 ) {
+                gsc_object_get_field( ctx, obj, "name" );
+                if ( gsc_type( ctx, -1 ) == GSC_TYPE_STRING ||
+                     gsc_type( ctx, -1 ) == GSC_TYPE_INTERNED_STRING ) {
+                    const char *name = gsc_to_string( ctx, -1 );
+                    Com_sprintf( buf, bufSize, "%s", name ? name : "" );
+                    gsc_pop( ctx, 1 );
+                    return buf;
+                }
+                gsc_pop( ctx, 1 );
+            }
             return "[object]";
+        }
         case GSC_TYPE_REFERENCE:
             return "[reference]";
         case GSC_TYPE_THREAD:
