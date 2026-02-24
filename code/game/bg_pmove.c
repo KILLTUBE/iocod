@@ -600,16 +600,8 @@ static void PM_LadderMove( void ) {
 
 	PM_StepSlideMove( qfalse );
 
-	// Yaw movement direction for animations (clamped to +-75 from ladder face).
-	// CoD2: writes to ps->movementDir as signed char (not delta_angles).
-	{
-		vec3_t ladderAngles;
-		vectoangles( pml.ladderNormal, ladderAngles );
-		moveyaw = (int)AngleDelta( ladderAngles[YAW] + 180.0f, pm->ps->viewangles[YAW] );
-	}
-	if ( moveyaw >  75 ) moveyaw =  75;
-	if ( moveyaw < -75 ) moveyaw = -75;
-	pm->ps->movementDir = (signed char)moveyaw;
+	// Set the movementDir so clients can rotate the legs for strafing
+	PM_SetMovementDir();
 }
 
 /*
