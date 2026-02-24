@@ -1361,7 +1361,6 @@ static void CL_Character_LoadAnimations( void )
     s_tpChar.currentTorsoAnim = TP_TORSO_ANIM_STAND_IDLE;
     s_tpChar.legAnimStartTime = cl.serverTime;
     s_tpChar.torsoAnimStartTime = cl.serverTime;
-    s_tpChar.loadedPlayerAnimType = -1;
     s_tpChar.loadedPlayerAnimType = playerAnimType;
     Q_strncpyz( s_tpChar.loadedPlayerAnimTypeName, playerAnimTypeName,
                 sizeof( s_tpChar.loadedPlayerAnimTypeName ) );
@@ -2461,6 +2460,7 @@ void CL_CharacterCod1_Init( void )
     s_tpChar.currentTorsoAnim = TP_TORSO_ANIM_STAND_IDLE;
     s_tpChar.legAnimStartTime = cl.serverTime;
     s_tpChar.torsoAnimStartTime = cl.serverTime;
+    s_tpChar.loadedPlayerAnimType = -1;
 
     if ( cl_thirdPersonModel ) {
         cl_thirdPersonModel->modified = qtrue;
