@@ -937,9 +937,17 @@ void UI_LoadMenus(const char *menuFile, qboolean reset) {
 	handle = trap_PC_LoadSource( menuFile );
 	if (!handle) {
 		Com_Printf( S_COLOR_YELLOW "menu file not found: %s, using default\n", menuFile );
-		handle = trap_PC_LoadSource( "ui/menus.txt" );
+#ifdef STANDALONE
+		handle = trap_PC_LoadSource( "ui_mp/menus.txt" );
 		if (!handle) {
-			trap_Error( S_COLOR_RED "default menu file not found: ui/menus.txt, unable to continue!" );
+			handle = trap_PC_LoadSource( "ui/menus.txt" );
+		}
+#else
+		handle = trap_PC_LoadSource( "ui/menus.txt" );
+#endif
+		if (!handle) {
+			Com_Printf( S_COLOR_RED "default menu file not found, skipping\n" );
+			return;
 		}
 	}
 
@@ -956,8 +964,9 @@ void UI_LoadMenus(const char *menuFile, qboolean reset) {
 			break;
 		}
 
-		if ( token.string[0] == '}' ) {
-			break;
+		if ( token.string[0] == '{' ) {
+			/* CoD1 menus.txt wraps loadMenu entries in outer braces; skip the opening brace */
+			continue;
 		}
 
 		if (Q_stricmp(token.string, "loadmenu") == 0) {
@@ -5185,7 +5194,9 @@ void _UI_Init( qboolean inGameLoad ) {
 	}
 #else 
 	UI_LoadMenus(menuSet, qtrue);
+#ifndef STANDALONE
 	UI_LoadMenus("ui/ingame.txt", qfalse);
+#endif
 #endif
 	
 	Menus_CloseAll();
@@ -5833,7 +5844,11 @@ static cvarTable_t		cvarTable[] = {
 	{ &ui_blueteam4, "ui_blueteam4", "0", CVAR_ARCHIVE },
 	{ &ui_blueteam5, "ui_blueteam5", "0", CVAR_ARCHIVE },
 	{ &ui_netSource, "ui_netSource", "1", CVAR_ARCHIVE },
+#ifdef STANDALONE
+	{ &ui_menuFiles, "ui_menuFiles", "ui_mp/menus.txt", CVAR_ARCHIVE },
+#else
 	{ &ui_menuFiles, "ui_menuFiles", "ui/menus.txt", CVAR_ARCHIVE },
+#endif
 	{ &ui_currentTier, "ui_currentTier", "0", CVAR_ARCHIVE },
 	{ &ui_currentMap, "ui_currentMap", "0", CVAR_ARCHIVE },
 	{ &ui_currentNetMap, "ui_currentNetMap", "0", CVAR_ARCHIVE },

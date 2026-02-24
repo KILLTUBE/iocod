@@ -228,13 +228,19 @@ static void SV_Map_f( void ) {
 		}
 	}
 
-	// save the map name here cause on a map restart we reload the q3config.cfg
-	// and thus nuke the arguments of the map command
-	Q_strncpyz(mapname, map, sizeof(mapname));
-	if ( !Q_stricmp( COM_GetExtension( mapname ), "bsp" ) ) {
-		char stripped[MAX_QPATH];
-		COM_StripExtension( mapname, stripped, sizeof( stripped ) );
-		Q_strncpyz( mapname, stripped, sizeof( mapname ) );
+	// Derive mapname from the resolved BSP path so that e.g. "devmap mp_harbor"
+	// produces mapname "mp/mp_harbor" → CM_LoadMap("maps/mp/mp_harbor.bsp").
+	{
+		const char *mapStart = expanded;
+		if ( Q_stricmpn( mapStart, "maps/", 5 ) == 0 ) {
+			mapStart += 5;
+		}
+		Q_strncpyz( mapname, mapStart, sizeof( mapname ) );
+		if ( !Q_stricmp( COM_GetExtension( mapname ), "bsp" ) ) {
+			char stripped[MAX_QPATH];
+			COM_StripExtension( mapname, stripped, sizeof( stripped ) );
+			Q_strncpyz( mapname, stripped, sizeof( mapname ) );
+		}
 	}
 
 	// start up the map
