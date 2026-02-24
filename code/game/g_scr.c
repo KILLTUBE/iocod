@@ -1405,6 +1405,15 @@ static int GScr_Meth_Show( gsc_Context *ctx )
     return 0;
 }
 
+static int GScr_Meth_Unlink( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    if ( ent ) {
+        trap_UnlinkEntity( ent );
+    }
+    return 0;
+}
+
 static int GScr_Meth_NotSolid( gsc_Context *ctx )
 {
     gentity_t *ent = G_Scr_GetSelf( ctx );
@@ -2406,20 +2415,27 @@ static int GScr_Fn_Print( gsc_Context *ctx )
     return 0;
 }
 
+/* Helper: build message from GSC args */
+static void G_Scr_BuildMessage( gsc_Context *ctx, char *buffer, int bufferSize )
+{
+    int  i, n = gsc_numargs( ctx );
+    char buf[ 256 ];
+    int  offset = 0;
+
+    buffer[ 0 ] = '\0';
+    for ( i = 0; i < n && offset < bufferSize - 1; i++ ) {
+        const char *arg = G_Scr_StringifyArg( ctx, i, buf, sizeof( buf ) );
+        Q_strncpyz( buffer + offset, arg, bufferSize - offset );
+        offset += strlen( buffer + offset );
+    }
+}
+
 /* iprintln — display on screen for all clients (CoD1) */
 static int GScr_Fn_IPrintLn( gsc_Context *ctx )
 {
-    int  i, n = gsc_numargs( ctx );
     char msg[ MAX_STRING_CHARS ];
-    int  len = 0;
 
-    for ( i = 0; i < n && len < MAX_STRING_CHARS - 2; i++ ) {
-        G_Scr_StringifyArg( ctx, i, msg + len, MAX_STRING_CHARS - len );
-        len = strlen( msg );
-    }
-    msg[ MAX_STRING_CHARS - 1 ] = '\0';
-
-    /* Send cp (center print) command to all clients */
+    G_Scr_BuildMessage( ctx, msg, sizeof( msg ) );
     trap_SendServerCommand( -1, va( "cp \"%s\"\n", msg ) );
     return 0;
 }
@@ -2427,18 +2443,40 @@ static int GScr_Fn_IPrintLn( gsc_Context *ctx )
 /* iprintlnbold — display on screen with emphasis (CoD1) */
 static int GScr_Fn_IPrintLnBold( gsc_Context *ctx )
 {
-    int  i, n = gsc_numargs( ctx );
     char msg[ MAX_STRING_CHARS ];
-    int  len = 0;
 
-    for ( i = 0; i < n && len < MAX_STRING_CHARS - 2; i++ ) {
-        G_Scr_StringifyArg( ctx, i, msg + len, MAX_STRING_CHARS - len );
-        len = strlen( msg );
-    }
-    msg[ MAX_STRING_CHARS - 1 ] = '\0';
-
-    /* For bold, we could use a different format, but cp works for now */
+    G_Scr_BuildMessage( ctx, msg, sizeof( msg ) );
     trap_SendServerCommand( -1, va( "cp \"%s\"\n", msg ) );
+    return 0;
+}
+
+/* Player method: iprintln — send message to specific player */
+static int GScr_Meth_Player_IPrintLn( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    char      msg[ MAX_STRING_CHARS ];
+
+    if ( !ent || !ent->client ) {
+        return 0;
+    }
+
+    G_Scr_BuildMessage( ctx, msg, sizeof( msg ) );
+    trap_SendServerCommand( ent - g_entities, va( "cp \"%s\"\n", msg ) );
+    return 0;
+}
+
+/* Player method: iprintlnbold — send bold message to specific player */
+static int GScr_Meth_Player_IPrintLnBold( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    char      msg[ MAX_STRING_CHARS ];
+
+    if ( !ent || !ent->client ) {
+        return 0;
+    }
+
+    G_Scr_BuildMessage( ctx, msg, sizeof( msg ) );
+    trap_SendServerCommand( ent - g_entities, va( "cp \"%s\"\n", msg ) );
     return 0;
 }
 
@@ -3351,10 +3389,13 @@ static void G_Scr_CreateGlobals( void )
     G_Scr_AddMethod( entMethodsObj, "isalive",         GScr_Meth_IsAlive );
     G_Scr_AddMethod( entMethodsObj, "spawn",           GScr_Meth_Spawn );
     G_Scr_AddMethod( entMethodsObj, "suicide",         GScr_Meth_Suicide );
+    G_Scr_AddMethod( entMethodsObj, "iprintln",        GScr_Meth_Player_IPrintLn );
+    G_Scr_AddMethod( entMethodsObj, "iprintlnbold",    GScr_Meth_Player_IPrintLnBold );
     G_Scr_AddMethod( entMethodsObj, "placespawnpoint", GScr_Meth_PlaceSpawnpoint );
     G_Scr_AddMethod( entMethodsObj, "delete",          GScr_Meth_Delete );
     G_Scr_AddMethod( entMethodsObj, "hide",            GScr_Meth_Hide );
     G_Scr_AddMethod( entMethodsObj, "show",            GScr_Meth_Show );
+    G_Scr_AddMethod( entMethodsObj, "unlink",          GScr_Meth_Unlink );
     G_Scr_AddMethod( entMethodsObj, "notsolid",        GScr_Meth_NotSolid );
     G_Scr_AddMethod( entMethodsObj, "solid",           GScr_Meth_Solid );
     G_Scr_AddMethod( entMethodsObj, "setmodel",        GScr_Meth_SetModel );
