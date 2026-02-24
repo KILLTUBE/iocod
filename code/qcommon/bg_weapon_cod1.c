@@ -12,8 +12,57 @@ valid and represent the empty string / zero.
 ===========================================================================
 */
 #include "q_shared.h"
-#include "qcommon.h"
 #include "bg_weapon_cod1.h"
+
+/*
+ * File I/O abstraction.
+ *
+ * This file is compiled into both the client (where FS_ReadFile / FS_FreeFile
+ * are available directly) and the game module qagame.so (where only trap_FS_*
+ * syscalls are available).  We bridge the gap with a thin pair of wrappers.
+ */
+#ifdef QAGAME
+/* ---- Game module path: use trap syscalls ---- */
+/* Forward declarations for the trap functions used here */
+extern int  trap_FS_FOpenFile( const char *qpath, fileHandle_t *f, fsMode_t mode );
+extern void trap_FS_Read( void *buffer, int len, fileHandle_t f );
+extern void trap_FS_FCloseFile( fileHandle_t f );
+
+#define BG_WD_FILEBUF_SIZE  65536
+static char s_wdFileBuf[BG_WD_FILEBUF_SIZE];
+
+static char *BG_WD_ReadFile( const char *path )
+{
+    fileHandle_t f;
+    int len = trap_FS_FOpenFile( path, &f, FS_READ );
+    if ( len <= 0 ) {
+        if ( f ) trap_FS_FCloseFile( f );
+        return NULL;
+    }
+    if ( len >= BG_WD_FILEBUF_SIZE ) {
+        trap_FS_FCloseFile( f );
+        return NULL;
+    }
+    trap_FS_Read( s_wdFileBuf, len, f );
+    s_wdFileBuf[len] = '\0';
+    trap_FS_FCloseFile( f );
+    return s_wdFileBuf;
+}
+static void BG_WD_FreeFile( char *buf ) { (void)buf; /* static buffer — no-op */ }
+
+#else
+/* ---- Client / engine path: use FS_ReadFile ---- */
+#include "qcommon.h"
+
+static char *BG_WD_ReadFile( const char *path )
+{
+    char *buf = NULL;
+    FS_ReadFile( path, (void **)&buf );
+    return buf;
+}
+static void BG_WD_FreeFile( char *buf ) { FS_FreeFile( buf ); }
+
+#endif /* QAGAME */
 
 #define COD_PLAYER_ANIM_TYPE_MAX 64
 
@@ -24,7 +73,6 @@ static char     s_playerAnimTypeNames[COD_PLAYER_ANIM_TYPE_MAX][64];
 void BG_LoadPlayerAnimTypes( void )
 {
     char *raw = NULL;
-    int len;
     char *scan;
     int count;
 
@@ -36,19 +84,8 @@ void BG_LoadPlayerAnimTypes( void )
     s_playerAnimTypeCount = 0;
     Com_Memset( s_playerAnimTypeNames, 0, sizeof( s_playerAnimTypeNames ) );
 
-    len = FS_ReadFile( "mp/playeranimtypes.txt", (void **)&raw );
-    if ( !raw || len <= 0 ) {
-        if ( raw ) {
-            FS_FreeFile( raw );
-        }
-        return;
-    }
-
-    if ( len > 4095 ) {
-        Com_Printf( "BG_LoadPlayerAnimTypes: 'mp/playeranimtypes.txt' max size exceeded\n" );
-        FS_FreeFile( raw );
-        return;
-    }
+    raw = BG_WD_ReadFile( "mp/playeranimtypes.txt" );
+    if ( !raw ) return;
 
     scan = raw;
     count = 0;
@@ -68,7 +105,7 @@ void BG_LoadPlayerAnimTypes( void )
         count++;
     }
     s_playerAnimTypeCount = count;
-    FS_FreeFile( raw );
+    BG_WD_FreeFile( raw );
 }
 
 int BG_GetPlayerAnimTypeCount( void )
@@ -298,10 +335,10 @@ qboolean BG_ParseWeaponDef( const char *name, weaponDef_t *out )
 
     /* Try sp first, then mp */
     Com_sprintf( path, sizeof(path), "weapons/sp/%s", name );
-    FS_ReadFile( path, (void **)&raw );
+    raw = BG_WD_ReadFile( path );
     if ( !raw ) {
         Com_sprintf( path, sizeof(path), "weapons/mp/%s", name );
-        FS_ReadFile( path, (void **)&raw );
+        raw = BG_WD_ReadFile( path );
     }
     if ( !raw ) {
         Com_Printf( "BG_ParseWeaponDef: '%s' not found\n", name );
@@ -311,7 +348,7 @@ qboolean BG_ParseWeaponDef( const char *name, weaponDef_t *out )
     /* Verify WEAPONFILE header */
     if ( Q_strncmp( raw, "WEAPONFILE", 10 ) != 0 ) {
         Com_Printf( "BG_ParseWeaponDef: '%s' missing WEAPONFILE header\n", name );
-        FS_FreeFile( raw );
+        BG_WD_FreeFile( raw );
         return qfalse;
     }
 
@@ -342,6 +379,6 @@ qboolean BG_ParseWeaponDef( const char *name, weaponDef_t *out )
         if ( key[0] ) SetWeaponField( out, key, val );
     }
 
-    FS_FreeFile( raw );
+    BG_WD_FreeFile( raw );
     return qtrue;
 }
