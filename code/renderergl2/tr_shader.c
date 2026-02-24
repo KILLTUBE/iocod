@@ -3624,10 +3624,8 @@ shader_t *R_FindShaderEx( const char *name, int lightmapIndex, qboolean mipRawIm
 	// create the default shading commands
 	//
 #ifdef STANDALONE
-	/* CoD1: auto-detect alpha-masked surfaces (fences, railings, foliage) by DXT3/DXT5/DXT1a format.
-	 * These surfaces have no explicit shader definition; the alpha channel carries the cutout mask.
-	 * Replace the two-pass lightmap shader with a single vertex-lit + alphaFunc GE128 pass so
-	 * transparent holes are actually discarded rather than rendered as black. */
+	/* CoD1: auto-detect alpha-masked surfaces (fences, railings, foliage).
+	 * Keep normal world lighting while applying alpha test so cutout holes are discarded. */
 	{
 		/* CoD1 names alpha-masked surfaces with "_masked@" or puts them under "transparents/".
 		 * Also detect by DXT3/DXT5/DXT1-RGBA internalFormat which always carries real alpha. */
@@ -3645,10 +3643,40 @@ shader_t *R_FindShaderEx( const char *name, int lightmapIndex, qboolean mipRawIm
 		{
 			ri.Printf( PRINT_DEVELOPER, "AutoAlpha: %s (fmt=0x%x lm=%d name=%d fmt=%d)\n",
 			           shader.name, image->internalFormat, shader.lightmapIndex, nameAlpha, fmtAlpha );
-			stages[0].bundle[0].image[0] = image;
-			stages[0].active = qtrue;
-			stages[0].rgbGen = CGEN_IDENTITY;
-			stages[0].stateBits = GLS_DEFAULT | GLS_ATEST_GE_80;
+
+			if ( shader.lightmapIndex >= 0 )
+			{
+				/* Diffuse+alpha first, then modulate by lightmap to avoid fullbright cutouts. */
+				stages[0].bundle[0].image[0] = image;
+				stages[0].active = qtrue;
+				stages[0].rgbGen = CGEN_IDENTITY;
+				stages[0].alphaGen = AGEN_SKIP;
+				stages[0].stateBits = GLS_DEFAULT | GLS_ATEST_GE_80;
+
+				stages[1].bundle[0].image[0] = tr.lightmaps[shader.lightmapIndex];
+				stages[1].bundle[0].isLightmap = qtrue;
+				stages[1].active = qtrue;
+				stages[1].rgbGen = CGEN_IDENTITY;
+				stages[1].stateBits = GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO | GLS_DEPTHFUNC_EQUAL;
+			}
+			else if ( shader.lightmapIndex == LIGHTMAP_BY_VERTEX )
+			{
+				stages[0].bundle[0].image[0] = image;
+				stages[0].active = qtrue;
+				stages[0].rgbGen = CGEN_EXACT_VERTEX;
+				stages[0].alphaGen = AGEN_SKIP;
+				stages[0].stateBits = GLS_DEFAULT | GLS_ATEST_GE_80;
+			}
+			else
+			{
+				/* LIGHTMAP_WHITEIMAGE path: keep fullbright behavior but with cutout alpha. */
+				stages[0].bundle[0].image[0] = image;
+				stages[0].active = qtrue;
+				stages[0].rgbGen = CGEN_IDENTITY_LIGHTING;
+				stages[0].alphaGen = AGEN_SKIP;
+				stages[0].stateBits = GLS_DEFAULT | GLS_ATEST_GE_80;
+			}
+
 			shader.sort = SS_SEE_THROUGH;
 			return FinishShader();
 		}
