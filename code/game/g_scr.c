@@ -69,6 +69,13 @@ typedef enum {
     G_SCR_HUD_SCOPE_TEAM
 } G_ScrHudScope_t;
 
+typedef enum {
+    G_SCR_HUD_TIMER_NONE = 0,
+    G_SCR_HUD_TIMER_DOWN,
+    G_SCR_HUD_TIMER_UP,
+    G_SCR_HUD_TIMER_TENTHS_DOWN
+} G_ScrHudTimerMode_t;
+
 typedef struct {
     qboolean      inuse;
     int           id;      /* 1..G_SCR_MAX_HUDELEMS */
@@ -82,6 +89,10 @@ typedef struct {
     int           height;
     char          text[ 128 ];
     char          shader[ MAX_QPATH ];
+    G_ScrHudTimerMode_t timerMode;
+    int           timerBaseMs;
+    int           timerStartMs;
+    int           timerLastValue;
 } G_ScrHudElem_t;
 
 static G_ScrHudElem_t g_scrHudElems[ G_SCR_MAX_HUDELEMS ];
@@ -1286,7 +1297,123 @@ static void G_Scr_Hud_ReadCommonFields( gsc_Context *ctx, int selfObjIdx, G_ScrH
     }
 }
 
-static int GScr_Meth_Hud_SetValue( gsc_Context *ctx );
+static void G_Scr_Hud_ClearTimer( G_ScrHudElem_t *hud )
+{
+    if ( !hud ) {
+        return;
+    }
+    hud->timerMode = G_SCR_HUD_TIMER_NONE;
+    hud->timerBaseMs = 0;
+    hud->timerStartMs = 0;
+    hud->timerLastValue = -1;
+}
+
+static void G_Scr_Hud_FormatClockSeconds( int totalSeconds, char *out, int outSize )
+{
+    int minutes;
+    int seconds;
+
+    if ( totalSeconds < 0 ) {
+        totalSeconds = 0;
+    }
+
+    minutes = totalSeconds / 60;
+    seconds = totalSeconds % 60;
+    Com_sprintf( out, outSize, "%d:%02d", minutes, seconds );
+}
+
+static void G_Scr_Hud_FormatClockTenths( int totalTenths, char *out, int outSize )
+{
+    int totalSeconds;
+    int minutes;
+    int seconds;
+    int tenths;
+
+    if ( totalTenths < 0 ) {
+        totalTenths = 0;
+    }
+
+    totalSeconds = totalTenths / 10;
+    tenths = totalTenths % 10;
+    minutes = totalSeconds / 60;
+    seconds = totalSeconds % 60;
+    Com_sprintf( out, outSize, "%d:%02d.%d", minutes, seconds, tenths );
+}
+
+static qboolean G_Scr_Hud_UpdateTimerText( G_ScrHudElem_t *hud, qboolean forceSend )
+{
+    int elapsedMs;
+    int displayValue;
+
+    if ( !hud || !hud->inuse || hud->timerMode == G_SCR_HUD_TIMER_NONE ) {
+        return qfalse;
+    }
+
+    elapsedMs = level.time - hud->timerStartMs;
+    if ( elapsedMs < 0 ) {
+        elapsedMs = 0;
+    }
+
+    switch ( hud->timerMode ) {
+        case G_SCR_HUD_TIMER_DOWN:
+        {
+            int remainingMs = hud->timerBaseMs - elapsedMs;
+            if ( remainingMs < 0 ) {
+                remainingMs = 0;
+            }
+            displayValue = ( remainingMs + 999 ) / 1000; /* ceil */
+            if ( !forceSend && displayValue == hud->timerLastValue ) {
+                return qfalse;
+            }
+            hud->timerLastValue = displayValue;
+            G_Scr_Hud_FormatClockSeconds( displayValue, hud->text, sizeof( hud->text ) );
+            G_Scr_Hud_SendUpdate( hud );
+            return qtrue;
+        }
+
+        case G_SCR_HUD_TIMER_UP:
+            displayValue = ( hud->timerBaseMs + elapsedMs ) / 1000; /* floor */
+            if ( !forceSend && displayValue == hud->timerLastValue ) {
+                return qfalse;
+            }
+            hud->timerLastValue = displayValue;
+            G_Scr_Hud_FormatClockSeconds( displayValue, hud->text, sizeof( hud->text ) );
+            G_Scr_Hud_SendUpdate( hud );
+            return qtrue;
+
+        case G_SCR_HUD_TIMER_TENTHS_DOWN:
+        {
+            int remainingMs = hud->timerBaseMs - elapsedMs;
+            if ( remainingMs < 0 ) {
+                remainingMs = 0;
+            }
+            displayValue = ( remainingMs + 99 ) / 100; /* ceil to tenths */
+            if ( !forceSend && displayValue == hud->timerLastValue ) {
+                return qfalse;
+            }
+            hud->timerLastValue = displayValue;
+            G_Scr_Hud_FormatClockTenths( displayValue, hud->text, sizeof( hud->text ) );
+            G_Scr_Hud_SendUpdate( hud );
+            return qtrue;
+        }
+
+        default:
+            return qfalse;
+    }
+}
+
+static void G_Scr_Hud_UpdateTimers( void )
+{
+    int i;
+
+    for ( i = 0; i < G_SCR_MAX_HUDELEMS; i++ ) {
+        G_ScrHudElem_t *hud = &g_scrHudElems[ i ];
+        if ( !hud->inuse || hud->timerMode == G_SCR_HUD_TIMER_NONE ) {
+            continue;
+        }
+        G_Scr_Hud_UpdateTimerText( hud, qfalse );
+    }
+}
 
 static int GScr_Meth_Hud_SetText( gsc_Context *ctx )
 {
@@ -1300,6 +1427,7 @@ static int GScr_Meth_Hud_SetText( gsc_Context *ctx )
 
     text = ( gsc_numargs( ctx ) > 0 ) ? gsc_get_string( ctx, 0 ) : "";
     Q_strncpyz( hud->text, text ? text : "", sizeof( hud->text ) );
+    G_Scr_Hud_ClearTimer( hud );
     G_Scr_Hud_ReadCommonFields( ctx, selfObjIdx, hud );
     G_Scr_Hud_SendUpdate( hud );
     return 0;
@@ -1332,17 +1460,83 @@ static int GScr_Meth_Hud_SetShader( gsc_Context *ctx )
 
 static int GScr_Meth_Hud_SetTimer( gsc_Context *ctx )
 {
-    return GScr_Meth_Hud_SetValue( ctx );
+    int             selfObjIdx;
+    float           seconds = 0.0f;
+    G_ScrHudElem_t *hud = G_Scr_Hud_FromSelf( ctx, &selfObjIdx );
+
+    if ( !hud ) {
+        return 0;
+    }
+
+    if ( gsc_numargs( ctx ) > 0 ) {
+        seconds = gsc_get_float( ctx, 0 );
+    }
+    if ( seconds < 0.0f ) {
+        seconds = 0.0f;
+    }
+
+    hud->timerMode = G_SCR_HUD_TIMER_DOWN;
+    hud->timerBaseMs = (int)( seconds * 1000.0f + 0.5f );
+    hud->timerStartMs = level.time;
+    hud->timerLastValue = -1;
+
+    G_Scr_Hud_ReadCommonFields( ctx, selfObjIdx, hud );
+    G_Scr_Hud_UpdateTimerText( hud, qtrue );
+    return 0;
 }
 
 static int GScr_Meth_Hud_SetTimerUp( gsc_Context *ctx )
 {
-    return GScr_Meth_Hud_SetValue( ctx );
+    int             selfObjIdx;
+    float           seconds = 0.0f;
+    G_ScrHudElem_t *hud = G_Scr_Hud_FromSelf( ctx, &selfObjIdx );
+
+    if ( !hud ) {
+        return 0;
+    }
+
+    if ( gsc_numargs( ctx ) > 0 ) {
+        seconds = gsc_get_float( ctx, 0 );
+    }
+    if ( seconds < 0.0f ) {
+        seconds = 0.0f;
+    }
+
+    hud->timerMode = G_SCR_HUD_TIMER_UP;
+    hud->timerBaseMs = (int)( seconds * 1000.0f + 0.5f );
+    hud->timerStartMs = level.time;
+    hud->timerLastValue = -1;
+
+    G_Scr_Hud_ReadCommonFields( ctx, selfObjIdx, hud );
+    G_Scr_Hud_UpdateTimerText( hud, qtrue );
+    return 0;
 }
 
 static int GScr_Meth_Hud_SetTenthsTimer( gsc_Context *ctx )
 {
-    return GScr_Meth_Hud_SetValue( ctx );
+    int             selfObjIdx;
+    float           seconds = 0.0f;
+    G_ScrHudElem_t *hud = G_Scr_Hud_FromSelf( ctx, &selfObjIdx );
+
+    if ( !hud ) {
+        return 0;
+    }
+
+    if ( gsc_numargs( ctx ) > 0 ) {
+        seconds = gsc_get_float( ctx, 0 );
+    }
+    if ( seconds < 0.0f ) {
+        seconds = 0.0f;
+    }
+
+    hud->timerMode = G_SCR_HUD_TIMER_TENTHS_DOWN;
+    hud->timerBaseMs = (int)( seconds * 1000.0f + 0.5f );
+    hud->timerStartMs = level.time;
+    hud->timerLastValue = -1;
+
+    G_Scr_Hud_ReadCommonFields( ctx, selfObjIdx, hud );
+    G_Scr_Hud_UpdateTimerText( hud, qtrue );
+    return 0;
 }
 
 static int GScr_Meth_Hud_SetValue( gsc_Context *ctx )
@@ -1366,6 +1560,7 @@ static int GScr_Meth_Hud_SetValue( gsc_Context *ctx )
         hud->text[0] = '\0';
     }
 
+    G_Scr_Hud_ClearTimer( hud );
     G_Scr_Hud_ReadCommonFields( ctx, selfObjIdx, hud );
     G_Scr_Hud_SendUpdate( hud );
     return 0;
@@ -2498,6 +2693,7 @@ void G_Scr_Frame( float dt )
         return;
     }
     gsc_update( g_scrCtx, dt );
+    G_Scr_Hud_UpdateTimers();
 }
 
 /* =========================================================================
