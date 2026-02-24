@@ -2968,6 +2968,193 @@ static int GScr_Fn_AmbientStop( gsc_Context *ctx ) { (void)ctx; return 0; }
 /* setCullFog — client-side, no-op on server */
 static int GScr_Fn_SetCullFog( gsc_Context *ctx ) { (void)ctx; return 0; }
 
+/* =========================================================================
+   Team score functions for CoD1 GSC compatibility
+   ========================================================================= */
+
+/* Helper: convert team string to team_t (reuses existing G_Scr_StringToTeam logic) */
+static team_t G_Scr_ParseTeamArg( gsc_Context *ctx, int argIdx )
+{
+    const char *team;
+    if ( gsc_numargs( ctx ) <= argIdx ) {
+        return TEAM_FREE;
+    }
+    team = gsc_get_string( ctx, argIdx );
+    if ( !Q_stricmp( team, "allies" ) || !Q_stricmp( team, "red" ) ) {
+        return TEAM_RED;
+    }
+    if ( !Q_stricmp( team, "axis" ) || !Q_stricmp( team, "blue" ) ) {
+        return TEAM_BLUE;
+    }
+    return TEAM_FREE;
+}
+
+/* setTeamScore(team, score) — directly set team score (CoD1) */
+static int GScr_Fn_SetTeamScore( gsc_Context *ctx )
+{
+    team_t team;
+    int    score;
+
+    if ( gsc_numargs( ctx ) < 2 ) {
+        return 0;
+    }
+
+    team  = G_Scr_ParseTeamArg( ctx, 0 );
+    score = (int)gsc_get_int( ctx, 1 );
+
+    if ( team >= TEAM_RED && team < TEAM_NUM_TEAMS ) {
+        level.teamScores[ team ] = score;
+        CalculateRanks();
+    }
+    return 0;
+}
+
+/* getTeamScore(team) — returns current team score (CoD1) */
+static int GScr_Fn_GetTeamScore( gsc_Context *ctx )
+{
+    team_t team = G_Scr_ParseTeamArg( ctx, 0 );
+
+    if ( team >= TEAM_RED && team < TEAM_NUM_TEAMS ) {
+        gsc_add_int( ctx, level.teamScores[ team ] );
+    } else {
+        gsc_add_int( ctx, 0 );
+    }
+    return 1;
+}
+
+/* =========================================================================
+   Objective system for CoD1 GSC compatibility
+   ========================================================================= */
+
+/* objective_add(id, type, ...) — stub: objective tracking not fully implemented */
+static int GScr_Fn_Objective_Add( gsc_Context *ctx )
+{
+    int objId;
+
+    if ( gsc_numargs( ctx ) < 1 ) {
+        return 0;
+    }
+
+    objId = (int)gsc_get_int( ctx, 0 );
+    if ( objId < 0 || objId >= G_SCR_MAX_OBJECTIVES ) {
+        return 0;
+    }
+
+    /* Mark objective as active (further state tracking can be added later) */
+    g_scrObjectives[ objId ].inuse = qtrue;
+
+    return 0;
+}
+
+/* objective_delete(id) — deactivates an objective */
+static int GScr_Fn_Objective_Delete( gsc_Context *ctx )
+{
+    int objId;
+
+    if ( gsc_numargs( ctx ) < 1 ) {
+        return 0;
+    }
+
+    objId = (int)gsc_get_int( ctx, 0 );
+    if ( objId >= 0 && objId < G_SCR_MAX_OBJECTIVES ) {
+        g_scrObjectives[ objId ].inuse = qfalse;
+    }
+    return 0;
+}
+
+/* objective_state(id, state) — stub: state tracking (0=hidden, 1=active, 2=done) */
+static int GScr_Fn_Objective_State( gsc_Context *ctx )
+{
+    (void)ctx;
+    /* Objective state tracking can be added if needed by scripts */
+    return 0;
+}
+
+/* objective_position(id, origin) — stores objective position */
+static int GScr_Fn_Objective_Position( gsc_Context *ctx )
+{
+    int objId;
+
+    if ( gsc_numargs( ctx ) < 2 ) {
+        return 0;
+    }
+
+    objId = (int)gsc_get_int( ctx, 0 );
+    if ( objId < 0 || objId >= G_SCR_MAX_OBJECTIVES ) {
+        return 0;
+    }
+
+    /* Use gsc_get_vec3 to directly parse the vector argument */
+    gsc_get_vec3( ctx, 1, g_scrObjectives[ objId ].origin );
+
+    return 0;
+}
+
+/* objective_icon(id, shader) — stores objective icon shader name */
+static int GScr_Fn_Objective_Icon( gsc_Context *ctx )
+{
+    int         objId;
+    const char *shader;
+
+    if ( gsc_numargs( ctx ) < 2 ) {
+        return 0;
+    }
+
+    objId  = (int)gsc_get_int( ctx, 0 );
+    shader = gsc_get_string( ctx, 1 );
+
+    if ( objId >= 0 && objId < G_SCR_MAX_OBJECTIVES ) {
+        Q_strncpyz( g_scrObjectives[ objId ].icon, shader, MAX_QPATH );
+    }
+    return 0;
+}
+
+/* objective_team(id, team) — stores objective team */
+static int GScr_Fn_Objective_Team( gsc_Context *ctx )
+{
+    int    objId;
+    team_t team;
+
+    if ( gsc_numargs( ctx ) < 2 ) {
+        return 0;
+    }
+
+    objId = (int)gsc_get_int( ctx, 0 );
+    team  = G_Scr_ParseTeamArg( ctx, 1 );
+
+    if ( objId >= 0 && objId < G_SCR_MAX_OBJECTIVES ) {
+        g_scrObjectives[ objId ].team = (int)team;
+    }
+    return 0;
+}
+
+/* objective_onentity(id, entity) — attaches objective to an entity */
+static int GScr_Fn_Objective_OnEntity( gsc_Context *ctx )
+{
+    int objId;
+    int entNum;
+
+    if ( gsc_numargs( ctx ) < 2 ) {
+        return 0;
+    }
+
+    objId = (int)gsc_get_int( ctx, 0 );
+
+    if ( gsc_get_type( ctx, 1 ) == GSC_TYPE_OBJECT ) {
+        int obj = gsc_get_object( ctx, 1 );
+        gsc_object_get_field( ctx, obj, "entitynum" );
+        if ( gsc_type( ctx, -1 ) != GSC_TYPE_UNDEFINED ) {
+            entNum = (int)gsc_get_int( ctx, -1 );
+            if ( objId >= 0 && objId < G_SCR_MAX_OBJECTIVES ) {
+                g_scrObjectives[ objId ].entNum = entNum;
+            }
+        }
+        gsc_pop( ctx, 1 );
+    }
+
+    return 0;
+}
+
 /* maps_mp_gametypes_callbacksetup compatibility stubs */
 static int GScr_Fn_GetMaxPlayers( gsc_Context *ctx )
 {
@@ -3057,6 +3244,19 @@ static void G_Scr_RegisterFunctions( void )
     gsc_register_function( g_scrCtx, NULL, "playfx",       GScr_Fn_PlayFx );
     gsc_register_function( g_scrCtx, NULL, "playfxontag",  GScr_Fn_PlayFxOnTag );
     gsc_register_function( g_scrCtx, NULL, "precachemenu", GScr_Fn_PrecacheMenu );
+
+    /* Team score functions (CoD1) */
+    gsc_register_function( g_scrCtx, NULL, "setteamscore", GScr_Fn_SetTeamScore );
+    gsc_register_function( g_scrCtx, NULL, "getteamscore", GScr_Fn_GetTeamScore );
+
+    /* Objective functions (CoD1) */
+    gsc_register_function( g_scrCtx, NULL, "objective_add",        GScr_Fn_Objective_Add );
+    gsc_register_function( g_scrCtx, NULL, "objective_delete",     GScr_Fn_Objective_Delete );
+    gsc_register_function( g_scrCtx, NULL, "objective_state",      GScr_Fn_Objective_State );
+    gsc_register_function( g_scrCtx, NULL, "objective_position",   GScr_Fn_Objective_Position );
+    gsc_register_function( g_scrCtx, NULL, "objective_icon",       GScr_Fn_Objective_Icon );
+    gsc_register_function( g_scrCtx, NULL, "objective_team",       GScr_Fn_Objective_Team );
+    gsc_register_function( g_scrCtx, NULL, "objective_onentity",   GScr_Fn_Objective_OnEntity );
     gsc_register_function( g_scrCtx, NULL, "precachestatusicon", GScr_Fn_PrecacheStatusIcon );
     gsc_register_function( g_scrCtx, NULL, "precacheheadicon", GScr_Fn_PrecacheHeadIcon );
     gsc_register_function( g_scrCtx, NULL, "precacheitem", GScr_Fn_PrecacheItem );
@@ -3384,6 +3584,7 @@ void G_Scr_Init( void )
     Com_Memset( g_scrViewModels, 0, sizeof( g_scrViewModels ) );
     Com_Memset( g_scrFxNames, 0, sizeof( g_scrFxNames ) );
     g_scrFxCount = 0;
+    Com_Memset( g_scrObjectives, 0, sizeof( g_scrObjectives ) );
     G_Scr_Hud_ResetAll( qfalse );
     g_scrCallbackFile[0] = '\0';
 
@@ -3572,6 +3773,7 @@ void G_Scr_Shutdown( void )
     Com_Memset( g_scrViewModels, 0, sizeof( g_scrViewModels ) );
     Com_Memset( g_scrFxNames, 0, sizeof( g_scrFxNames ) );
     g_scrFxCount = 0;
+    Com_Memset( g_scrObjectives, 0, sizeof( g_scrObjectives ) );
     g_scrEntityProxyObj = NULL;
     g_scrPlayerProxyObj = NULL;
     g_scrHudElemProxyObj = NULL;
