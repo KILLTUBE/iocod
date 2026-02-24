@@ -482,112 +482,133 @@ static void PM_WaterJumpMove( void ) {
 	}
 }
 
+// Forward declarations needed by PM_LadderMove
+static void PM_AirMove( void );
+
 /*
 ===================
 PM_LadderMove
 
-CoD1 ladder movement, reverse-engineered from game.mp.i386.so:
-- Pitch (pml.forward[2]) drives climb direction via upscale
-- forwardmove → vertical velocity; rightmove → horizontal at 0.2 scale
-- When airborne on ladder: lateral friction + push-back toward surface
-- After move: clamp yaw to ±75° from ladder facing direction
+Source: CoD2 bgame/bg_pmove.cpp PM_LadderMove, adapted for Q3 data structures.
+CoD1 game.mp.i386.so confirms same algorithm.
 ===================
 */
 static void PM_LadderMove( void ) {
-	vec3_t	flatforward;	// horizontal-only direction toward ladder
 	vec3_t	wishvel, wishdir;
-	vec3_t	angles;
-	float	wishspeed, upscale;
-	float	dot, ladderSlip;
-	float	pushSpeed;
-	float	right2d[2];
-	float	right2dLen;
-	float	targetYaw, delta;
+	vec3_t	vTempRight;
+	float	upscale, scale, wishspeed;
+	float	fSideSpeed, fSpeedDrop;
+	float	right2d[2], right2dLen;
+	float	dot, vz2, vxy2;
+	int		moveyaw;
 
-	// Upscale converts pitch into a climb fraction: [-1 = full down, +1 = full up].
-	// pml.forward[2]: +1 when looking straight up, -1 when looking straight down.
-	// The 0.25 bias means looking level still results in slight upward tendency.
-	upscale = (pml.forward[2] + 0.25f) * 2.5f;
+	// Jump while on ladder: exit ladder and go airborne
+	if ( PM_CheckJump() ) {
+		pm->ps->pm_flags &= ~PMF_ON_LADDER;
+		pm->ps->pm_flags |= PMF_TIME_LADDER;
+		pm->ps->pm_time = pm_ladderJumpTime;
+		PM_AirMove();
+		return;
+	}
+
+	// upscale: converts pitch (pml.forward[2]) into climb fraction [-1=down, +1=up].
+	// +0.25 bias: looking horizontally gives slight upward tendency.
+	upscale = ( pml.forward[2] + 0.25f ) * 2.5f;
 	if ( upscale >  1.0f ) upscale =  1.0f;
 	if ( upscale < -1.0f ) upscale = -1.0f;
 
-	// Horizontal-only forward (toward the ladder face, z = 0)
-	flatforward[0] = pml.forward[0];
-	flatforward[1] = pml.forward[1];
-	flatforward[2] = 0.0f;
-	VectorNormalize( flatforward );
+	// Flatten forward/right to horizontal plane (z=0)
+	pml.forward[2] = 0.0f;
+	VectorNormalize( pml.forward );
 
+	vTempRight[0] = pml.right[0];
+	vTempRight[1] = pml.right[1];
+	vTempRight[2] = 0.0f;
+	VectorNormalize( vTempRight );
+	// Project right onto ladder plane (remove component along ladder normal)
+	ProjectPointOnPlane( pml.right, pml.ladderNormal, vTempRight );
+
+	scale = PM_CmdScale( &pm->cmd );
 	VectorClear( wishvel );
 
-	// forwardmove → vertical movement scaled by look direction
+	// forwardmove: vertical wish via upscale (0.5 * scale matches CoD2 source)
 	if ( pm->cmd.forwardmove ) {
-		wishvel[2] = upscale * pm->ps->speed * pm_ladderScale *
-		             ( (float)pm->cmd.forwardmove / 127.0f );
+		wishvel[2] = upscale * 0.5f * scale * pm->cmd.forwardmove;
 	}
 
-	// rightmove → horizontal strafe at 0.2 scale projected onto ladder right
+	// rightmove: horizontal wish at 0.2 scale along ladder-plane right
 	if ( pm->cmd.rightmove ) {
-		float rscale = 0.2f * pm->ps->speed * pm_ladderScale *
-		               ( (float)pm->cmd.rightmove / 127.0f );
-		wishvel[0] += rscale * pml.right[0];
-		wishvel[1] += rscale * pml.right[1];
+		VectorMA( wishvel, scale * 0.2f * pm->cmd.rightmove, pml.right, wishvel );
 	}
 
 	wishspeed = VectorNormalize2( wishvel, wishdir );
-	PM_Accelerate( wishdir, wishspeed, pm_ladderfriction );
+	PM_Accelerate( wishdir, wishspeed, pm_accelerate );
 
-	if ( !pml.walking ) {
-		// Airborne on ladder: apply lateral friction to stop sideways drift,
-		// then push player toward the ladder surface.
-
-		if ( !pm->cmd.rightmove ) {
-			// Lateral friction: project velocity onto normalized 2D right vector,
-			// damp that component (matching CoD1's ladder friction formula).
-			right2d[0] = pml.right[0];
-			right2d[1] = pml.right[1];
-			right2dLen = (float)sqrt( right2d[0]*right2d[0] + right2d[1]*right2d[1] );
-			if ( right2dLen > 0.001f ) {
-				right2d[0] /= right2dLen;
-				right2d[1] /= right2dLen;
-			}
-			dot = pm->ps->velocity[0] * right2d[0] + pm->ps->velocity[1] * right2d[1];
-			if ( dot != 0.0f ) {
-				// Remove the lateral component
-				pm->ps->velocity[0] -= dot * right2d[0];
-				pm->ps->velocity[1] -= dot * right2d[1];
-
-				// Compute friction impulse
-				ladderSlip = dot * pml.frametime * pm_ladderfriction;
-				if ( fabs(dot) > fabs(ladderSlip) ) {
-					if ( fabs(ladderSlip) > 1.0f ) {
-						dot -= ladderSlip;
-					}
-					// Re-add damped lateral component
-					pm->ps->velocity[0] += dot * right2d[0];
-					pm->ps->velocity[1] += dot * right2d[1];
-				}
-				// else |dot| <= |ladderSlip|: component stays zeroed
-			}
+	// No forwardmove: decay vertical velocity toward zero (gravity-damped hold)
+	if ( !pm->cmd.forwardmove ) {
+		if ( pm->ps->velocity[2] > 0.0f ) {
+			pm->ps->velocity[2] -= pm->ps->gravity * pml.frametime;
+			if ( pm->ps->velocity[2] < 0.0f ) pm->ps->velocity[2] = 0.0f;
+		} else {
+			pm->ps->velocity[2] += pm->ps->gravity * pml.frametime;
+			if ( pm->ps->velocity[2] > 0.0f ) pm->ps->velocity[2] = 0.0f;
 		}
+	}
 
-		// Push player back toward the ladder surface each frame.
-		// Climbing up: stronger push (-500), descending: lighter (-250).
-		// pml.ladderNormal points away from wall (outward), so negative = into wall.
-		pushSpeed = ( wishvel[2] > 0.0f ) ? -500.0f : -250.0f;
-		pm->ps->velocity[0] += pml.ladderNormal[0] * pushSpeed;
-		pm->ps->velocity[1] += pml.ladderNormal[1] * pushSpeed;
+	// No rightmove: lateral friction - damp velocity along the right axis
+	if ( !pm->cmd.rightmove ) {
+		right2d[0] = pml.right[0];
+		right2d[1] = pml.right[1];
+		right2dLen = (float)sqrt( right2d[0]*right2d[0] + right2d[1]*right2d[1] );
+		if ( right2dLen > 0.001f ) {
+			right2d[0] /= right2dLen;
+			right2d[1] /= right2dLen;
+		}
+		fSideSpeed = right2d[0]*pm->ps->velocity[0] + right2d[1]*pm->ps->velocity[1];
+		if ( fSideSpeed != 0.0f ) {
+			// Strip lateral component, then re-add a friction-damped version
+			pm->ps->velocity[0] -= fSideSpeed * right2d[0];
+			pm->ps->velocity[1] -= fSideSpeed * right2d[1];
+			fSpeedDrop = fSideSpeed * pml.frametime * pm_ladderfriction;
+			if ( fabs( fSideSpeed ) > fabs( fSpeedDrop ) ) {
+				if ( fabs( fSpeedDrop ) < 1.0f ) {
+					fSpeedDrop = ( fSpeedDrop >= 0.0f ) ? 1.0f : -1.0f;
+				}
+				pm->ps->velocity[0] += ( fSideSpeed - fSpeedDrop ) * right2d[0];
+				pm->ps->velocity[1] += ( fSideSpeed - fSpeedDrop ) * right2d[1];
+			}
+			// else: |side| <= |drop|, component stays zeroed (full stop)
+		}
+	}
+
+	// Airborne on ladder: keep player pressed against the surface
+	if ( !pml.walking ) {
+		// Remove velocity component going through the wall
+		dot = pml.ladderNormal[0]*pm->ps->velocity[0] + pml.ladderNormal[1]*pm->ps->velocity[1];
+		pm->ps->velocity[0] -= dot * pml.ladderNormal[0];
+		pm->ps->velocity[1] -= dot * pml.ladderNormal[1];
+
+		// If moving more vertically than horizontally, push into the ladder
+		vz2  = pm->ps->velocity[2] * pm->ps->velocity[2];
+		vxy2 = pm->ps->velocity[0]*pm->ps->velocity[0] + pm->ps->velocity[1]*pm->ps->velocity[1];
+		if ( vz2 >= vxy2 ) {
+			pm->ps->velocity[0] -= 50.0f * pml.ladderNormal[0];
+			pm->ps->velocity[1] -= 50.0f * pml.ladderNormal[1];
+		}
 	}
 
 	PM_StepSlideMove( qfalse );
 
-	// Clamp player yaw to ±75° of the direction facing the ladder.
-	// flatforward points toward the ladder, so targetYaw = its yaw + 180 (face it).
-	vectoangles( flatforward, angles );
-	targetYaw = AngleMod( angles[YAW] + 180.0f );
-	delta = AngleDelta( targetYaw, pm->ps->viewangles[YAW] );
-	if ( delta >  75.0f ) delta =  75.0f;
-	if ( delta < -75.0f ) delta = -75.0f;
-	pm->ps->delta_angles[YAW] = ANGLE2SHORT( delta ) - pm->cmd.angles[YAW];
+	// Yaw movement direction for animations (clamped to +-75 from ladder face).
+	// CoD2: writes to ps->movementDir as signed char (not delta_angles).
+	{
+		vec3_t ladderAngles;
+		vectoangles( pml.ladderNormal, ladderAngles );
+		moveyaw = (int)AngleDelta( ladderAngles[YAW] + 180.0f, pm->ps->viewangles[YAW] );
+	}
+	if ( moveyaw >  75 ) moveyaw =  75;
+	if ( moveyaw < -75 ) moveyaw = -75;
+	pm->ps->movementDir = (signed char)moveyaw;
 }
 
 /*
@@ -1328,38 +1349,78 @@ static void PM_GroundTrace( void ) {
 /*
 ===================
 PM_CheckLadder
+
+Source: CoD2 bgame/bg_pmove.cpp PM_CheckLadderMove, adapted for Q3.
+Key details:
+ - Shrunk trace bounds (mins+6 XY, maxs-6 XY, mins[2]=8) to avoid false positives
+ - 8-unit range when walking, 30-unit range when airborne
+ - Airborne-while-on-ladder: trace back along stored normal to stay on
+ - Two-trace confirmation when first grabbing: forward hit + backward re-check
+ - PMF_TIME_LADDER (set on jump) blocks re-grab for pm_ladderJumpTime ms
 ===================
 */
 static void PM_CheckLadder( void ) {
-	vec3_t	flatforward, point;
+	vec3_t	checkDir, spot;
 	trace_t	trace;
+	vec3_t	lmins, lmaxs;
+	float	traceDist;
+	qboolean airborneOnLadder;
 
 	if ( pm->ps->pm_flags & PMF_TIME_LADDER ) {
 		return;
 	}
+	if ( pm->ps->pm_type >= PM_DEAD ) {
+		pm->ps->pm_flags &= ~PMF_ON_LADDER;
+		VectorClear( pml.ladderNormal );
+		return;
+	}
 
-	flatforward[0] = pml.forward[0];
-	flatforward[1] = pml.forward[1];
-	flatforward[2] = 0;
-	if ( VectorNormalize (flatforward) == 0 ) {
-		// looking straight up or down, use the previous forward if we are already on a ladder
-		if ( pm->ps->pm_flags & PMF_ON_LADDER ) {
-			// for now just allow it, maybe it will keep us on
-		} else {
-			return;
+	// Shrunk bounds for trace: avoids catching ladders at the player's corners
+	VectorCopy( pm->mins, lmins );
+	VectorCopy( pm->maxs, lmaxs );
+	lmins[0] += 6.0f;  lmins[1] += 6.0f;  lmins[2] = 8.0f;
+	lmaxs[0] -= 6.0f;  lmaxs[1] -= 6.0f;
+	if ( lmins[2] > lmaxs[2] ) lmaxs[2] = lmins[2];
+
+	traceDist = pml.walking ? 8.0f : 30.0f;
+
+	// When airborne while on ladder, search toward the stored ladder surface
+	// to prevent falling off when not pressing forward.
+	airborneOnLadder = ( pm->ps->pm_flags & PMF_ON_LADDER ) &&
+	                   ( pm->ps->groundEntityNum == ENTITYNUM_NONE );
+	if ( airborneOnLadder ) {
+		VectorNegate( pml.ladderNormal, checkDir );
+	} else {
+		checkDir[0] = pml.forward[0];
+		checkDir[1] = pml.forward[1];
+		checkDir[2] = 0.0f;
+		if ( VectorNormalize( checkDir ) == 0 ) {
+			// Looking straight up/down with no stored normal: give up
+			if ( !(pm->ps->pm_flags & PMF_ON_LADDER) ) return;
+			VectorNegate( pml.ladderNormal, checkDir );
 		}
 	}
 
-	VectorMA (pm->ps->origin, 1.0, flatforward, point);
+	VectorMA( pm->ps->origin, traceDist, checkDir, spot );
+	pm->trace( &trace, pm->ps->origin, lmins, lmaxs, spot, pm->ps->clientNum, pm->tracemask );
 
-	pm->trace (&trace, pm->ps->origin, pm->mins, pm->maxs, point, pm->ps->clientNum, pm->tracemask);
-
-	if ( trace.fraction < 1.0 && (trace.surfaceFlags & SURF_LADDER) ) {
-		// If we are already on a ladder, or if we are moving forward into one
-		if ( (pm->ps->pm_flags & PMF_ON_LADDER) || pm->cmd.forwardmove > 0 ) {
-			pm->ps->pm_flags |= PMF_ON_LADDER;
-			// Save the outward ladder surface normal for PM_LadderMove push-back
+	if ( trace.fraction < 1.0f && ( trace.surfaceFlags & SURF_LADDER ) ) {
+		if ( !pml.walking || pm->cmd.forwardmove > 0 ) {
+			if ( pm->ps->pm_flags & PMF_ON_LADDER ) {
+				// Already on ladder: update normal and done
+				VectorCopy( trace.plane.normal, pml.ladderNormal );
+				return;
+			}
+			// First contact: do a second trace going INTO the ladder to confirm
+			// the player is truly pressed against it (not just passing by).
 			VectorCopy( trace.plane.normal, pml.ladderNormal );
+			VectorNegate( pml.ladderNormal, checkDir );
+			VectorMA( pm->ps->origin, traceDist, checkDir, spot );
+			pm->trace( &trace, pm->ps->origin, lmins, lmaxs, spot, pm->ps->clientNum, pm->tracemask );
+			if ( trace.fraction < 1.0f && ( trace.surfaceFlags & SURF_LADDER ) ) {
+				pm->ps->pm_flags |= PMF_ON_LADDER;
+				VectorCopy( trace.plane.normal, pml.ladderNormal );
+			}
 		}
 	} else {
 		pm->ps->pm_flags &= ~PMF_ON_LADDER;

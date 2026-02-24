@@ -27,7 +27,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	STEPSIZE		39			// CoD1: 39 (Q3: 18), confirmed from game.mp.i386.so rodata
 #define	JUMP_HEIGHT		39.0f		// CoD1 jump height in game units; velocity = sqrt(2*h*gravity)
 
-#define	JUMP_VELOCITY	270
+// JUMP_VELOCITY removed: CoD1 computes it as sqrt(2 * JUMP_HEIGHT * ps->gravity)
 
 #define	TIMER_LAND		130
 #define	TIMER_GESTURE	(34*66+50)
