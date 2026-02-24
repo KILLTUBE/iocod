@@ -2420,7 +2420,12 @@ void G_Scr_Init( void )
             G_Printf( "GSC: error in %s::main (status %d)\n",
                       gametypeScript, status );
         }
-        while ( gsc_update( g_scrCtx, 0.0f ) == GSC_YIELD ) {}
+        /*
+         * Do a single startup tick.
+         * Gametype scripts spawn persistent threads (score/time updates, etc.);
+         * draining until !YIELD here deadlocks map init.
+         */
+        gsc_update( g_scrCtx, 0.0f );
     }
 
     if ( mapOk ) {
@@ -2429,12 +2434,12 @@ void G_Scr_Init( void )
             G_Printf( "GSC: error in %s::main (status %d)\n",
                       mapScript, status );
         }
-        while ( gsc_update( g_scrCtx, 0.0f ) == GSC_YIELD ) {}
+        gsc_update( g_scrCtx, 0.0f );
     }
 
     if ( g_scrCallbackFile[0] ) {
         G_Scr_ExecCallback( "CodeCallback_StartGameType" );
-        while ( gsc_update( g_scrCtx, 0.0f ) == GSC_YIELD ) {}
+        gsc_update( g_scrCtx, 0.0f );
     }
 }
 
