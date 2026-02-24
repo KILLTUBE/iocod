@@ -276,15 +276,39 @@ void IN_Button15Down(void) {IN_KeyDown(&in_buttons[15]);}
 void IN_Button15Up(void) {IN_KeyUp(&in_buttons[15]);}
 
 void IN_GoCrouch( void ) {
-	IN_KeyUp( &in_buttons[12] );  // clear prone latch
-	IN_KeyUp( &in_buttons[13] );  // clear stand latch
-	IN_KeyDown( &in_buttons[11] );
+	qboolean isProne  = ( cl.snap.valid && (cl.snap.ps.pm_flags & PMF_PRONE)  ) ? qtrue : qfalse;
+	qboolean isDucked = ( cl.snap.valid && (cl.snap.ps.pm_flags & PMF_DUCKED) ) ? qtrue : qfalse;
+
+	IN_KeyUp( &in_buttons[12] );   /* always release prone latch */
+	IN_KeyUp( &in_buttons[13] );   /* always release stand latch */
+
+	if ( isProne ) {
+		/* prone → crouch: set BUTTON_CROUCH (pmove clears PMF_PRONE when it sees this) */
+		IN_KeyDown( &in_buttons[11] );
+	} else if ( isDucked ) {
+		/* already crouching → stand up: release BUTTON_CROUCH, pmove will clear PMF_DUCKED */
+		IN_KeyUp( &in_buttons[11] );
+	} else {
+		/* standing → crouch */
+		IN_KeyDown( &in_buttons[11] );
+	}
 }
 
 void IN_GoProne( void ) {
-	IN_KeyUp( &in_buttons[11] );  // clear crouch latch
-	IN_KeyUp( &in_buttons[13] );  // clear stand latch
-	IN_KeyDown( &in_buttons[12] );
+	qboolean isProne = ( cl.snap.valid && (cl.snap.ps.pm_flags & PMF_PRONE) ) ? qtrue : qfalse;
+
+	if ( isProne ) {
+		/* prone → stand: release BUTTON_PRONE, send one-shot BUTTON_STAND to
+		 * clear PMF_PRONE in pmove (PMF_PRONE is sticky, mere release isn't enough) */
+		IN_KeyUp( &in_buttons[11] );
+		IN_KeyUp( &in_buttons[12] );
+		in_buttons[13].wasPressed = qtrue;   /* one-shot BUTTON_STAND */
+	} else {
+		/* not prone → go prone */
+		IN_KeyUp( &in_buttons[11] );   /* release crouch */
+		IN_KeyUp( &in_buttons[13] );   /* release stand */
+		IN_KeyDown( &in_buttons[12] );
+	}
 }
 
 // CoD1: +gostand - stand up if crouching, jump if already standing.
