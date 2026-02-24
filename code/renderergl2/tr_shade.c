@@ -1671,7 +1671,14 @@ void RB_StageIteratorGeneric( void )
 	//
 	// set face culling appropriately
 	//
-	if (input->shader->cullType == CT_TWO_SIDED)
+	if ( backEnd.currentEntity && backEnd.currentEntity != &tr.worldEntity &&
+	     ( backEnd.currentEntity->e.renderfx & RF_FIRST_PERSON ) )
+	{
+		/* Keep first-person/viewmodel geometry visible from inside without
+		 * forcing all shared materials to be two-sided. */
+		GL_Cull( CT_TWO_SIDED );
+	}
+	else if (input->shader->cullType == CT_TWO_SIDED)
 	{
 		GL_Cull( CT_TWO_SIDED );
 	}
