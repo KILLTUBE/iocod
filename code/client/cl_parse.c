@@ -495,14 +495,17 @@ void CL_ParseGamestate( msg_t *msg ) {
 		if (clc.compat) {
 			// CoD1 svc values inside gamestate: configstring=2, baseline=3, EOF=7
 			if (cmd == 7) {
+				SHOWNET( msg, "END OF GAMESTATE" );
 				break; // svc_EOF
 			}
 			if (cmd == 2) { // svc_configstring
+				SHOWNET( msg, "svc_configstring" );
 				i = MSG_ReadShort( msg );
 				if ( i < 0 || i >= MAX_CONFIGSTRINGS ) {
 					Com_Error( ERR_DROP, "CL_ParseGamestate: CoD1 configstring index %d out of range", i );
 				}
 				s = MSG_ReadBigString( msg );
+				Com_DPrintf( "  CS[%d] = \"%s\"\n", i, s );
 				len = strlen( s );
 				if ( len + 1 + cl.gameState.dataCount > MAX_GAMESTATE_CHARS ) {
 					Com_Error( ERR_DROP, "MAX_GAMESTATE_CHARS exceeded" );
