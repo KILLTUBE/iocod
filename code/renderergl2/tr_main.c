@@ -623,6 +623,25 @@ static void R_SetFarClip( void )
 	//
 	// set far clipping planes dynamically
 	//
+	if ( tr.viewParms.visBounds[0][0] > tr.viewParms.visBounds[1][0] ||
+	     tr.viewParms.visBounds[0][1] > tr.viewParms.visBounds[1][1] ||
+	     tr.viewParms.visBounds[0][2] > tr.viewParms.visBounds[1][2] )
+	{
+		/* No world bounds were accumulated this frame (can happen in CoD1 cell
+		 * path edge cases). Fall back to the world root bounds instead of using
+		 * cleared bounds, which would explode zFar and depth precision. */
+		if ( tr.world && tr.world->numnodes > 0 )
+		{
+			VectorCopy( tr.world->nodes[0].mins, tr.viewParms.visBounds[0] );
+			VectorCopy( tr.world->nodes[0].maxs, tr.viewParms.visBounds[1] );
+		}
+		else
+		{
+			tr.viewParms.zFar = 2048;
+			return;
+		}
+	}
+
 	farthestCornerDistance = 0;
 	for ( i = 0; i < 8; i++ )
 	{

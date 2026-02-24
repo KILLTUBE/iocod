@@ -339,6 +339,15 @@ static void R_AddWorldSurface( msurface_t *surf, int dlightBits, int pshadowBits
 		pshadowBits = ( pshadowBits != 0 );
 	}
 
+	/* Keep depth precision stable by expanding visBounds from the actual world
+	 * surfaces we add. CoD1 paths don't walk BSP leafs, so without this zFar can
+	 * be computed from cleared bounds and become excessively large. */
+	if ( tr.currentEntityNum == REFENTITYNUM_WORLD && ( surf->cullinfo.type & CULLINFO_BOX ) )
+	{
+		AddPointToBounds( surf->cullinfo.bounds[0], tr.viewParms.visBounds[0], tr.viewParms.visBounds[1] );
+		AddPointToBounds( surf->cullinfo.bounds[1], tr.viewParms.visBounds[0], tr.viewParms.visBounds[1] );
+	}
+
 	R_AddDrawSurf( surf->data, surf->shader, surf->fogIndex, dlightBits, pshadowBits, surf->cubemapIndex );
 }
 

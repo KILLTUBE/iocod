@@ -1758,6 +1758,7 @@ void ParseSort( char **text ) {
 		shader.sort = SS_OPAQUE;
 	}else if ( !Q_stricmp( token, "decal" ) ) {
 		shader.sort = SS_DECAL;
+		shader.polygonOffset = qtrue;
 	} else if ( !Q_stricmp( token, "seeThrough" ) ) {
 		shader.sort = SS_SEE_THROUGH;
 	} else if ( !Q_stricmp( token, "banner" ) ) {
@@ -3606,6 +3607,18 @@ shader_t *R_FindShaderEx( const char *name, int lightmapIndex, qboolean mipRawIm
 			return FinishShader();
 		}
 	}
+
+#ifdef STANDALONE
+	/* CoD1 decal-like materials often rely on naming without explicit
+	 * polygonOffset in shader scripts. Auto-enable offset to prevent z-fighting. */
+	if ( !shader.polygonOffset &&
+	     ( Q_stristr( shader.name, "decals/" ) ||
+	       Q_stristr( shader.name, "decal@" ) ||
+	       Q_stristr( shader.name, "/decal_" ) ) )
+	{
+		shader.polygonOffset = qtrue;
+	}
+#endif
 
 	//
 	// create the default shading commands
