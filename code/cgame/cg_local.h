@@ -71,6 +71,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	TEAMCHAT_WIDTH		80
 #define TEAMCHAT_HEIGHT		8
 
+/* CoD1 iprintln message queue (left-bottom on-screen messages) */
+#define	IPRINTLN_WIDTH		128
+#define	IPRINTLN_HEIGHT		8
+
 // very large characters
 #define	GIANT_WIDTH			32
 #define	GIANT_HEIGHT		48
@@ -1069,6 +1073,12 @@ typedef struct {
 	int				teamChatMsgTimes[TEAMCHAT_HEIGHT];
 	int				teamChatPos;
 	int				teamLastChatPos;
+
+	/* CoD1 iprintln message queue */
+	char			iprintlnMsgs[IPRINTLN_HEIGHT][IPRINTLN_WIDTH+1];
+	int				iprintlnMsgTimes[IPRINTLN_HEIGHT];
+	int				iprintlnPos;
+	int				iprintlnLastPos;
 
 	int cursorX;
 	int cursorY;

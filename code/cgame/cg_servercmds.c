@@ -1133,6 +1133,34 @@ static void CG_ServerCommand( void ) {
 	}
 #endif
 
+	/* CoD1 commands: 'f' for left-bottom, 'g' for center (bold) */
+	if ( !strcmp( cmd, "f" ) ) {
+		/* iprintln - show in on-screen chat area (left bottom) */
+		const char *msg = CG_Argv(1);
+		int len;
+		int i;
+
+		CG_Printf( "%s\n", msg );
+
+		/* Add to iprintln message queue */
+		len = strlen( msg );
+		if ( len > IPRINTLN_WIDTH ) {
+			len = IPRINTLN_WIDTH;
+		}
+		for ( i = 0; i < len; i++ ) {
+			cgs.iprintlnMsgs[cgs.iprintlnPos % IPRINTLN_HEIGHT][i] = msg[i];
+		}
+		cgs.iprintlnMsgs[cgs.iprintlnPos % IPRINTLN_HEIGHT][len] = '\0';
+		cgs.iprintlnMsgTimes[cgs.iprintlnPos % IPRINTLN_HEIGHT] = cg.time;
+		cgs.iprintlnPos++;
+		return;
+	}
+	if ( !strcmp( cmd, "g" ) ) {
+		/* iprintlnbold - show in center */
+		CG_CenterPrint( CG_Argv(1), SCREEN_HEIGHT * 0.30, BIGCHAR_WIDTH );
+		return;
+	}
+
 	if ( !strcmp( cmd, "cp" ) ) {
 		CG_CenterPrint( CG_Argv(1), SCREEN_HEIGHT * 0.30, BIGCHAR_WIDTH );
 		return;

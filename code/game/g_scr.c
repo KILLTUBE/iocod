@@ -2430,27 +2430,29 @@ static void G_Scr_BuildMessage( gsc_Context *ctx, char *buffer, int bufferSize )
     }
 }
 
-/* iprintln — display on screen for all clients (CoD1) */
+/* iprintln — display on screen left bottom for all clients (CoD1) */
 static int GScr_Fn_IPrintLn( gsc_Context *ctx )
 {
     char msg[ MAX_STRING_CHARS ];
 
     G_Scr_BuildMessage( ctx, msg, sizeof( msg ) );
-    trap_SendServerCommand( -1, va( "cp \"%s\"\n", msg ) );
+    /* CoD1 uses 'f' command for left-bottom messages */
+    trap_SendServerCommand( -1, va( "f \"%s\"\n", msg ) );
     return 0;
 }
 
-/* iprintlnbold — display on screen with emphasis (CoD1) */
+/* iprintlnbold — display on screen center for all clients (CoD1) */
 static int GScr_Fn_IPrintLnBold( gsc_Context *ctx )
 {
     char msg[ MAX_STRING_CHARS ];
 
     G_Scr_BuildMessage( ctx, msg, sizeof( msg ) );
-    trap_SendServerCommand( -1, va( "cp \"%s\"\n", msg ) );
+    /* CoD1 uses 'g' command for center messages */
+    trap_SendServerCommand( -1, va( "g \"%s\"\n", msg ) );
     return 0;
 }
 
-/* Player method: iprintln — send message to specific player */
+/* Player method: iprintln — send message to specific player (CoD1) */
 static int GScr_Meth_Player_IPrintLn( gsc_Context *ctx )
 {
     gentity_t *ent = G_Scr_GetSelf( ctx );
@@ -2461,11 +2463,11 @@ static int GScr_Meth_Player_IPrintLn( gsc_Context *ctx )
     }
 
     G_Scr_BuildMessage( ctx, msg, sizeof( msg ) );
-    trap_SendServerCommand( ent - g_entities, va( "cp \"%s\"\n", msg ) );
+    trap_SendServerCommand( ent - g_entities, va( "f \"%s\"\n", msg ) );
     return 0;
 }
 
-/* Player method: iprintlnbold — send bold message to specific player */
+/* Player method: iprintlnbold — send bold message to specific player (CoD1) */
 static int GScr_Meth_Player_IPrintLnBold( gsc_Context *ctx )
 {
     gentity_t *ent = G_Scr_GetSelf( ctx );
@@ -2476,7 +2478,7 @@ static int GScr_Meth_Player_IPrintLnBold( gsc_Context *ctx )
     }
 
     G_Scr_BuildMessage( ctx, msg, sizeof( msg ) );
-    trap_SendServerCommand( ent - g_entities, va( "cp \"%s\"\n", msg ) );
+    trap_SendServerCommand( ent - g_entities, va( "g \"%s\"\n", msg ) );
     return 0;
 }
 
