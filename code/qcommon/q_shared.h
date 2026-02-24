@@ -35,7 +35,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
   #define HOMEPATH_NAME				"iocod"
   #define GAMENAME_FOR_MASTER		"iocod"	// must NOT contain whitespace
   // No intro/logo cinematics for CoD1 (uses ROQ files not present in linux port)
-//  #define LEGACY_PROTOCOL
+  #define LEGACY_PROTOCOL			// CoD1 uses old Q3 challenge/netchan protocol (no checksum, no client challenge echo)
 //  #define PROTOCOL_HANDLER		"iocod"
   #define CONFIG_PREFIX			"iocod"
 #else

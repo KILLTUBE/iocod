@@ -245,8 +245,12 @@ PROTOCOL
 */
 
 #define	PROTOCOL_VERSION	71
+#ifdef STANDALONE
+#define PROTOCOL_LEGACY_VERSION	6	// CoD1 v1.5 protocol
+#else
 #define PROTOCOL_LEGACY_VERSION	68
 // 1.31 - 67
+#endif
 
 // maintain a list of compatible protocols for demo playing
 // NOTE: that stuff only works with two digits protocols
