@@ -42,6 +42,44 @@ char systemChat[256];
 char teamChat1[256];
 char teamChat2[256];
 
+#ifdef STANDALONE
+void CG_ScrHud_Draw( void )
+{
+	int i;
+	vec4_t color;
+
+	for ( i = 0; i < MAX_SCR_HUD_ELEMS; i++ ) {
+		cgScrHudElem_t *elem = &cgs.scrHudElems[i];
+
+		if ( !elem->inuse ) {
+			continue;
+		}
+
+		color[0] = elem->color[0];
+		color[1] = elem->color[1];
+		color[2] = elem->color[2];
+		color[3] = elem->color[3];
+
+		if ( elem->shader[0] && elem->width > 0 && elem->height > 0 ) {
+			if ( !elem->shaderHandle ) {
+				elem->shaderHandle = trap_R_RegisterShaderNoMip( elem->shader );
+			}
+			if ( elem->shaderHandle ) {
+				trap_R_SetColor( color );
+				CG_DrawPic( elem->x, elem->y, (float)elem->width, (float)elem->height, elem->shaderHandle );
+				trap_R_SetColor( NULL );
+			}
+		}
+
+		if ( elem->text[0] ) {
+			CG_Text_Paint( elem->x, elem->y, elem->scale, color, elem->text, 0, 0, 0 );
+		}
+	}
+}
+#else
+void CG_ScrHud_Draw( void ) {}
+#endif
+
 #if defined(MISSIONPACK) || defined(STANDALONE)
 
 int CG_Text_Width(const char *text, float scale, int limit) {
@@ -2599,6 +2637,8 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 		CG_DrawTeamInfo();
 #endif
 	}
+
+	CG_ScrHud_Draw();
 
 	CG_DrawVote();
 	CG_DrawTeamVote();

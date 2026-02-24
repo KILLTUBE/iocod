@@ -39,6 +39,8 @@ Player object globals: "player_N" (N = clientNum, 0-based).
 
 #include <ctype.h>
 #include <math.h>
+#include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -58,12 +60,39 @@ static int          g_scrHudElemProxyIdx;
 /* Per-client: raw pointer to the GSC object so we can push it later.
    NULL if no object exists for this slot.                                  */
 static void        *g_scrPlayerObjPtrs[ MAX_CLIENTS ];
+static qboolean     g_scrEntityObjAlive[ MAX_GENTITIES ];
+
+#define G_SCR_MAX_HUDELEMS 128
+
+typedef enum {
+    G_SCR_HUD_SCOPE_ALL,
+    G_SCR_HUD_SCOPE_CLIENT,
+    G_SCR_HUD_SCOPE_TEAM
+} G_ScrHudScope_t;
+
+typedef struct {
+    qboolean      inuse;
+    int           id;      /* 1..G_SCR_MAX_HUDELEMS */
+    G_ScrHudScope_t scope;
+    int           owner;   /* clientNum for CLIENT, team_t for TEAM */
+    float         x;
+    float         y;
+    float         scale;
+    float         color[ 4 ];
+    int           width;
+    int           height;
+    char          text[ 128 ];
+    char          shader[ MAX_QPATH ];
+} G_ScrHudElem_t;
+
+static G_ScrHudElem_t g_scrHudElems[ G_SCR_MAX_HUDELEMS ];
 
 /* The GSC file namespace (path without .gsc) where CodeCallback_* live.   */
 static char         g_scrCallbackFile[ MAX_QPATH ];
 
 /* Local forward declaration from g_spawn.c (not exposed in g_local.h). */
 qboolean G_CallSpawn( gentity_t *ent );
+static void G_Scr_CreatePlayerObj( int clientNum );
 
 /* =========================================================================
    Source-buffer tracking — freed after gsc_link completes
@@ -333,13 +362,114 @@ static char *G_Scr_CopyString( const char *src )
     return dst;
 }
 
+static qboolean G_Scr_GetEntityNum( const gentity_t *ent, int *outEntNum )
+{
+    int entNum;
+
+    if ( !ent ) {
+        return qfalse;
+    }
+
+    entNum = (int)( ent - g_entities );
+    if ( entNum < 0 || entNum >= MAX_GENTITIES ) {
+        return qfalse;
+    }
+
+    if ( outEntNum ) {
+        *outEntNum = entNum;
+    }
+    return qtrue;
+}
+
+static void G_Scr_GetEntityGlobalName( int entNum, char *name, int nameSize )
+{
+    if ( entNum >= 0 && entNum < MAX_CLIENTS ) {
+        Com_sprintf( name, nameSize, "player_%d", entNum );
+    } else {
+        Com_sprintf( name, nameSize, "entity_%d", entNum );
+    }
+}
+
+static void G_Scr_ClearGlobal( const char *name )
+{
+    gsc_add_int( g_scrCtx, 0 ); /* undefined-equivalent in this VM */
+    gsc_set_global( g_scrCtx, name );
+}
+
+static void G_Scr_SetEntityObjectFields( gsc_Context *ctx, int entObj, gentity_t *ent )
+{
+    int entNum = -1;
+
+    if ( !ent ) {
+        return;
+    }
+
+    G_Scr_GetEntityNum( ent, &entNum );
+
+    gsc_add_string( ctx, ent->classname ? ent->classname : "" );
+    gsc_object_set_field( ctx, entObj, "classname" );
+    gsc_add_string( ctx, ent->targetname ? ent->targetname : "" );
+    gsc_object_set_field( ctx, entObj, "targetname" );
+    gsc_add_string( ctx, ent->target ? ent->target : "" );
+    gsc_object_set_field( ctx, entObj, "target" );
+    gsc_add_string( ctx, ent->model ? ent->model : "" );
+    gsc_object_set_field( ctx, entObj, "model" );
+
+    gsc_add_vec3( ctx, ent->r.currentOrigin );
+    gsc_object_set_field( ctx, entObj, "origin" );
+    gsc_add_vec3( ctx, ent->s.angles );
+    gsc_object_set_field( ctx, entObj, "angles" );
+
+    gsc_add_int( ctx, entNum );
+    gsc_object_set_field( ctx, entObj, "entitynum" );
+}
+
+static void G_Scr_CreateEntityObject( gentity_t *ent, qboolean keepOnStack )
+{
+    char globalName[ 32 ];
+    int  entObj;
+    int  entNum;
+
+    if ( !g_scrCtx || !ent || !G_Scr_GetEntityNum( ent, &entNum ) ) {
+        return;
+    }
+
+    entObj = gsc_add_tagged_object( g_scrCtx, "#entity" );
+    if ( entNum < MAX_CLIENTS ) {
+        gsc_object_set_proxy( g_scrCtx, entObj, g_scrPlayerProxyIdx );
+    } else {
+        gsc_object_set_proxy( g_scrCtx, entObj, g_scrEntityProxyIdx );
+    }
+    gsc_object_set_userdata( g_scrCtx, entObj, ent );
+    G_Scr_SetEntityObjectFields( g_scrCtx, entObj, ent );
+
+    if ( entNum < MAX_CLIENTS ) {
+        g_scrPlayerObjPtrs[ entNum ] = gsc_get_ptr( g_scrCtx, entObj );
+    } else {
+        g_scrEntityObjAlive[ entNum ] = qtrue;
+    }
+
+    G_Scr_GetEntityGlobalName( entNum, globalName, sizeof( globalName ) );
+    gsc_set_global( g_scrCtx, globalName ); /* pops entObj */
+
+    if ( keepOnStack ) {
+        if ( entNum < MAX_CLIENTS && g_scrPlayerObjPtrs[ entNum ] ) {
+            gsc_push_object( g_scrCtx, g_scrPlayerObjPtrs[ entNum ] );
+        } else {
+            gsc_get_global( g_scrCtx, globalName );
+        }
+    }
+}
+
 static void G_Scr_PushEntityObject( gsc_Context *ctx, gentity_t *ent )
 {
-    int entObj;
+    char globalName[ 32 ];
+    int  entObj;
+    int  entNum;
     int clientNum;
     int topBefore;
 
-    if ( !ent ) {
+    if ( !ent || !G_Scr_GetEntityNum( ent, &entNum ) ) {
         return;
     }
 
@@ -347,46 +477,87 @@ static void G_Scr_PushEntityObject( gsc_Context *ctx, gentity_t *ent )
          g_scrPlayerObjPtrs[ clientNum ] ) {
         topBefore = gsc_top( ctx );
         gsc_push_object( ctx, g_scrPlayerObjPtrs[ clientNum ] );
-        if ( gsc_top( ctx ) > topBefore ) {
+        if ( gsc_top( ctx ) > topBefore && gsc_type( ctx, -1 ) == GSC_TYPE_OBJECT ) {
+            entObj = gsc_top( ctx ) - 1;
+            gsc_object_set_userdata( ctx, entObj, ent );
+            G_Scr_SetEntityObjectFields( ctx, entObj, ent );
             return;
         }
     }
 
-    entObj = gsc_add_tagged_object( ctx, "#entity" );
-    if ( G_Scr_GetClientNumForEntity( ent, NULL ) ) {
-        gsc_object_set_proxy( ctx, entObj, g_scrPlayerProxyIdx );
-    } else {
-        gsc_object_set_proxy( ctx, entObj, g_scrEntityProxyIdx );
-    }
-    gsc_object_set_userdata( ctx, entObj, ent );
-
-    if ( ent->classname ) {
-        gsc_add_string( ctx, ent->classname );
-        gsc_object_set_field( ctx, entObj, "classname" );
-    }
-    if ( ent->targetname ) {
-        gsc_add_string( ctx, ent->targetname );
-        gsc_object_set_field( ctx, entObj, "targetname" );
-    }
-    if ( ent->target ) {
-        gsc_add_string( ctx, ent->target );
-        gsc_object_set_field( ctx, entObj, "target" );
-    }
-    if ( ent->model ) {
-        gsc_add_string( ctx, ent->model );
-        gsc_object_set_field( ctx, entObj, "model" );
+    if ( entNum >= MAX_CLIENTS && g_scrEntityObjAlive[ entNum ] ) {
+        topBefore = gsc_top( ctx );
+        G_Scr_GetEntityGlobalName( entNum, globalName, sizeof( globalName ) );
+        gsc_get_global( ctx, globalName );
+        if ( gsc_top( ctx ) > topBefore && gsc_type( ctx, -1 ) == GSC_TYPE_OBJECT ) {
+            entObj = gsc_top( ctx ) - 1;
+            gsc_object_set_userdata( ctx, entObj, ent );
+            G_Scr_SetEntityObjectFields( ctx, entObj, ent );
+            return;
+        }
+        if ( gsc_top( ctx ) > topBefore ) {
+            gsc_pop( ctx, 1 );
+        }
+        g_scrEntityObjAlive[ entNum ] = qfalse;
     }
 
-    gsc_add_vec3( ctx, ent->r.currentOrigin );
-    gsc_object_set_field( ctx, entObj, "origin" );
-    gsc_add_vec3( ctx, ent->s.angles );
-    gsc_object_set_field( ctx, entObj, "angles" );
+    G_Scr_CreateEntityObject( ent, qtrue );
 }
 
-static void G_Scr_PushHudElemObject( gsc_Context *ctx )
+static G_ScrHudElem_t *G_Scr_Hud_Alloc( void )
 {
-    int obj = gsc_add_tagged_object( ctx, "#hudelem" );
+    int i;
+
+    for ( i = 0; i < G_SCR_MAX_HUDELEMS; i++ ) {
+        G_ScrHudElem_t *hud = &g_scrHudElems[ i ];
+        if ( hud->inuse ) {
+            continue;
+        }
+
+        Com_Memset( hud, 0, sizeof( *hud ) );
+        hud->inuse = qtrue;
+        hud->id = i + 1;
+        hud->scope = G_SCR_HUD_SCOPE_ALL;
+        hud->owner = -1;
+        hud->scale = 0.35f;
+        hud->color[0] = 1.0f;
+        hud->color[1] = 1.0f;
+        hud->color[2] = 1.0f;
+        hud->color[3] = 1.0f;
+        return hud;
+    }
+
+    return NULL;
+}
+
+static void G_Scr_PushHudElemObject( gsc_Context *ctx, G_ScrHudScope_t scope, int owner )
+{
+    float          white[3] = { 1.0f, 1.0f, 1.0f };
+    G_ScrHudElem_t *hud;
+    int            obj;
+
+    hud = G_Scr_Hud_Alloc();
+    if ( !hud ) {
+        return;
+    }
+
+    hud->scope = scope;
+    hud->owner = owner;
+
+    obj = gsc_add_tagged_object( ctx, "#hudelem" );
     gsc_object_set_proxy( ctx, obj, g_scrHudElemProxyIdx );
+    gsc_object_set_userdata( ctx, obj, (void *)(intptr_t)hud->id );
+
+    gsc_add_float( ctx, hud->x );
+    gsc_object_set_field( ctx, obj, "x" );
+    gsc_add_float( ctx, hud->y );
+    gsc_object_set_field( ctx, obj, "y" );
+    gsc_add_float( ctx, hud->scale );
+    gsc_object_set_field( ctx, obj, "fontscale" );
+    gsc_add_vec3( ctx, white );
+    gsc_object_set_field( ctx, obj, "color" );
+    gsc_add_float( ctx, hud->color[3] );
+    gsc_object_set_field( ctx, obj, "alpha" );
 }
 
 static int G_Scr_NoopReturn0( gsc_Context *ctx )
@@ -851,15 +1022,371 @@ static int GScr_Meth_AllowSpectateTeam( gsc_Context *ctx )
     return 0;
 }
 
-static int GScr_Meth_Hud_SetText( gsc_Context *ctx )       { return G_Scr_NoopReturn0( ctx ); }
-static int GScr_Meth_Hud_SetShader( gsc_Context *ctx )     { return G_Scr_NoopReturn0( ctx ); }
-static int GScr_Meth_Hud_SetTimer( gsc_Context *ctx )      { return G_Scr_NoopReturn0( ctx ); }
-static int GScr_Meth_Hud_SetTimerUp( gsc_Context *ctx )    { return G_Scr_NoopReturn0( ctx ); }
-static int GScr_Meth_Hud_SetTenthsTimer( gsc_Context *ctx ){ return G_Scr_NoopReturn0( ctx ); }
-static int GScr_Meth_Hud_SetValue( gsc_Context *ctx )      { return G_Scr_NoopReturn0( ctx ); }
-static int GScr_Meth_Hud_FadeOverTime( gsc_Context *ctx )  { return G_Scr_NoopReturn0( ctx ); }
-static int GScr_Meth_Hud_MoveOverTime( gsc_Context *ctx )  { return G_Scr_NoopReturn0( ctx ); }
-static int GScr_Meth_Hud_Destroy( gsc_Context *ctx )       { return G_Scr_NoopReturn0( ctx ); }
+static void G_Scr_Hud_SanitizeServerString( const char *src, char *dst, int dstSize )
+{
+    int i, j;
+
+    if ( !dst || dstSize <= 0 ) {
+        return;
+    }
+
+    if ( !src ) {
+        dst[0] = '\0';
+        return;
+    }
+
+    for ( i = 0, j = 0; src[i] && j < dstSize - 1; i++ ) {
+        unsigned char ch = (unsigned char)src[i];
+        if ( ch == '"' || ch == '\\' || ch == '\n' || ch == '\r' ) {
+            dst[j++] = ' ';
+            continue;
+        }
+        if ( ch < 32 ) {
+            continue;
+        }
+        dst[j++] = (char)ch;
+    }
+    dst[j] = '\0';
+}
+
+static qboolean G_Scr_Hud_ClientMatches( const G_ScrHudElem_t *hud, int clientNum )
+{
+    if ( !hud || !hud->inuse ) {
+        return qfalse;
+    }
+
+    if ( clientNum < 0 || clientNum >= level.maxclients ) {
+        return qfalse;
+    }
+
+    if ( level.clients[ clientNum ].pers.connected != CON_CONNECTED ) {
+        return qfalse;
+    }
+
+    switch ( hud->scope ) {
+        case G_SCR_HUD_SCOPE_ALL:
+            return qtrue;
+        case G_SCR_HUD_SCOPE_CLIENT:
+            return hud->owner == clientNum;
+        case G_SCR_HUD_SCOPE_TEAM:
+            return (int)level.clients[ clientNum ].sess.sessionTeam == hud->owner;
+        default:
+            return qfalse;
+    }
+}
+
+static void G_Scr_Hud_SendUpdateToClient( const G_ScrHudElem_t *hud, int clientNum )
+{
+    char safeText[ sizeof( hud->text ) ];
+    char safeShader[ sizeof( hud->shader ) ];
+
+    if ( !hud ) {
+        return;
+    }
+
+    G_Scr_Hud_SanitizeServerString( hud->text, safeText, sizeof( safeText ) );
+    G_Scr_Hud_SanitizeServerString( hud->shader, safeShader, sizeof( safeShader ) );
+
+    trap_SendServerCommand(
+        clientNum,
+        va( "scr_hud set %d %.3f %.3f %.3f %.3f %.3f %.3f %.3f %d %d \"%s\" \"%s\"",
+            hud->id,
+            hud->x,
+            hud->y,
+            hud->scale,
+            hud->color[0], hud->color[1], hud->color[2], hud->color[3],
+            hud->width, hud->height,
+            safeText, safeShader ) );
+}
+
+static void G_Scr_Hud_SendUpdate( const G_ScrHudElem_t *hud )
+{
+    int i;
+
+    if ( !hud || !hud->inuse ) {
+        return;
+    }
+
+    if ( hud->scope == G_SCR_HUD_SCOPE_ALL ) {
+        G_Scr_Hud_SendUpdateToClient( hud, -1 );
+        return;
+    }
+
+    for ( i = 0; i < level.maxclients; i++ ) {
+        if ( G_Scr_Hud_ClientMatches( hud, i ) ) {
+            G_Scr_Hud_SendUpdateToClient( hud, i );
+        }
+    }
+}
+
+static void G_Scr_Hud_SendDelete( const G_ScrHudElem_t *hud )
+{
+    int i;
+
+    if ( !hud ) {
+        return;
+    }
+
+    if ( hud->scope == G_SCR_HUD_SCOPE_ALL ) {
+        trap_SendServerCommand( -1, va( "scr_hud del %d", hud->id ) );
+        return;
+    }
+
+    for ( i = 0; i < level.maxclients; i++ ) {
+        if ( G_Scr_Hud_ClientMatches( hud, i ) ) {
+            trap_SendServerCommand( i, va( "scr_hud del %d", hud->id ) );
+        }
+    }
+}
+
+static void G_Scr_Hud_SendAllToClient( int clientNum )
+{
+    int i;
+
+    if ( clientNum < 0 || clientNum >= level.maxclients ) {
+        return;
+    }
+
+    for ( i = 0; i < G_SCR_MAX_HUDELEMS; i++ ) {
+        G_ScrHudElem_t *hud = &g_scrHudElems[ i ];
+        if ( G_Scr_Hud_ClientMatches( hud, clientNum ) ) {
+            G_Scr_Hud_SendUpdateToClient( hud, clientNum );
+        }
+    }
+}
+
+static void G_Scr_Hud_ResetAll( qboolean broadcast )
+{
+    Com_Memset( g_scrHudElems, 0, sizeof( g_scrHudElems ) );
+    if ( broadcast ) {
+        trap_SendServerCommand( -1, "scr_hud reset" );
+    }
+}
+
+static G_ScrHudElem_t *G_Scr_Hud_FindById( int id )
+{
+    if ( id < 1 || id > G_SCR_MAX_HUDELEMS ) {
+        return NULL;
+    }
+
+    if ( !g_scrHudElems[ id - 1 ].inuse ) {
+        return NULL;
+    }
+
+    return &g_scrHudElems[ id - 1 ];
+}
+
+static G_ScrHudElem_t *G_Scr_Hud_FromSelf( gsc_Context *ctx, int *outSelfObjIdx )
+{
+    int             selfObjIdx;
+    intptr_t        rawId;
+    G_ScrHudElem_t *hud;
+
+    selfObjIdx = gsc_get_object( ctx, -1 );
+    if ( selfObjIdx < 0 ) {
+        return NULL;
+    }
+
+    rawId = (intptr_t)gsc_object_get_userdata( ctx, selfObjIdx );
+    if ( rawId <= 0 ) {
+        return NULL;
+    }
+
+    hud = G_Scr_Hud_FindById( (int)rawId );
+    if ( !hud ) {
+        return NULL;
+    }
+
+    if ( outSelfObjIdx ) {
+        *outSelfObjIdx = selfObjIdx;
+    }
+
+    return hud;
+}
+
+static void G_Scr_Hud_ReadFloatField( gsc_Context *ctx, int objIdx, const char *name, float *value )
+{
+    gsc_object_get_field( ctx, objIdx, name );
+    if ( gsc_type( ctx, -1 ) != GSC_TYPE_UNDEFINED ) {
+        *value = gsc_to_float( ctx, -1 );
+    }
+    gsc_pop( ctx, 1 );
+}
+
+static void G_Scr_Hud_ReadVec3Field( gsc_Context *ctx, int objIdx, const char *name, float out[3] )
+{
+    gsc_object_get_field( ctx, objIdx, name );
+    if ( gsc_type( ctx, -1 ) == GSC_TYPE_VECTOR ) {
+        float       x, y, z;
+        const char *vecStr = gsc_to_string( ctx, -1 );
+        if ( vecStr &&
+             ( sscanf( vecStr, " ( %f , %f , %f ) ", &x, &y, &z ) == 3 ||
+               sscanf( vecStr, "(%f,%f,%f)", &x, &y, &z ) == 3 ) ) {
+            out[0] = x;
+            out[1] = y;
+            out[2] = z;
+        }
+    }
+    gsc_pop( ctx, 1 );
+}
+
+static void G_Scr_Hud_ReadCommonFields( gsc_Context *ctx, int selfObjIdx, G_ScrHudElem_t *hud )
+{
+    float dim;
+
+    if ( !hud ) {
+        return;
+    }
+
+    G_Scr_Hud_ReadFloatField( ctx, selfObjIdx, "x", &hud->x );
+    G_Scr_Hud_ReadFloatField( ctx, selfObjIdx, "y", &hud->y );
+    G_Scr_Hud_ReadFloatField( ctx, selfObjIdx, "fontscale", &hud->scale );
+    G_Scr_Hud_ReadFloatField( ctx, selfObjIdx, "scale", &hud->scale );
+    G_Scr_Hud_ReadFloatField( ctx, selfObjIdx, "alpha", &hud->color[3] );
+    G_Scr_Hud_ReadVec3Field( ctx, selfObjIdx, "color", hud->color );
+
+    dim = (float)hud->width;
+    G_Scr_Hud_ReadFloatField( ctx, selfObjIdx, "width", &dim );
+    hud->width = (int)dim;
+    dim = (float)hud->height;
+    G_Scr_Hud_ReadFloatField( ctx, selfObjIdx, "height", &dim );
+    hud->height = (int)dim;
+
+    if ( hud->scale <= 0.0f ) {
+        hud->scale = 0.35f;
+    }
+    if ( hud->color[3] < 0.0f ) {
+        hud->color[3] = 0.0f;
+    } else if ( hud->color[3] > 1.0f ) {
+        hud->color[3] = 1.0f;
+    }
+}
+
+static int GScr_Meth_Hud_SetValue( gsc_Context *ctx );
+
+static int GScr_Meth_Hud_SetText( gsc_Context *ctx )
+{
+    int             selfObjIdx;
+    const char     *text;
+    G_ScrHudElem_t *hud = G_Scr_Hud_FromSelf( ctx, &selfObjIdx );
+
+    if ( !hud ) {
+        return 0;
+    }
+
+    text = ( gsc_numargs( ctx ) > 0 ) ? gsc_get_string( ctx, 0 ) : "";
+    Q_strncpyz( hud->text, text ? text : "", sizeof( hud->text ) );
+    G_Scr_Hud_ReadCommonFields( ctx, selfObjIdx, hud );
+    G_Scr_Hud_SendUpdate( hud );
+    return 0;
+}
+
+static int GScr_Meth_Hud_SetShader( gsc_Context *ctx )
+{
+    int             selfObjIdx;
+    const char     *shader;
+    G_ScrHudElem_t *hud = G_Scr_Hud_FromSelf( ctx, &selfObjIdx );
+
+    if ( !hud ) {
+        return 0;
+    }
+
+    shader = ( gsc_numargs( ctx ) > 0 ) ? gsc_get_string( ctx, 0 ) : "";
+    Q_strncpyz( hud->shader, shader ? shader : "", sizeof( hud->shader ) );
+
+    if ( gsc_numargs( ctx ) > 1 ) {
+        hud->width = (int)gsc_get_float( ctx, 1 );
+    }
+    if ( gsc_numargs( ctx ) > 2 ) {
+        hud->height = (int)gsc_get_float( ctx, 2 );
+    }
+
+    G_Scr_Hud_ReadCommonFields( ctx, selfObjIdx, hud );
+    G_Scr_Hud_SendUpdate( hud );
+    return 0;
+}
+
+static int GScr_Meth_Hud_SetTimer( gsc_Context *ctx )
+{
+    return GScr_Meth_Hud_SetValue( ctx );
+}
+
+static int GScr_Meth_Hud_SetTimerUp( gsc_Context *ctx )
+{
+    return GScr_Meth_Hud_SetValue( ctx );
+}
+
+static int GScr_Meth_Hud_SetTenthsTimer( gsc_Context *ctx )
+{
+    return GScr_Meth_Hud_SetValue( ctx );
+}
+
+static int GScr_Meth_Hud_SetValue( gsc_Context *ctx )
+{
+    int             selfObjIdx;
+    int             value = 0;
+    G_ScrHudElem_t *hud = G_Scr_Hud_FromSelf( ctx, &selfObjIdx );
+
+    if ( !hud ) {
+        return 0;
+    }
+
+    if ( gsc_numargs( ctx ) > 0 ) {
+        if ( gsc_get_type( ctx, 0 ) == GSC_TYPE_FLOAT ) {
+            value = (int)gsc_get_float( ctx, 0 );
+        } else {
+            value = (int)gsc_get_int( ctx, 0 );
+        }
+        Com_sprintf( hud->text, sizeof( hud->text ), "%d", value );
+    } else {
+        hud->text[0] = '\0';
+    }
+
+    G_Scr_Hud_ReadCommonFields( ctx, selfObjIdx, hud );
+    G_Scr_Hud_SendUpdate( hud );
+    return 0;
+}
+
+static int GScr_Meth_Hud_FadeOverTime( gsc_Context *ctx )
+{
+    int             selfObjIdx;
+    G_ScrHudElem_t *hud = G_Scr_Hud_FromSelf( ctx, &selfObjIdx );
+
+    if ( !hud ) {
+        return 0;
+    }
+
+    G_Scr_Hud_ReadCommonFields( ctx, selfObjIdx, hud );
+    G_Scr_Hud_SendUpdate( hud );
+    return 0;
+}
+
+static int GScr_Meth_Hud_MoveOverTime( gsc_Context *ctx )
+{
+    int             selfObjIdx;
+    G_ScrHudElem_t *hud = G_Scr_Hud_FromSelf( ctx, &selfObjIdx );
+
+    if ( !hud ) {
+        return 0;
+    }
+
+    G_Scr_Hud_ReadCommonFields( ctx, selfObjIdx, hud );
+    G_Scr_Hud_SendUpdate( hud );
+    return 0;
+}
+
+static int GScr_Meth_Hud_Destroy( gsc_Context *ctx )
+{
+    G_ScrHudElem_t *hud = G_Scr_Hud_FromSelf( ctx, NULL );
+
+    if ( !hud ) {
+        return 0;
+    }
+
+    G_Scr_Hud_SendDelete( hud );
+    Com_Memset( hud, 0, sizeof( *hud ) );
+    return 0;
+}
 
 /* =========================================================================
    Global / free functions available to scripts
@@ -984,25 +1511,74 @@ static int GScr_Fn_IsAliveGlobal( gsc_Context *ctx )
     return 1;
 }
 
+static int G_Scr_Hud_ParseTeamArg( gsc_Context *ctx, int arg )
+{
+    int         type;
+    const char *team;
+
+    if ( gsc_numargs( ctx ) <= arg ) {
+        return TEAM_FREE;
+    }
+
+    type = gsc_get_type( ctx, arg );
+    if ( type == GSC_TYPE_INTEGER ) {
+        int teamNum = (int)gsc_get_int( ctx, arg );
+        if ( teamNum >= TEAM_FREE && teamNum <= TEAM_SPECTATOR ) {
+            return teamNum;
+        }
+        return TEAM_FREE;
+    }
+
+    team = gsc_get_string( ctx, arg );
+    if ( !team || !team[0] ) {
+        return TEAM_FREE;
+    }
+
+    if ( !Q_stricmp( team, "allies" ) || !Q_stricmp( team, "red" ) ) {
+        return TEAM_RED;
+    }
+    if ( !Q_stricmp( team, "axis" ) || !Q_stricmp( team, "blue" ) ) {
+        return TEAM_BLUE;
+    }
+    if ( !Q_stricmp( team, "spectator" ) ) {
+        return TEAM_SPECTATOR;
+    }
+    return TEAM_FREE;
+}
+
 static int GScr_Fn_NewHudElem( gsc_Context *ctx )
 {
-    (void)ctx;
-    G_Scr_PushHudElemObject( ctx );
-    return 1;
+    int topBefore = gsc_top( ctx );
+    G_Scr_PushHudElemObject( ctx, G_SCR_HUD_SCOPE_ALL, -1 );
+    return ( gsc_top( ctx ) > topBefore ) ? 1 : 0;
 }
 
 static int GScr_Fn_NewClientHudElem( gsc_Context *ctx )
 {
-    (void)ctx;
-    G_Scr_PushHudElemObject( ctx );
-    return 1;
+    int       topBefore = gsc_top( ctx );
+    int       clientNum = -1;
+    gentity_t *ownerEnt = NULL;
+
+    if ( gsc_numargs( ctx ) > 0 ) {
+        ownerEnt = G_Scr_GetEntityFromArg( ctx, 0 );
+    }
+    if ( !ownerEnt ) {
+        ownerEnt = G_Scr_GetSelf( ctx );
+    }
+    if ( !G_Scr_GetClientNumForEntity( ownerEnt, &clientNum ) ) {
+        return 0;
+    }
+
+    G_Scr_PushHudElemObject( ctx, G_SCR_HUD_SCOPE_CLIENT, clientNum );
+    return ( gsc_top( ctx ) > topBefore ) ? 1 : 0;
 }
 
 static int GScr_Fn_NewTeamHudElem( gsc_Context *ctx )
 {
-    (void)ctx;
-    G_Scr_PushHudElemObject( ctx );
-    return 1;
+    int topBefore = gsc_top( ctx );
+    int team = G_Scr_Hud_ParseTeamArg( ctx, 0 );
+    G_Scr_PushHudElemObject( ctx, G_SCR_HUD_SCOPE_TEAM, team );
+    return ( gsc_top( ctx ) > topBefore ) ? 1 : 0;
 }
 
 static int GScr_Fn_PositionWouldTelefrag( gsc_Context *ctx )
@@ -1207,17 +1783,26 @@ static int GScr_Fn_GetEnt( gsc_Context *ctx )
 
     if ( gsc_get_type( ctx, 0 ) == GSC_TYPE_INTEGER ) {
         clientNum = (int)gsc_get_int( ctx, 0 );
-        if ( clientNum < 0 || clientNum >= MAX_CLIENTS ||
-             !g_scrPlayerObjPtrs[ clientNum ] ) {
+        if ( clientNum < 0 || clientNum >= MAX_CLIENTS ) {
             return 0; /* undefined */
         }
 
+        if ( !g_scrPlayerObjPtrs[ clientNum ] ) {
+            G_Scr_CreatePlayerObj( clientNum );
+        }
+
         topBefore = gsc_top( g_scrCtx );
-        gsc_push_object( g_scrCtx, g_scrPlayerObjPtrs[ clientNum ] );
-        if ( gsc_top( g_scrCtx ) <= topBefore ) {
+        if ( g_scrPlayerObjPtrs[ clientNum ] ) {
+            gsc_push_object( g_scrCtx, g_scrPlayerObjPtrs[ clientNum ] );
+        }
+        if ( gsc_top( g_scrCtx ) <= topBefore || gsc_type( g_scrCtx, -1 ) != GSC_TYPE_OBJECT ) {
             /* Fallback: retrieve via the named global */
             Com_sprintf( globalName, sizeof( globalName ), "player_%d", clientNum );
             gsc_get_global( g_scrCtx, globalName );
+            if ( gsc_type( g_scrCtx, -1 ) != GSC_TYPE_OBJECT ) {
+                gsc_pop( g_scrCtx, 1 );
+                return 0;
+            }
         }
         return 1;
     }
@@ -1558,22 +2143,10 @@ static void G_Scr_CreateGlobals( void )
    ========================================================================= */
 static void G_Scr_CreatePlayerObj( int clientNum )
 {
-    char       globalName[ 32 ];
-    gentity_t *ent;
-    int        entObj;
-
-    ent = &g_entities[ clientNum ];
-
-    entObj = gsc_add_tagged_object( g_scrCtx, "#entity" );
-    gsc_object_set_proxy( g_scrCtx, entObj, g_scrPlayerProxyIdx );
-    gsc_object_set_userdata( g_scrCtx, entObj, ent );
-
-    /* Store raw ptr so we can push it back later for callbacks */
-    g_scrPlayerObjPtrs[ clientNum ] = gsc_get_ptr( g_scrCtx, entObj );
-
-    /* Register as a named global to keep it alive */
-    Com_sprintf( globalName, sizeof( globalName ), "player_%d", clientNum );
-    gsc_set_global( g_scrCtx, globalName ); /* pops entObj */
+    if ( !g_scrCtx || clientNum < 0 || clientNum >= MAX_CLIENTS ) {
+        return;
+    }
+    G_Scr_CreateEntityObject( &g_entities[ clientNum ], qfalse );
 }
 
 /* =========================================================================
@@ -1585,6 +2158,13 @@ static void G_Scr_SetSelfToPlayer( int clientNum )
     char globalName[ 32 ];
     int  topBefore;
 
+    if ( clientNum < 0 || clientNum >= MAX_CLIENTS ) {
+        return;
+    }
+
+    if ( !g_scrPlayerObjPtrs[ clientNum ] ) {
+        G_Scr_CreatePlayerObj( clientNum );
+    }
     if ( !g_scrPlayerObjPtrs[ clientNum ] ) {
         return;
     }
@@ -1595,7 +2175,11 @@ static void G_Scr_SetSelfToPlayer( int clientNum )
     gsc_get_global( g_scrCtx, globalName );
 
     if ( gsc_top( g_scrCtx ) > topBefore ) {
-        gsc_set_global( g_scrCtx, "self" );
+        if ( gsc_type( g_scrCtx, -1 ) == GSC_TYPE_OBJECT ) {
+            gsc_set_global( g_scrCtx, "self" );
+        } else {
+            gsc_pop( g_scrCtx, 1 );
+        }
     }
 }
 
@@ -1669,6 +2253,7 @@ void G_Scr_Init( void )
     char              callbackScript[ MAX_QPATH ];  /* maps/mp/gametypes/_cbsetup */
     char              mapScript[ MAX_QPATH ];       /* maps/mp/<mapname>          */
     char              mapScriptSP[ MAX_QPATH ];     /* maps/<mapname> (SP fallback) */
+    int               i;
     int               status;
     qboolean          gametypeOk;
     qboolean          callbackOk;
@@ -1679,6 +2264,8 @@ void G_Scr_Init( void )
     g_scrActive  = qfalse;
     g_scrSources = NULL;
     Com_Memset( g_scrPlayerObjPtrs, 0, sizeof( g_scrPlayerObjPtrs ) );
+    Com_Memset( g_scrEntityObjAlive, 0, sizeof( g_scrEntityObjAlive ) );
+    G_Scr_Hud_ResetAll( qfalse );
     g_scrCallbackFile[0] = '\0';
 
     /* Determine map name and gametype */
@@ -1802,6 +2389,14 @@ void G_Scr_Init( void )
         G_Printf( "GSC: scripting active  callbacks disabled\n" );
     }
 
+    /* Fresh HUD state per map and stable object handles for all live entities. */
+    G_Scr_Hud_ResetAll( qtrue );
+    for ( i = 0; i < level.num_entities; i++ ) {
+        if ( g_entities[ i ].inuse ) {
+            G_Scr_CreateEntityObject( &g_entities[ i ], qfalse );
+        }
+    }
+
     /*
      Execution order:
        1. Gametype main()  — registers level.callbackStartGameType etc.
@@ -1837,12 +2432,18 @@ void G_Scr_Init( void )
    ========================================================================= */
 void G_Scr_Shutdown( void )
 {
+    if ( g_scrActive ) {
+        G_Scr_Hud_ResetAll( qtrue );
+    }
+
     if ( g_scrCtx ) {
         gsc_destroy( g_scrCtx );
         g_scrCtx = NULL;
     }
     G_Scr_FreeSources();
     Com_Memset( g_scrPlayerObjPtrs, 0, sizeof( g_scrPlayerObjPtrs ) );
+    Com_Memset( g_scrEntityObjAlive, 0, sizeof( g_scrEntityObjAlive ) );
+    Com_Memset( g_scrHudElems, 0, sizeof( g_scrHudElems ) );
     g_scrCallbackFile[0] = '\0';
     g_scrActive = qfalse;
 }
@@ -1859,6 +2460,47 @@ void G_Scr_Frame( float dt )
 }
 
 /* =========================================================================
+   Entity lifecycle callbacks
+   ========================================================================= */
+
+void G_Scr_EntitySpawned( gentity_t *ent )
+{
+    int entNum;
+
+    if ( !g_scrActive || !g_scrCtx || !ent ) {
+        return;
+    }
+
+    if ( !G_Scr_GetEntityNum( ent, &entNum ) || entNum < MAX_CLIENTS ) {
+        return;
+    }
+
+    G_Scr_CreateEntityObject( ent, qfalse );
+}
+
+void G_Scr_EntityFreed( gentity_t *ent )
+{
+    char globalName[ 32 ];
+    int  entNum;
+
+    if ( !g_scrCtx || !ent ) {
+        return;
+    }
+
+    if ( !G_Scr_GetEntityNum( ent, &entNum ) || entNum < MAX_CLIENTS ) {
+        return;
+    }
+
+    if ( !g_scrEntityObjAlive[ entNum ] ) {
+        return;
+    }
+
+    G_Scr_GetEntityGlobalName( entNum, globalName, sizeof( globalName ) );
+    G_Scr_ClearGlobal( globalName );
+    g_scrEntityObjAlive[ entNum ] = qfalse;
+}
+
+/* =========================================================================
    Player lifecycle callbacks
    ========================================================================= */
 
@@ -1868,12 +2510,14 @@ void G_Scr_PlayerConnect( int clientNum )
         return;
     }
     G_Scr_CreatePlayerObj( clientNum );
+    G_Scr_Hud_SendAllToClient( clientNum );
     G_Scr_ExecPlayerCallback( clientNum, "CodeCallback_PlayerConnect" );
 }
 
 void G_Scr_PlayerDisconnect( int clientNum )
 {
     char globalName[ 32 ];
+    int  i;
 
     if ( !g_scrActive || !g_scrCtx ) {
         return;
@@ -1886,10 +2530,18 @@ void G_Scr_PlayerDisconnect( int clientNum )
 
     /* Clear the player global so the object can be GC'd */
     Com_sprintf( globalName, sizeof( globalName ), "player_%d", clientNum );
-    gsc_add_int( g_scrCtx, 0 );  /* push undefined-equivalent */
-    gsc_set_global( g_scrCtx, globalName );
+    G_Scr_ClearGlobal( globalName );
 
     g_scrPlayerObjPtrs[ clientNum ] = NULL;
+
+    for ( i = 0; i < G_SCR_MAX_HUDELEMS; i++ ) {
+        G_ScrHudElem_t *hud = &g_scrHudElems[ i ];
+        if ( hud->inuse &&
+             hud->scope == G_SCR_HUD_SCOPE_CLIENT &&
+             hud->owner == clientNum ) {
+            Com_Memset( hud, 0, sizeof( *hud ) );
+        }
+    }
 }
 
 void G_Scr_PlayerSpawn( int clientNum )
@@ -1898,7 +2550,11 @@ void G_Scr_PlayerSpawn( int clientNum )
         return;
     }
 
-    /* Update the userdata pointer in case the entity was re-initialised */
+    if ( !g_scrPlayerObjPtrs[ clientNum ] ) {
+        G_Scr_CreatePlayerObj( clientNum );
+    }
+
+    /* Update the userdata pointer/fields in case the entity was re-initialised. */
     if ( g_scrPlayerObjPtrs[ clientNum ] ) {
         char globalName[ 32 ];
         int  topBefore, entObjIdx;
@@ -1907,13 +2563,17 @@ void G_Scr_PlayerSpawn( int clientNum )
         topBefore = gsc_top( g_scrCtx );
         gsc_get_global( g_scrCtx, globalName );
         if ( gsc_top( g_scrCtx ) > topBefore ) {
-            entObjIdx = gsc_top( g_scrCtx ) - 1;
-            gsc_object_set_userdata( g_scrCtx, entObjIdx,
-                                     &g_entities[ clientNum ] );
+            if ( gsc_type( g_scrCtx, -1 ) == GSC_TYPE_OBJECT ) {
+                entObjIdx = gsc_top( g_scrCtx ) - 1;
+                gsc_object_set_userdata( g_scrCtx, entObjIdx,
+                                         &g_entities[ clientNum ] );
+                G_Scr_SetEntityObjectFields( g_scrCtx, entObjIdx, &g_entities[ clientNum ] );
+            }
             gsc_pop( g_scrCtx, 1 );
         }
     }
 
+    G_Scr_Hud_SendAllToClient( clientNum );
     G_Scr_ExecPlayerCallback( clientNum, "CodeCallback_PlayerSpawn" );
 }
 

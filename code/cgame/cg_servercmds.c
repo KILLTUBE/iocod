@@ -58,6 +58,80 @@ static int CG_ValidOrder(const char *p) {
 }
 #endif
 
+#ifdef STANDALONE
+void CG_ScrHud_Reset( void )
+{
+	memset( cgs.scrHudElems, 0, sizeof( cgs.scrHudElems ) );
+}
+
+static void CG_ScrHud_ServerCommand( void )
+{
+	const char *op = CG_Argv( 1 );
+	int         id;
+
+	if ( !op || !op[0] ) {
+		return;
+	}
+
+	if ( !Q_stricmp( op, "reset" ) ) {
+		CG_ScrHud_Reset();
+		return;
+	}
+
+	if ( !Q_stricmp( op, "del" ) ) {
+		if ( trap_Argc() < 3 ) {
+			return;
+		}
+		id = atoi( CG_Argv( 2 ) );
+		if ( id >= 1 && id <= MAX_SCR_HUD_ELEMS ) {
+			memset( &cgs.scrHudElems[ id - 1 ], 0, sizeof( cgs.scrHudElems[0] ) );
+		}
+		return;
+	}
+
+	if ( !Q_stricmp( op, "set" ) ) {
+		cgScrHudElem_t *elem;
+		char            oldShader[MAX_QPATH];
+
+		if ( trap_Argc() < 14 ) {
+			return;
+		}
+
+		id = atoi( CG_Argv( 2 ) );
+		if ( id < 1 || id > MAX_SCR_HUD_ELEMS ) {
+			return;
+		}
+
+		elem = &cgs.scrHudElems[ id - 1 ];
+		Q_strncpyz( oldShader, elem->shader, sizeof( oldShader ) );
+
+		elem->inuse = qtrue;
+		elem->id = id;
+		elem->x = (float)atof( CG_Argv( 3 ) );
+		elem->y = (float)atof( CG_Argv( 4 ) );
+		elem->scale = (float)atof( CG_Argv( 5 ) );
+		elem->color[0] = (float)atof( CG_Argv( 6 ) );
+		elem->color[1] = (float)atof( CG_Argv( 7 ) );
+		elem->color[2] = (float)atof( CG_Argv( 8 ) );
+		elem->color[3] = (float)atof( CG_Argv( 9 ) );
+		elem->width = atoi( CG_Argv( 10 ) );
+		elem->height = atoi( CG_Argv( 11 ) );
+		Q_strncpyz( elem->text, CG_Argv( 12 ), sizeof( elem->text ) );
+		Q_strncpyz( elem->shader, CG_Argv( 13 ), sizeof( elem->shader ) );
+
+		if ( elem->scale <= 0.0f ) {
+			elem->scale = 0.35f;
+		}
+
+		if ( Q_stricmp( oldShader, elem->shader ) ) {
+			elem->shaderHandle = 0;
+		}
+	}
+}
+#else
+void CG_ScrHud_Reset( void ) {}
+#endif
+
 /*
 =================
 CG_ParseScores
@@ -473,6 +547,9 @@ static void CG_MapRestart( void ) {
 	cg.levelShot = qfalse;
 
 	cgs.voteTime = 0;
+#ifdef STANDALONE
+	CG_ScrHud_Reset();
+#endif
 
 	cg.mapRestart = qtrue;
 
@@ -1002,6 +1079,13 @@ static void CG_ServerCommand( void ) {
 		// server claimed the command
 		return;
 	}
+
+#ifdef STANDALONE
+	if ( !strcmp( cmd, "scr_hud" ) ) {
+		CG_ScrHud_ServerCommand();
+		return;
+	}
+#endif
 
 	if ( !strcmp( cmd, "cp" ) ) {
 		CG_CenterPrint( CG_Argv(1), SCREEN_HEIGHT * 0.30, BIGCHAR_WIDTH );

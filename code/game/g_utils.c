@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // g_utils.c -- misc utility functions for game module
 
 #include "g_local.h"
+#include "g_scr.h"
 
 typedef struct {
   char oldShader[MAX_QPATH];
@@ -408,6 +409,7 @@ gentity_t *G_Spawn( void ) {
 
 			// reuse this slot
 			G_InitGentity( e );
+			G_Scr_EntitySpawned( e );
 			return e;
 		}
 		if ( level.num_entities < ENTITYNUM_MAX_NORMAL ) {
@@ -429,6 +431,7 @@ gentity_t *G_Spawn( void ) {
 		&level.clients[0].ps, sizeof( level.clients[0] ) );
 
 	G_InitGentity( e );
+	G_Scr_EntitySpawned( e );
 	return e;
 }
 
@@ -471,6 +474,8 @@ void G_FreeEntity( gentity_t *ed ) {
 	if ( ed->neverFree ) {
 		return;
 	}
+
+	G_Scr_EntityFreed( ed );
 
 	memset (ed, 0, sizeof(*ed));
 	ed->classname = "freed";

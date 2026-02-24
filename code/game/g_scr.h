@@ -24,6 +24,10 @@ void G_Scr_PlayerKilled( int clientNum, int attackerNum, int mod );
 /* Called on damage so scripts can handle CodeCallback_PlayerDamage */
 void G_Scr_PlayerDamage( int clientNum, int attackerNum, int damage, int mod );
 
+/* Entity lifecycle hooks so script object handles stay stable */
+void G_Scr_EntitySpawned( gentity_t *ent );
+void G_Scr_EntityFreed( gentity_t *ent );
+
 #else /* !STANDALONE */
 
 #define G_Scr_Init()                  ((void)0)
@@ -34,5 +38,7 @@ void G_Scr_PlayerDamage( int clientNum, int attackerNum, int damage, int mod );
 #define G_Scr_PlayerSpawn(n)          ((void)0)
 #define G_Scr_PlayerKilled(a,b,c)     ((void)0)
 #define G_Scr_PlayerDamage(a,b,c,d)   ((void)0)
+#define G_Scr_EntitySpawned(e)        ((void)0)
+#define G_Scr_EntityFreed(e)          ((void)0)
 
 #endif /* STANDALONE */

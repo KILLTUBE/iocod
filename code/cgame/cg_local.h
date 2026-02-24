@@ -985,6 +985,24 @@ typedef struct {
 
 } cgMedia_t;
 
+#ifdef STANDALONE
+#define MAX_SCR_HUD_ELEMS 128
+
+typedef struct {
+	qboolean	inuse;
+	int			id;
+	float		x;
+	float		y;
+	float		scale;
+	vec4_t		color;
+	int			width;
+	int			height;
+	char		text[128];
+	char		shader[MAX_QPATH];
+	qhandle_t	shaderHandle;
+} cgScrHudElem_t;
+#endif
+
 
 // The client game static (cgs) structure hold everything
 // loaded or calculated from the gamestate.  It will NOT
@@ -1078,6 +1096,7 @@ typedef struct {
 	qhandle_t	cod1StanceStand;	/* gfx/hud/stance_stand  */
 	qhandle_t	cod1StanceCrouch;	/* gfx/hud/stance_crouch */
 	qhandle_t	cod1StanceProne;	/* gfx/hud/stance_prone  */
+	cgScrHudElem_t scrHudElems[MAX_SCR_HUD_ELEMS];
 #endif
 
 } cgs_t;
@@ -1287,6 +1306,8 @@ void CG_CenterPrint( const char *str, int y, int charWidth );
 void CG_DrawHead( float x, float y, float w, float h, int clientNum, vec3_t headAngles );
 void CG_DrawActive( stereoFrame_t stereoView );
 void CG_Draw2DOnly( stereoFrame_t stereoView );
+void CG_ScrHud_Reset( void );
+void CG_ScrHud_Draw( void );
 void CG_DrawFlagModel( float x, float y, float w, float h, int team, qboolean force2D );
 void CG_DrawTeamBackground( int x, int y, int w, int h, float alpha, int team );
 void CG_OwnerDraw(float x, float y, float w, float h, float text_x, float text_y, int ownerDraw, int ownerDrawFlags, int align, float special, float scale, vec4_t color, qhandle_t shader, int textStyle);
