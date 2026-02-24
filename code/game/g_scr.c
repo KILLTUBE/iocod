@@ -2406,6 +2406,42 @@ static int GScr_Fn_Print( gsc_Context *ctx )
     return 0;
 }
 
+/* iprintln — display on screen for all clients (CoD1) */
+static int GScr_Fn_IPrintLn( gsc_Context *ctx )
+{
+    int  i, n = gsc_numargs( ctx );
+    char msg[ MAX_STRING_CHARS ];
+    int  len = 0;
+
+    for ( i = 0; i < n && len < MAX_STRING_CHARS - 2; i++ ) {
+        G_Scr_StringifyArg( ctx, i, msg + len, MAX_STRING_CHARS - len );
+        len = strlen( msg );
+    }
+    msg[ MAX_STRING_CHARS - 1 ] = '\0';
+
+    /* Send cp (center print) command to all clients */
+    trap_SendServerCommand( -1, va( "cp \"%s\"\n", msg ) );
+    return 0;
+}
+
+/* iprintlnbold — display on screen with emphasis (CoD1) */
+static int GScr_Fn_IPrintLnBold( gsc_Context *ctx )
+{
+    int  i, n = gsc_numargs( ctx );
+    char msg[ MAX_STRING_CHARS ];
+    int  len = 0;
+
+    for ( i = 0; i < n && len < MAX_STRING_CHARS - 2; i++ ) {
+        G_Scr_StringifyArg( ctx, i, msg + len, MAX_STRING_CHARS - len );
+        len = strlen( msg );
+    }
+    msg[ MAX_STRING_CHARS - 1 ] = '\0';
+
+    /* For bold, we could use a different format, but cp works for now */
+    trap_SendServerCommand( -1, va( "cp \"%s\"\n", msg ) );
+    return 0;
+}
+
 static int GScr_Fn_IsDefined( gsc_Context *ctx )
 {
     gsc_add_bool( ctx, gsc_get_type( ctx, 0 ) != GSC_TYPE_UNDEFINED );
@@ -3178,8 +3214,8 @@ static void G_Scr_RegisterFunctions( void )
     /* Output */
     gsc_register_function( g_scrCtx, NULL, "print",        GScr_Fn_Print );
     gsc_register_function( g_scrCtx, NULL, "println",      GScr_Fn_Print );
-    gsc_register_function( g_scrCtx, NULL, "iprintln",     GScr_Fn_Print );
-    gsc_register_function( g_scrCtx, NULL, "iprintlnbold", GScr_Fn_Print );
+    gsc_register_function( g_scrCtx, NULL, "iprintln",     GScr_Fn_IPrintLn );
+    gsc_register_function( g_scrCtx, NULL, "iprintlnbold", GScr_Fn_IPrintLnBold );
 
     /* Type checking */
     gsc_register_function( g_scrCtx, NULL, "isdefined",    GScr_Fn_IsDefined );
