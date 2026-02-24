@@ -873,19 +873,31 @@ void G_Scr_Init( void )
      Choose which file holds the CodeCallback_* entry points.
      _callbacksetup is the canonical location; fall back to gametype or map.
     */
-    if ( callbackOk ) {
+    if ( gametypeOk && callbackOk ) {
         Q_strncpyz( g_scrCallbackFile, callbackScript,
                     sizeof( g_scrCallbackFile ) );
     } else if ( gametypeOk ) {
         Q_strncpyz( g_scrCallbackFile, gametypeScript,
                     sizeof( g_scrCallbackFile ) );
-    } else {
+    } else if ( mapOk ) {
         Q_strncpyz( g_scrCallbackFile, mapScript,
                     sizeof( g_scrCallbackFile ) );
+    } else {
+        g_scrCallbackFile[0] = '\0';
+    }
+
+    if ( !gametypeOk ) {
+        G_Printf( "GSC: gametype '%s' unavailable; CodeCallback_* hooks disabled\n",
+                  gametypeScript );
+        g_scrCallbackFile[0] = '\0';
     }
 
     g_scrActive = qtrue;
-    G_Printf( "GSC: scripting active  callbacks in '%s'\n", g_scrCallbackFile );
+    if ( g_scrCallbackFile[0] ) {
+        G_Printf( "GSC: scripting active  callbacks in '%s'\n", g_scrCallbackFile );
+    } else {
+        G_Printf( "GSC: scripting active  callbacks disabled\n" );
+    }
 
     /*
      Execution order:
@@ -911,8 +923,10 @@ void G_Scr_Init( void )
         while ( gsc_update( g_scrCtx, 0.0f ) == GSC_YIELD ) {}
     }
 
-    G_Scr_ExecCallback( "CodeCallback_StartGameType" );
-    while ( gsc_update( g_scrCtx, 0.0f ) == GSC_YIELD ) {}
+    if ( g_scrCallbackFile[0] ) {
+        G_Scr_ExecCallback( "CodeCallback_StartGameType" );
+        while ( gsc_update( g_scrCtx, 0.0f ) == GSC_YIELD ) {}
+    }
 }
 
 /* =========================================================================
