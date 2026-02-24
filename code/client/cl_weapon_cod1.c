@@ -25,6 +25,9 @@ Cvars:
 #include "client.h"
 #include "../qcommon/bg_weapon_cod1.h"
 
+/* ADS toggle state lives in cl_input.c, driven by the "ads" command */
+extern qboolean in_adsToggle;
+
 /* ===========================================================================
    Cvars
    =========================================================================== */
@@ -311,6 +314,7 @@ static void CL_WeaponThink( void )
     curPmType = cl.snap.ps.pm_type;
     if ( curPmType == 0 && s_prevPmType != 0 ) {
         s_spawnSerial++;
+        in_adsToggle = qfalse;   /* always exit ADS on (re)spawn */
         startWeap = ( cl_startWeapon && cl_startWeapon->string[0] )
                     ? cl_startWeapon->string : "";
         if ( startWeap[0] ) {
@@ -327,7 +331,7 @@ static void CL_WeaponThink( void )
     wantFire   = ( cmd->buttons & BUTTON_ATTACK  ) ? qtrue : qfalse;
     wantReload = ( cmd->buttons & BUTTON_RELOAD  ) ? qtrue : qfalse;
     wantMelee  = ( cmd->buttons & BUTTON_MELEE   ) ? qtrue : qfalse;
-    wantAds    = ( cmd->buttons & BUTTON_ADS     ) ? qtrue : qfalse;
+    wantAds    = in_adsToggle;   /* ADS is toggle, not hold */
 
     /* ---- ADS fraction interpolation ---- */
     {
@@ -353,7 +357,7 @@ static void CL_WeaponThink( void )
 
     /* ---- ADS state transitions ---- */
     if ( wantAds && !cl_weapon.adsActive ) {
-        /* Entering ADS */
+        /* Entering ADS — only from idle states */
         if ( IsIdleAnim( cl_weapon.currentAnim ) ) {
             cl_weapon.adsActive = qtrue;
             if ( cl_weapon.anims[WA_ADS_UP] )
@@ -366,6 +370,15 @@ static void CL_WeaponThink( void )
             SetAnim( WA_ADS_DOWN );
         else
             SetAnim( WA_IDLE );
+    }
+
+    /* Force ADS off when firing interrupts or player dies */
+    if ( cl_weapon.currentAnim == WA_FIRE || cl_weapon.currentAnim == WA_RELOAD ||
+         cl_weapon.currentAnim == WA_RELOAD_EMPTY || cl_weapon.currentAnim == WA_MELEE ) {
+        if ( cl_weapon.adsActive ) {
+            cl_weapon.adsActive = qfalse;
+            in_adsToggle        = qfalse;
+        }
     }
 
     /* ---- Per-state logic ---- */
@@ -587,18 +600,6 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     animFrame = CL_WeaponCurrentAnimFrame();
     curAnim   = cl_weapon.anims[ cl_weapon.currentAnim ];
 
-    /* --- DObj pose evaluation --- */
-    if ( re.UpdateDObjPose && ( cl_weapon.handModel || cl_weapon.gunModel ) ) {
-        re.UpdateDObjPose( cl_weapon.handModel, cl_weapon.gunModel,
-                           curAnim, animFrame );
-    }
-
-    if ( cl_animDebug && cl_animDebug->integer )
-        Com_Printf( "anim=%d frame=%.1f clip=%d res=%d ads=%.2f\n",
-                    cl_weapon.currentAnim, animFrame,
-                    cl_weapon.clipAmmo, cl_weapon.reserveAmmo,
-                    cl_weapon.adsFrac );
-
     /* --- Camera / view setup --- */
     ofsF = 0.0f; ofsR = 0.0f; ofsU = 0.0f;
 
@@ -635,6 +636,47 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     VectorMA( modelOrigin,  ofsU, axis[2], modelOrigin );
 
     AnglesToAxis( viewAngles, entityAxis );
+
+    /* --- DObj pose evaluation (must happen before tag_ads query) --- */
+    if ( re.UpdateDObjPose && ( cl_weapon.handModel || cl_weapon.gunModel ) ) {
+        re.UpdateDObjPose( cl_weapon.handModel, cl_weapon.gunModel,
+                           curAnim, animFrame );
+    }
+
+    /* --- tag_ads camera offset ---
+     *
+     * CoD1 ADS works by repositioning the viewmodel so that the tag_ads bone
+     * (the iron-sight / optic alignment point) sits exactly at the camera
+     * origin.  We query the bone's local-space position from the current
+     * animated pose, then shift modelOrigin by -(tag_ads_pos) * adsFrac
+     * so the transition is smooth.
+     *
+     * The pose bones are stored in model-local space (root at origin), so
+     * the returned tag->origin is the bone's offset from model origin.
+     * We need to rotate that offset into world space using entityAxis before
+     * subtracting it from modelOrigin.
+     */
+    if ( cl_weapon.adsFrac > 0.0f && re.LerpTag ) {
+        orientation_t tagAds;
+        qhandle_t     tagModel = cl_weapon.gunModel ? cl_weapon.gunModel : cl_weapon.handModel;
+
+        Com_Memset( &tagAds, 0, sizeof(tagAds) );
+        if ( re.LerpTag( &tagAds, tagModel, 0, 0, 0.0f, "tag_ads" ) ) {
+            /* tagAds.origin is in model-local space; rotate to world */
+            vec3_t tagWorld;
+            tagWorld[0] =  DotProduct( tagAds.origin, entityAxis[0] );
+            tagWorld[1] = -DotProduct( tagAds.origin, entityAxis[1] );
+            tagWorld[2] =  DotProduct( tagAds.origin, entityAxis[2] );
+            /* Shift model so tag_ads lands at camera origin */
+            VectorMA( modelOrigin, -cl_weapon.adsFrac, tagWorld, modelOrigin );
+        }
+    }
+
+    if ( cl_animDebug && cl_animDebug->integer )
+        Com_Printf( "anim=%d frame=%.1f clip=%d res=%d ads=%.2f\n",
+                    cl_weapon.currentAnim, animFrame,
+                    cl_weapon.clipAmmo, cl_weapon.reserveAmmo,
+                    cl_weapon.adsFrac );
 
     /* --- ADS FOV interpolation --- */
     gunFov = ( cl_gunFov && cl_gunFov->value > 1.0f ) ? cl_gunFov->value : 65.0f;
@@ -726,6 +768,15 @@ static void CL_WeaponInfo_f( void )
     if ( wd.anims.adsUpAnim[0]  ) Com_Printf( "  adsUp    : %s\n", wd.anims.adsUpAnim  );
 }
 
+static void CL_ADS_f( void )
+{
+    /* Toggle aim-down-sights. Only meaningful when alive with an active weapon. */
+    if ( !cl_weapon.active ) return;
+    in_adsToggle = !in_adsToggle;
+    /* If toggling off while mid-transition, let the state machine
+     * handle the WA_ADS_DOWN animation on the next think frame. */
+}
+
 /* ===========================================================================
    Init / Shutdown
    =========================================================================== */
@@ -744,6 +795,7 @@ void CL_WeaponCod1_Init( void )
     Cmd_AddCommand( "give",       CL_Give_f       );
     Cmd_AddCommand( "dropweapon", CL_DropWeapon_f );
     Cmd_AddCommand( "weaponinfo", CL_WeaponInfo_f );
+    Cmd_AddCommand( "ads",        CL_ADS_f        );
 
     Com_Memset( &cl_weapon, 0, sizeof(cl_weapon) );
     s_prevPmType    = -1;
@@ -756,6 +808,8 @@ void CL_WeaponCod1_Shutdown( void )
     Cmd_RemoveCommand( "give"       );
     Cmd_RemoveCommand( "dropweapon" );
     Cmd_RemoveCommand( "weaponinfo" );
+    Cmd_RemoveCommand( "ads"        );
+    in_adsToggle = qfalse;
     Com_Memset( &cl_weapon, 0, sizeof(cl_weapon) );
     s_prevPmType  = -1;
     s_lastThinkTime = 0;
