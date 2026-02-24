@@ -3624,25 +3624,25 @@ shader_t *R_FindShaderEx( const char *name, int lightmapIndex, qboolean mipRawIm
 	// create the default shading commands
 	//
 #ifdef STANDALONE
-	/* CoD1: auto-detect alpha-masked surfaces (fences, railings, foliage).
-	 * Keep normal world lighting while applying alpha test so cutout holes are discarded. */
+	/* CoD1: classify implicit alpha materials by naming convention.
+	 * - masked/fence assets use hard alpha test
+	 * - decal/transparent overlays use soft alpha blending */
 	{
-		/* CoD1 names alpha-masked surfaces with "_masked@" or puts them under "transparents/".
-		 * Also detect by DXT3/DXT5/DXT1-RGBA internalFormat which always carries real alpha. */
-		qboolean nameAlpha = ( Q_stristr( shader.name, "_masked@" ) != NULL ||
-		                       Q_stristr( shader.name, "transparents/" ) != NULL );
-		qboolean fmtAlpha  = ( image->internalFormat == GL_COMPRESSED_RGBA_S3TC_DXT3_EXT ||
-		                       image->internalFormat == GL_COMPRESSED_RGBA_S3TC_DXT5_EXT ||
-		                       image->internalFormat == GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT ||
-		                       image->internalFormat == GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT ||
-		                       image->internalFormat == GL_COMPRESSED_RGBA_S3TC_DXT1_EXT );
-		qboolean lmWorld   = ( shader.lightmapIndex >= 0 ||
-		                       shader.lightmapIndex == LIGHTMAP_BY_VERTEX ||
-		                       shader.lightmapIndex == LIGHTMAP_WHITEIMAGE );
-		if ( lmWorld && ( nameAlpha || fmtAlpha ) )
+		qboolean nameCutout = ( Q_stristr( shader.name, "_masked@" ) != NULL ||
+		                        Q_stristr( shader.name, "fence" ) != NULL ||
+		                        Q_stristr( shader.name, "wiremesh" ) != NULL ||
+		                        Q_stristr( shader.name, "barbed" ) != NULL );
+		qboolean nameBlend  = ( Q_stristr( shader.name, "decals/" ) != NULL ||
+		                        Q_stristr( shader.name, "decal@" ) != NULL ||
+		                        Q_stristr( shader.name, "transparents/" ) != NULL );
+		qboolean lmWorld    = ( shader.lightmapIndex >= 0 ||
+		                        shader.lightmapIndex == LIGHTMAP_BY_VERTEX ||
+		                        shader.lightmapIndex == LIGHTMAP_WHITEIMAGE );
+
+		if ( lmWorld && nameCutout )
 		{
-			ri.Printf( PRINT_DEVELOPER, "AutoAlpha: %s (fmt=0x%x lm=%d name=%d fmt=%d)\n",
-			           shader.name, image->internalFormat, shader.lightmapIndex, nameAlpha, fmtAlpha );
+			ri.Printf( PRINT_DEVELOPER, "AutoAlpha(mask): %s (fmt=0x%x lm=%d)\n",
+			           shader.name, image->internalFormat, shader.lightmapIndex );
 
 			if ( shader.lightmapIndex >= 0 )
 			{
@@ -3678,6 +3678,31 @@ shader_t *R_FindShaderEx( const char *name, int lightmapIndex, qboolean mipRawIm
 			}
 
 			shader.sort = SS_SEE_THROUGH;
+			return FinishShader();
+		}
+
+		if ( lmWorld && nameBlend )
+		{
+			ri.Printf( PRINT_DEVELOPER, "AutoAlpha(blend): %s (fmt=0x%x lm=%d)\n",
+			           shader.name, image->internalFormat, shader.lightmapIndex );
+
+			/* Soft alpha overlays should stay translucent; use vertex lighting to
+			 * avoid fullbright results from missing explicit shader scripts. */
+			stages[0].bundle[0].image[0] = image;
+			stages[0].active = qtrue;
+			stages[0].alphaGen = AGEN_SKIP;
+
+			if ( shader.lightmapIndex == LIGHTMAP_WHITEIMAGE )
+			{
+				stages[0].rgbGen = CGEN_IDENTITY_LIGHTING;
+			}
+			else
+			{
+				stages[0].rgbGen = CGEN_EXACT_VERTEX;
+			}
+
+			stages[0].stateBits = GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA;
+			shader.sort = shader.polygonOffset ? SS_DECAL : SS_BLEND0;
 			return FinishShader();
 		}
 	}

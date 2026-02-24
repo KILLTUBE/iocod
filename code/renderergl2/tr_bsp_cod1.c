@@ -193,8 +193,12 @@ static void R_LoadCod1Surfaces( const byte *base ) {
 		if ( r_singleShader->integer && !surf->shader->isSky )
 			surf->shader = tr.defaultShader;
 
-		/* CoD1 geometry may have different winding order - make two-sided */
-		if ( surf->shader && surf->shader->cullType == CT_FRONT_SIDED ) {
+		/* Keep legacy CoD1 winding workaround for opaque world geometry only.
+		 * Do not force two-sided on see-through/blended materials or fences will
+		 * render both faces and look doubled. */
+		if ( surf->shader &&
+		     surf->shader->cullType == CT_FRONT_SIDED &&
+		     surf->shader->sort <= SS_OPAQUE ) {
 			((shader_t *)surf->shader)->cullType = CT_TWO_SIDED;
 		}
 
