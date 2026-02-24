@@ -1273,13 +1273,10 @@ static void Cmd_MenuResponse_f( gentity_t *ent ) {
 	char	response[MAX_TOKEN_CHARS];
 	char	serverIdArg[MAX_TOKEN_CHARS];
 	char	serverIdCurrent[64];
-	int		clientNum;
 
 	if ( !ent || !ent->client || !G_Scr_IsActive() ) {
 		return;
 	}
-
-	clientNum = ent - g_entities;
 
 	if ( trap_Argc() == 4 ) {
 		trap_Argv( 1, serverIdArg, sizeof( serverIdArg ) );
@@ -1295,7 +1292,7 @@ static void Cmd_MenuResponse_f( gentity_t *ent ) {
 		Q_strncpyz( response, "bad", sizeof( response ) );
 	}
 
-	G_Scr_PlayerMenuResponse( clientNum, menuName, response );
+	G_Scr_PlayerMenuResponse( ent - g_entities, menuName, response );
 }
 
 /*
