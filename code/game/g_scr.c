@@ -38,6 +38,7 @@ Player object globals: "player_N" (N = clientNum, 0-based).
 #include "../thirdparty/gsc/include/gsc.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -51,6 +52,8 @@ static qboolean     g_scrActive;
 /* Stack index of the shared entity proxy object.  Stays at bottom of stack
    for the lifetime of the context.                                         */
 static int          g_scrEntityProxyIdx;
+static int          g_scrPlayerProxyIdx;
+static int          g_scrHudElemProxyIdx;
 
 /* Per-client: raw pointer to the GSC object so we can push it later.
    NULL if no object exists for this slot.                                  */
@@ -58,6 +61,9 @@ static void        *g_scrPlayerObjPtrs[ MAX_CLIENTS ];
 
 /* The GSC file namespace (path without .gsc) where CodeCallback_* live.   */
 static char         g_scrCallbackFile[ MAX_QPATH ];
+
+/* Local forward declaration from g_spawn.c (not exposed in g_local.h). */
+qboolean G_CallSpawn( gentity_t *ent );
 
 /* =========================================================================
    Source-buffer tracking — freed after gsc_link completes
@@ -256,11 +262,165 @@ static gentity_t *G_Scr_GetSelf( gsc_Context *ctx )
     return (gentity_t *)gsc_object_get_userdata( ctx, selfIdx );
 }
 
+static qboolean G_Scr_GetClientNumForEntity( const gentity_t *ent, int *outClientNum )
+{
+    int clientNum;
+
+    if ( !ent || !ent->client ) {
+        return qfalse;
+    }
+
+    clientNum = (int)( ent - g_entities );
+    if ( clientNum < 0 || clientNum >= MAX_CLIENTS ) {
+        return qfalse;
+    }
+
+    if ( outClientNum ) {
+        *outClientNum = clientNum;
+    }
+    return qtrue;
+}
+
+static const char *G_Scr_TeamToString( team_t team )
+{
+    switch ( team ) {
+        case TEAM_RED:       return "allies";
+        case TEAM_BLUE:      return "axis";
+        case TEAM_FREE:      return "none";
+        case TEAM_SPECTATOR: return "spectator";
+        default:             return "spectator";
+    }
+}
+
+static gentity_t *G_Scr_GetEntityFromArg( gsc_Context *ctx, int arg )
+{
+    int type = gsc_get_type( ctx, arg );
+
+    if ( type == GSC_TYPE_OBJECT ) {
+        int obj = gsc_get_object( ctx, arg );
+        if ( obj >= 0 ) {
+            return (gentity_t *)gsc_object_get_userdata( ctx, obj );
+        }
+        return NULL;
+    }
+
+    if ( type == GSC_TYPE_INTEGER ) {
+        int entNum = (int)gsc_get_int( ctx, arg );
+        if ( entNum >= 0 && entNum < level.num_entities ) {
+            return &g_entities[ entNum ];
+        }
+    }
+
+    return NULL;
+}
+
+static char *G_Scr_CopyString( const char *src )
+{
+    size_t len;
+    char  *dst;
+
+    if ( !src ) {
+        src = "";
+    }
+
+    len = strlen( src );
+    dst = (char *)G_Alloc( (int)len + 1 );
+    if ( !dst ) {
+        return NULL;
+    }
+
+    memcpy( dst, src, len + 1 );
+    return dst;
+}
+
 static void G_Scr_PushEntityObject( gsc_Context *ctx, gentity_t *ent )
 {
-    int entObj = gsc_add_tagged_object( ctx, "#entity" );
-    gsc_object_set_proxy( ctx, entObj, g_scrEntityProxyIdx );
+    int entObj;
+    int clientNum;
+    int topBefore;
+
+    if ( !ent ) {
+        return;
+    }
+
+    if ( G_Scr_GetClientNumForEntity( ent, &clientNum ) &&
+         g_scrPlayerObjPtrs[ clientNum ] ) {
+        topBefore = gsc_top( ctx );
+        gsc_push_object( ctx, g_scrPlayerObjPtrs[ clientNum ] );
+        if ( gsc_top( ctx ) > topBefore ) {
+            return;
+        }
+    }
+
+    entObj = gsc_add_tagged_object( ctx, "#entity" );
+    if ( G_Scr_GetClientNumForEntity( ent, NULL ) ) {
+        gsc_object_set_proxy( ctx, entObj, g_scrPlayerProxyIdx );
+    } else {
+        gsc_object_set_proxy( ctx, entObj, g_scrEntityProxyIdx );
+    }
     gsc_object_set_userdata( ctx, entObj, ent );
+
+    if ( ent->classname ) {
+        gsc_add_string( ctx, ent->classname );
+        gsc_object_set_field( ctx, entObj, "classname" );
+    }
+    if ( ent->targetname ) {
+        gsc_add_string( ctx, ent->targetname );
+        gsc_object_set_field( ctx, entObj, "targetname" );
+    }
+    if ( ent->target ) {
+        gsc_add_string( ctx, ent->target );
+        gsc_object_set_field( ctx, entObj, "target" );
+    }
+    if ( ent->model ) {
+        gsc_add_string( ctx, ent->model );
+        gsc_object_set_field( ctx, entObj, "model" );
+    }
+
+    gsc_add_vec3( ctx, ent->r.currentOrigin );
+    gsc_object_set_field( ctx, entObj, "origin" );
+    gsc_add_vec3( ctx, ent->s.angles );
+    gsc_object_set_field( ctx, entObj, "angles" );
+}
+
+static void G_Scr_PushHudElemObject( gsc_Context *ctx )
+{
+    int obj = gsc_add_tagged_object( ctx, "#hudelem" );
+    gsc_object_set_proxy( ctx, obj, g_scrHudElemProxyIdx );
+}
+
+static int G_Scr_NoopReturn0( gsc_Context *ctx )
+{
+    (void)ctx;
+    return 0;
+}
+
+static int G_Scr_NoopReturn1( gsc_Context *ctx )
+{
+    (void)ctx;
+    gsc_add_int( ctx, 1 );
+    return 1;
+}
+
+static int G_Scr_NoopFalse( gsc_Context *ctx )
+{
+    (void)ctx;
+    gsc_add_bool( ctx, qfalse );
+    return 1;
+}
+
+static int G_Scr_NoopNoneString( gsc_Context *ctx )
+{
+    (void)ctx;
+    gsc_add_string( ctx, "none" );
+    return 1;
+}
+
+static int G_Scr_NoopZero( gsc_Context *ctx )
+{
+    (void)ctx;
+    gsc_add_int( ctx, 0 );
+    return 1;
 }
 
 static qboolean G_Scr_ClassnameMatches( const char *wanted, const char *actual )
@@ -331,12 +491,12 @@ static int GScr_Meth_GetName( gsc_Context *ctx )
 static int GScr_Meth_GetOrigin( gsc_Context *ctx )
 {
     gentity_t *ent = G_Scr_GetSelf( ctx );
-    if ( !ent || !ent->client ) {
+    if ( !ent ) {
         float zero[3] = { 0.0f, 0.0f, 0.0f };
         gsc_add_vec3( ctx, zero );
         return 1;
     }
-    gsc_add_vec3( ctx, ent->client->ps.origin );
+    gsc_add_vec3( ctx, ent->r.currentOrigin );
     return 1;
 }
 
@@ -344,11 +504,13 @@ static int GScr_Meth_SetOrigin( gsc_Context *ctx )
 {
     float     v[3];
     gentity_t *ent = G_Scr_GetSelf( ctx );
-    if ( !ent || !ent->client ) {
+    if ( !ent ) {
         return 0;
     }
     gsc_get_vec3( ctx, 0, v );
-    VectorCopy( v, ent->client->ps.origin );
+    if ( ent->client ) {
+        VectorCopy( v, ent->client->ps.origin );
+    }
     G_SetOrigin( ent, v );
     return 0;
 }
@@ -380,19 +542,42 @@ static int GScr_Meth_GetTeam( gsc_Context *ctx )
         gsc_add_string( ctx, "spectator" );
         return 1;
     }
-    switch ( ent->client->sess.sessionTeam ) {
-        case TEAM_RED:  gsc_add_string( ctx, "red" );       break;
-        case TEAM_BLUE: gsc_add_string( ctx, "blue" );      break;
-        case TEAM_FREE: gsc_add_string( ctx, "free" );      break;
-        default:        gsc_add_string( ctx, "spectator" ); break;
-    }
+    gsc_add_string( ctx, G_Scr_TeamToString( ent->client->sess.sessionTeam ) );
     return 1;
 }
 
 static int GScr_Meth_GetClientNum( gsc_Context *ctx )
 {
+    int clientNum;
     gentity_t *ent = G_Scr_GetSelf( ctx );
-    gsc_add_int( ctx, ent ? ent->s.clientNum : -1 );
+    if ( G_Scr_GetClientNumForEntity( ent, &clientNum ) ) {
+        gsc_add_int( ctx, clientNum );
+    } else {
+        gsc_add_int( ctx, ent ? ent->s.number : -1 );
+    }
+    return 1;
+}
+
+static int GScr_Meth_GetEntityNumber( gsc_Context *ctx )
+{
+    return GScr_Meth_GetClientNum( ctx );
+}
+
+static int GScr_Meth_GetGuid( gsc_Context *ctx )
+{
+    int clientNum;
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+
+    if ( !G_Scr_GetClientNumForEntity( ent, &clientNum ) ) {
+        gsc_add_int( ctx, -1 );
+        return 1;
+    }
+
+    /*
+     * ioq3 does not expose CoD-style integer GUIDs in gamecode.
+     * Return stable client slot as best-effort compatibility value.
+     */
+    gsc_add_int( ctx, clientNum );
     return 1;
 }
 
@@ -414,10 +599,19 @@ static int GScr_Meth_IsAlive( gsc_Context *ctx )
 /* self spawn() — respawn the player at a spawn point */
 static int GScr_Meth_Spawn( gsc_Context *ctx )
 {
+    vec3_t spawnOrigin;
+    vec3_t spawnAngles;
     gentity_t *ent = G_Scr_GetSelf( ctx );
     if ( ent && ent->client &&
          ent->client->pers.connected == CON_CONNECTED ) {
         ClientSpawn( ent );
+        if ( gsc_numargs( ctx ) >= 2 &&
+             gsc_get_type( ctx, 0 ) == GSC_TYPE_VECTOR &&
+             gsc_get_type( ctx, 1 ) == GSC_TYPE_VECTOR ) {
+            gsc_get_vec3( ctx, 0, spawnOrigin );
+            gsc_get_vec3( ctx, 1, spawnAngles );
+            TeleportPlayer( ent, spawnOrigin, spawnAngles );
+        }
     }
     return 0;
 }
@@ -446,6 +640,226 @@ static int GScr_Meth_PlaceSpawnpoint( gsc_Context *ctx )
     trap_LinkEntity( ent );
     return 0;
 }
+
+static int GScr_Meth_Delete( gsc_Context *ctx )
+{
+    int entNum;
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    if ( !ent ) {
+        return 0;
+    }
+
+    entNum = (int)( ent - g_entities );
+    if ( entNum >= MAX_CLIENTS && ent->inuse ) {
+        G_FreeEntity( ent );
+    }
+    return 0;
+}
+
+static int GScr_Meth_Hide( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    if ( ent ) {
+        ent->r.svFlags |= SVF_NOCLIENT;
+        trap_LinkEntity( ent );
+    }
+    return 0;
+}
+
+static int GScr_Meth_Show( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    if ( ent ) {
+        ent->r.svFlags &= ~SVF_NOCLIENT;
+        trap_LinkEntity( ent );
+    }
+    return 0;
+}
+
+static int GScr_Meth_NotSolid( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    if ( ent ) {
+        ent->r.contents = 0;
+        ent->clipmask = 0;
+        trap_LinkEntity( ent );
+    }
+    return 0;
+}
+
+static int GScr_Meth_Solid( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    if ( ent ) {
+        ent->r.contents = CONTENTS_SOLID;
+        ent->clipmask = MASK_SOLID;
+        trap_LinkEntity( ent );
+    }
+    return 0;
+}
+
+static int GScr_Meth_SetModel( gsc_Context *ctx )
+{
+    const char *model = gsc_get_string( ctx, 0 );
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    if ( !ent || !model || !model[0] ) {
+        return 0;
+    }
+
+    ent->model = G_Scr_CopyString( model );
+    if ( model[0] == '*' ) {
+        trap_SetBrushModel( ent, model );
+    }
+    trap_LinkEntity( ent );
+    return 0;
+}
+
+static int GScr_Meth_IsTouching( gsc_Context *ctx )
+{
+    gentity_t *self = G_Scr_GetSelf( ctx );
+    gentity_t *other = G_Scr_GetEntityFromArg( ctx, 0 );
+    gsc_add_bool( ctx,
+                  self && other &&
+                  BoundsIntersect( self->r.absmin, self->r.absmax,
+                                   other->r.absmin, other->r.absmax ) );
+    return 1;
+}
+
+static int GScr_Meth_SetClientCvar( gsc_Context *ctx )
+{
+    (void)ctx;
+    return 0;
+}
+
+static int GScr_Meth_OpenMenu( gsc_Context *ctx )
+{
+    (void)ctx;
+    gsc_add_int( ctx, 1 );
+    return 1;
+}
+
+static int GScr_Meth_CloseMenu( gsc_Context *ctx )
+{
+    (void)ctx;
+    return 0;
+}
+
+static int GScr_Meth_CloseInGameMenu( gsc_Context *ctx )
+{
+    (void)ctx;
+    return 0;
+}
+
+static int GScr_Meth_AttackButtonPressed( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    gsc_add_bool( ctx, ent && ent->client && ( ent->client->buttons & BUTTON_ATTACK ) );
+    return 1;
+}
+
+static int GScr_Meth_UseButtonPressed( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    gsc_add_bool( ctx, ent && ent->client && ( ent->client->buttons & BUTTON_USE_HOLDABLE ) );
+    return 1;
+}
+
+static int GScr_Meth_MeleeButtonPressed( gsc_Context *ctx )
+{
+    return GScr_Meth_AttackButtonPressed( ctx );
+}
+
+static int GScr_Meth_PlayerADS( gsc_Context *ctx )
+{
+    (void)ctx;
+    gsc_add_bool( ctx, qfalse );
+    return 1;
+}
+
+static int GScr_Meth_IsOnGround( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    gsc_add_bool( ctx, ent && ent->client &&
+                  ent->client->ps.groundEntityNum != ENTITYNUM_NONE );
+    return 1;
+}
+
+static int GScr_Meth_GiveWeapon( gsc_Context *ctx )          { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_TakeWeapon( gsc_Context *ctx )          { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_GiveMaxAmmo( gsc_Context *ctx )         { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_GiveStartAmmo( gsc_Context *ctx )       { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_SetSpawnWeapon( gsc_Context *ctx )      { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_SetWeaponSlotWeapon( gsc_Context *ctx ) { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_SetWeaponSlotAmmo( gsc_Context *ctx )   { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_SetWeaponSlotClipAmmo( gsc_Context *ctx ){ return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_SetWeaponClipAmmo( gsc_Context *ctx )   { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_GetWeaponSlotAmmo( gsc_Context *ctx )   { return G_Scr_NoopZero( ctx ); }
+static int GScr_Meth_GetWeaponSlotClipAmmo( gsc_Context *ctx ){ return G_Scr_NoopZero( ctx ); }
+static int GScr_Meth_GetWeaponSlotWeapon( gsc_Context *ctx ) { return G_Scr_NoopNoneString( ctx ); }
+static int GScr_Meth_GetCurrentWeapon( gsc_Context *ctx )    { return G_Scr_NoopNoneString( ctx ); }
+static int GScr_Meth_GetCurrentOffhand( gsc_Context *ctx )   { return G_Scr_NoopNoneString( ctx ); }
+static int GScr_Meth_HasWeapon( gsc_Context *ctx )           { return G_Scr_NoopFalse( ctx ); }
+static int GScr_Meth_SwitchToWeapon( gsc_Context *ctx )      { return G_Scr_NoopReturn1( ctx ); }
+static int GScr_Meth_SwitchToOffhand( gsc_Context *ctx )     { return G_Scr_NoopReturn1( ctx ); }
+static int GScr_Meth_SetClientDvar( gsc_Context *ctx )       { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_FreezeControls( gsc_Context *ctx )      { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_DisableWeapon( gsc_Context *ctx )       { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_EnableWeapon( gsc_Context *ctx )        { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_SetEnterTime( gsc_Context *ctx )        { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_PingPlayer( gsc_Context *ctx )          { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_SayAll( gsc_Context *ctx )              { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_SayTeam( gsc_Context *ctx )             { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_SetViewModel( gsc_Context *ctx )        { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_GetViewModel( gsc_Context *ctx )        { return G_Scr_NoopNoneString( ctx ); }
+static int GScr_Meth_Attach( gsc_Context *ctx )              { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_Detach( gsc_Context *ctx )              { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_DetachAll( gsc_Context *ctx )           { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_PlaySound( gsc_Context *ctx )           { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_PlayLocalSound( gsc_Context *ctx )      { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_PlayLoopSound( gsc_Context *ctx )       { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_StopLoopSound( gsc_Context *ctx )       { return G_Scr_NoopReturn0( ctx ); }
+
+static int GScr_Meth_ClonePlayer( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    if ( ent && ent->client ) {
+        CopyToBodyQue( ent );
+    }
+    return 0;
+}
+
+static int GScr_Meth_DropItem( gsc_Context *ctx )
+{
+    (void)ctx;
+    return 0;
+}
+
+/*
+ * CoD callback scripts call finishPlayerDamage(), but ioq3 already applies
+ * damage before G_Scr_PlayerDamage is fired. Keep this as a no-op so damage
+ * does not get applied twice.
+ */
+static int GScr_Meth_FinishPlayerDamage( gsc_Context *ctx )
+{
+    (void)ctx;
+    return 0;
+}
+
+static int GScr_Meth_AllowSpectateTeam( gsc_Context *ctx )
+{
+    (void)ctx;
+    return 0;
+}
+
+static int GScr_Meth_Hud_SetText( gsc_Context *ctx )       { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_Hud_SetShader( gsc_Context *ctx )     { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_Hud_SetTimer( gsc_Context *ctx )      { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_Hud_SetTimerUp( gsc_Context *ctx )    { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_Hud_SetTenthsTimer( gsc_Context *ctx ){ return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_Hud_SetValue( gsc_Context *ctx )      { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_Hud_FadeOverTime( gsc_Context *ctx )  { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_Hud_MoveOverTime( gsc_Context *ctx )  { return G_Scr_NoopReturn0( ctx ); }
+static int GScr_Meth_Hud_Destroy( gsc_Context *ctx )       { return G_Scr_NoopReturn0( ctx ); }
 
 /* =========================================================================
    Global / free functions available to scripts
@@ -517,6 +931,263 @@ static int GScr_Fn_SetDvar( gsc_Context *ctx )
     return 0;
 }
 
+static int GScr_Fn_GetDvarFloat( gsc_Context *ctx )
+{
+    const char *name = gsc_get_string( ctx, 0 );
+    if ( !name ) name = "";
+    gsc_add_float( ctx, trap_Cvar_VariableValue( name ) );
+    return 1;
+}
+
+static int GScr_Fn_MakeCvarServerInfo( gsc_Context *ctx )
+{
+    const char *name = gsc_get_string( ctx, 0 );
+    const char *defaultValue = ( gsc_numargs( ctx ) > 1 ) ? gsc_get_string( ctx, 1 ) : "";
+    char        cur[ 256 ];
+
+    if ( name && name[0] ) {
+        trap_Cvar_VariableStringBuffer( name, cur, sizeof( cur ) );
+        if ( !cur[0] ) {
+            trap_Cvar_Set( name, defaultValue ? defaultValue : "" );
+        }
+    }
+    return 0;
+}
+
+static int GScr_Fn_SetArchive( gsc_Context *ctx )
+{
+    (void)ctx;
+    return 0;
+}
+
+static int GScr_Fn_LogPrint( gsc_Context *ctx )
+{
+    int i, n = gsc_numargs( ctx );
+    for ( i = 0; i < n; i++ ) {
+        G_LogPrintf( "%s", gsc_get_string( ctx, i ) );
+    }
+    return 0;
+}
+
+static int GScr_Fn_IsPlayerGlobal( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetEntityFromArg( ctx, 0 );
+    gsc_add_bool( ctx, ent && ent->client &&
+                  ent->client->pers.connected != CON_DISCONNECTED );
+    return 1;
+}
+
+static int GScr_Fn_IsAliveGlobal( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetEntityFromArg( ctx, 0 );
+    gsc_add_bool( ctx, ent && ent->health > 0 );
+    return 1;
+}
+
+static int GScr_Fn_NewHudElem( gsc_Context *ctx )
+{
+    (void)ctx;
+    G_Scr_PushHudElemObject( ctx );
+    return 1;
+}
+
+static int GScr_Fn_NewClientHudElem( gsc_Context *ctx )
+{
+    (void)ctx;
+    G_Scr_PushHudElemObject( ctx );
+    return 1;
+}
+
+static int GScr_Fn_NewTeamHudElem( gsc_Context *ctx )
+{
+    (void)ctx;
+    G_Scr_PushHudElemObject( ctx );
+    return 1;
+}
+
+static int GScr_Fn_PositionWouldTelefrag( gsc_Context *ctx )
+{
+    trace_t tr;
+    vec3_t  origin;
+    vec3_t  mins = { -15.0f, -15.0f, -24.0f };
+    vec3_t  maxs = {  15.0f,  15.0f,  32.0f };
+
+    gsc_get_vec3( ctx, 0, origin );
+    trap_Trace( &tr, origin, mins, maxs, origin, ENTITYNUM_NONE, MASK_PLAYERSOLID );
+    gsc_add_bool( ctx, tr.startsolid || tr.allsolid );
+    return 1;
+}
+
+static int GScr_Fn_Distance( gsc_Context *ctx )
+{
+    vec3_t a, b, d;
+    gsc_get_vec3( ctx, 0, a );
+    gsc_get_vec3( ctx, 1, b );
+    VectorSubtract( a, b, d );
+    gsc_add_float( ctx, VectorLength( d ) );
+    return 1;
+}
+
+static int GScr_Fn_Length( gsc_Context *ctx )
+{
+    vec3_t v;
+    gsc_get_vec3( ctx, 0, v );
+    gsc_add_float( ctx, VectorLength( v ) );
+    return 1;
+}
+
+static int GScr_Fn_LengthSquared( gsc_Context *ctx )
+{
+    vec3_t v;
+    gsc_get_vec3( ctx, 0, v );
+    gsc_add_float( ctx, DotProduct( v, v ) );
+    return 1;
+}
+
+static int GScr_Fn_VectorNormalize( gsc_Context *ctx )
+{
+    vec3_t v;
+    gsc_get_vec3( ctx, 0, v );
+    VectorNormalize( v );
+    gsc_add_vec3( ctx, v );
+    return 1;
+}
+
+static int GScr_Fn_VectorScale( gsc_Context *ctx )
+{
+    vec3_t v, out;
+    float  s = gsc_get_float( ctx, 1 );
+    gsc_get_vec3( ctx, 0, v );
+    VectorScale( v, s, out );
+    gsc_add_vec3( ctx, out );
+    return 1;
+}
+
+static int GScr_Fn_VectorToAngles( gsc_Context *ctx )
+{
+    vec3_t v, a;
+    gsc_get_vec3( ctx, 0, v );
+    vectoangles( v, a );
+    gsc_add_vec3( ctx, a );
+    return 1;
+}
+
+static int GScr_Fn_AnglesToForward( gsc_Context *ctx )
+{
+    vec3_t a, fwd;
+    gsc_get_vec3( ctx, 0, a );
+    AngleVectors( a, fwd, NULL, NULL );
+    gsc_add_vec3( ctx, fwd );
+    return 1;
+}
+
+static int GScr_Fn_SpawnStruct( gsc_Context *ctx )
+{
+    (void)ctx;
+    gsc_add_object( ctx );
+    return 1;
+}
+
+static int GScr_Fn_Spawn( gsc_Context *ctx )
+{
+    const char *classname = gsc_get_string( ctx, 0 );
+    vec3_t      origin = { 0.0f, 0.0f, 0.0f };
+    gentity_t  *ent = G_Spawn();
+
+    if ( !ent ) {
+        return 0;
+    }
+
+    if ( gsc_numargs( ctx ) > 1 && gsc_get_type( ctx, 1 ) == GSC_TYPE_VECTOR ) {
+        gsc_get_vec3( ctx, 1, origin );
+    }
+
+    if ( classname && classname[0] ) {
+        ent->classname = G_Scr_CopyString( classname );
+    } else {
+        ent->classname = G_Scr_CopyString( "script_model" );
+    }
+
+    VectorCopy( origin, ent->s.origin );
+    VectorCopy( origin, ent->s.pos.trBase );
+    VectorCopy( origin, ent->r.currentOrigin );
+
+    if ( !G_CallSpawn( ent ) ) {
+        trap_LinkEntity( ent );
+    }
+
+    if ( !ent->inuse ) {
+        return 0;
+    }
+
+    G_Scr_PushEntityObject( ctx, ent );
+    return 1;
+}
+
+static int GScr_Fn_MapRestart( gsc_Context *ctx )
+{
+    (void)ctx;
+    trap_SendConsoleCommand( EXEC_APPEND, "map_restart 0\n" );
+    return 0;
+}
+
+static int GScr_Fn_SetClientNameMode( gsc_Context *ctx )
+{
+    (void)ctx;
+    return 0;
+}
+
+static int GScr_Fn_Obituary( gsc_Context *ctx )
+{
+    (void)ctx;
+    return 0;
+}
+
+static int GScr_Fn_MapExists( gsc_Context *ctx )
+{
+    char        path[ MAX_QPATH ];
+    char        mapName[ MAX_QPATH ];
+    fileHandle_t fh;
+    int          len;
+    const char  *name = gsc_get_string( ctx, 0 );
+
+    if ( !name || !name[0] ) {
+        gsc_add_bool( ctx, qfalse );
+        return 1;
+    }
+
+    G_Scr_NormalizeMapName( name, mapName, sizeof( mapName ) );
+    Com_sprintf( path, sizeof( path ), "maps/%s.bsp", mapName );
+
+    len = trap_FS_FOpenFile( path, &fh, FS_READ );
+    if ( fh ) {
+        trap_FS_FCloseFile( fh );
+    }
+
+    if ( len <= 0 ) {
+        Com_sprintf( path, sizeof( path ), "maps/mp/%s.bsp", mapName );
+        len = trap_FS_FOpenFile( path, &fh, FS_READ );
+        if ( fh ) {
+            trap_FS_FCloseFile( fh );
+        }
+    }
+
+    gsc_add_bool( ctx, len > 0 );
+    return 1;
+}
+
+static int GScr_Fn_Announcement( gsc_Context *ctx ) { (void)ctx; return 0; }
+static int GScr_Fn_ClientAnnouncement( gsc_Context *ctx ) { (void)ctx; return 0; }
+static int GScr_Fn_UpdateScores( gsc_Context *ctx ) { (void)ctx; return 0; }
+static int GScr_Fn_AddTestClient( gsc_Context *ctx ) { (void)ctx; return 0; }
+static int GScr_Fn_PrecacheMenu( gsc_Context *ctx ) { (void)ctx; return 0; }
+static int GScr_Fn_PrecacheStatusIcon( gsc_Context *ctx ) { (void)ctx; return 0; }
+static int GScr_Fn_PrecacheHeadIcon( gsc_Context *ctx ) { (void)ctx; return 0; }
+static int GScr_Fn_PrecacheItem( gsc_Context *ctx ) { (void)ctx; return 0; }
+static int GScr_Fn_PrecacheShader( gsc_Context *ctx ) { (void)ctx; return 0; }
+static int GScr_Fn_PrecacheString( gsc_Context *ctx ) { (void)ctx; return 0; }
+static int GScr_Fn_PrecacheTurret( gsc_Context *ctx ) { (void)ctx; return 0; }
+
 /* gettime() — returns level time in seconds */
 static int GScr_Fn_GetTime( gsc_Context *ctx )
 {
@@ -551,6 +1222,10 @@ static int GScr_Fn_GetEnt( gsc_Context *ctx )
         return 1;
     }
 
+    if ( gsc_numargs( ctx ) < 1 ) {
+        return 0;
+    }
+
     value = gsc_get_string( ctx, 0 );
     key = ( gsc_numargs( ctx ) > 1 ) ? gsc_get_string( ctx, 1 ) : "targetname";
 
@@ -572,14 +1247,24 @@ static int GScr_Fn_GetEntArray( gsc_Context *ctx )
     int i;
     int count = 0;
     char idxKey[ 32 ];
-    const char *value = gsc_get_string( ctx, 0 );
-    const char *key = ( gsc_numargs( ctx ) > 1 ) ? gsc_get_string( ctx, 1 ) : "classname";
+    const char *value = NULL;
+    const char *key = "classname";
+    qboolean filter = qfalse;
 
     arrObj = gsc_add_object( ctx );
 
+    if ( gsc_numargs( ctx ) > 0 ) {
+        value = gsc_get_string( ctx, 0 );
+        key = ( gsc_numargs( ctx ) > 1 ) ? gsc_get_string( ctx, 1 ) : "classname";
+        filter = ( value && value[0] );
+    }
+
     for ( i = 0; i < level.num_entities; i++ ) {
         gentity_t *ent = &g_entities[ i ];
-        if ( !G_Scr_EntityMatchesFilter( ent, value, key ) ) {
+        if ( !ent->inuse ) {
+            continue;
+        }
+        if ( filter && !G_Scr_EntityMatchesFilter( ent, value, key ) ) {
             continue;
         }
 
@@ -658,13 +1343,24 @@ static void G_Scr_RegisterFunctions( void )
     /* Math / random */
     gsc_register_function( g_scrCtx, NULL, "randomint",    GScr_Fn_RandomInt );
     gsc_register_function( g_scrCtx, NULL, "randomfloat",  GScr_Fn_RandomFloat );
+    gsc_register_function( g_scrCtx, NULL, "distance",     GScr_Fn_Distance );
+    gsc_register_function( g_scrCtx, NULL, "length",       GScr_Fn_Length );
+    gsc_register_function( g_scrCtx, NULL, "lengthsquared", GScr_Fn_LengthSquared );
+    gsc_register_function( g_scrCtx, NULL, "vectornormalize", GScr_Fn_VectorNormalize );
+    gsc_register_function( g_scrCtx, NULL, "vectorscale",  GScr_Fn_VectorScale );
+    gsc_register_function( g_scrCtx, NULL, "vectortoangles", GScr_Fn_VectorToAngles );
+    gsc_register_function( g_scrCtx, NULL, "anglestoforward", GScr_Fn_AnglesToForward );
 
     /* Cvar / dvar — register both spellings since they're different names */
     gsc_register_function( g_scrCtx, NULL, "getdvar",      GScr_Fn_GetDvar );
     gsc_register_function( g_scrCtx, NULL, "getdvarint",   GScr_Fn_GetDvarInt );
+    gsc_register_function( g_scrCtx, NULL, "getdvarfloat", GScr_Fn_GetDvarFloat );
     gsc_register_function( g_scrCtx, NULL, "setdvar",      GScr_Fn_SetDvar );
     gsc_register_function( g_scrCtx, NULL, "getcvar",      GScr_Fn_GetCvar );   /* CoD1 alias */
+    gsc_register_function( g_scrCtx, NULL, "getcvarint",   GScr_Fn_GetDvarInt );
+    gsc_register_function( g_scrCtx, NULL, "getcvarfloat", GScr_Fn_GetDvarFloat );
     gsc_register_function( g_scrCtx, NULL, "setcvar",      GScr_Fn_SetCvar );   /* CoD1 alias */
+    gsc_register_function( g_scrCtx, NULL, "makecvarserverinfo", GScr_Fn_MakeCvarServerInfo );
 
     /* Time */
     gsc_register_function( g_scrCtx, NULL, "gettime",      GScr_Fn_GetTime );
@@ -672,18 +1368,45 @@ static void G_Scr_RegisterFunctions( void )
     /* Entity access */
     gsc_register_function( g_scrCtx, NULL, "getent",       GScr_Fn_GetEnt );
     gsc_register_function( g_scrCtx, NULL, "getentarray",  GScr_Fn_GetEntArray );
+    gsc_register_function( g_scrCtx, NULL, "spawn",        GScr_Fn_Spawn );
+    gsc_register_function( g_scrCtx, NULL, "spawnstruct",  GScr_Fn_SpawnStruct );
+    gsc_register_function( g_scrCtx, NULL, "positionwouldtelefrag", GScr_Fn_PositionWouldTelefrag );
 
     /* Player counts */
     gsc_register_function( g_scrCtx, NULL, "getmaxplayers", GScr_Fn_GetMaxPlayers );
     gsc_register_function( g_scrCtx, NULL, "getnumplayers", GScr_Fn_GetNumPlayers );
+    gsc_register_function( g_scrCtx, NULL, "isplayer",     GScr_Fn_IsPlayerGlobal );
+    gsc_register_function( g_scrCtx, NULL, "isalive",      GScr_Fn_IsAliveGlobal );
 
     /* Level control */
     gsc_register_function( g_scrCtx, NULL, "exitlevel",    GScr_Fn_ExitLevel );
+    gsc_register_function( g_scrCtx, NULL, "maprestart",   GScr_Fn_MapRestart );
+    gsc_register_function( g_scrCtx, NULL, "mapexists",    GScr_Fn_MapExists );
+    gsc_register_function( g_scrCtx, NULL, "setarchive",   GScr_Fn_SetArchive );
+    gsc_register_function( g_scrCtx, NULL, "setclientnamemode", GScr_Fn_SetClientNameMode );
+    gsc_register_function( g_scrCtx, NULL, "obituary",     GScr_Fn_Obituary );
+    gsc_register_function( g_scrCtx, NULL, "logprint",     GScr_Fn_LogPrint );
+    gsc_register_function( g_scrCtx, NULL, "announcement", GScr_Fn_Announcement );
+    gsc_register_function( g_scrCtx, NULL, "clientannouncement", GScr_Fn_ClientAnnouncement );
+    gsc_register_function( g_scrCtx, NULL, "updatescores", GScr_Fn_UpdateScores );
+    gsc_register_function( g_scrCtx, NULL, "addtestclient", GScr_Fn_AddTestClient );
 
     /* Client-side / audio stubs (no-ops on the server) */
     gsc_register_function( g_scrCtx, NULL, "ambientplay",  GScr_Fn_AmbientPlay );
     gsc_register_function( g_scrCtx, NULL, "ambientstop",  GScr_Fn_AmbientStop );
     gsc_register_function( g_scrCtx, NULL, "setcullfog",   GScr_Fn_SetCullFog );
+    gsc_register_function( g_scrCtx, NULL, "precachemenu", GScr_Fn_PrecacheMenu );
+    gsc_register_function( g_scrCtx, NULL, "precachestatusicon", GScr_Fn_PrecacheStatusIcon );
+    gsc_register_function( g_scrCtx, NULL, "precacheheadicon", GScr_Fn_PrecacheHeadIcon );
+    gsc_register_function( g_scrCtx, NULL, "precacheitem", GScr_Fn_PrecacheItem );
+    gsc_register_function( g_scrCtx, NULL, "precacheshader", GScr_Fn_PrecacheShader );
+    gsc_register_function( g_scrCtx, NULL, "precachestring", GScr_Fn_PrecacheString );
+    gsc_register_function( g_scrCtx, NULL, "precacheturret", GScr_Fn_PrecacheTurret );
+
+    /* HUD element constructors */
+    gsc_register_function( g_scrCtx, NULL, "newhudelem",        GScr_Fn_NewHudElem );
+    gsc_register_function( g_scrCtx, NULL, "newclienthudelem",  GScr_Fn_NewClientHudElem );
+    gsc_register_function( g_scrCtx, NULL, "newteamhudelem",    GScr_Fn_NewTeamHudElem );
 }
 
 /* =========================================================================
@@ -696,62 +1419,125 @@ static void G_Scr_RegisterFunctions( void )
      level, game, anim  (tagged empty objects, CoD compat)
      self               (initially = level object)
    ========================================================================= */
+static void G_Scr_AddMethod( int methodsObj, const char *name, gsc_Function fn )
+{
+    gsc_add_function( g_scrCtx, fn );
+    gsc_object_set_field( g_scrCtx, methodsObj, name );
+}
+
 static void G_Scr_CreateGlobals( void )
 {
-    int proxyObj;
-    int methodsObj;
-    int entObj;
+    int entProxyObj;
+    int entMethodsObj;
+    int playerProxyObj;
+    int playerMethodsObj;
+    int hudProxyObj;
+    int hudMethodsObj;
+    int levelObj;
 
-    /* ---- shared entity proxy ---- */
-    proxyObj = gsc_add_tagged_object( g_scrCtx, "#entity_proxy" );
-    g_scrEntityProxyIdx = proxyObj;
+    /* ---- base entity proxy ---- */
+    entProxyObj = gsc_add_tagged_object( g_scrCtx, "#ent_proxy" );
+    g_scrEntityProxyIdx = entProxyObj;
 
-    methodsObj = gsc_add_object( g_scrCtx );
+    entMethodsObj = gsc_add_object( g_scrCtx );
+    G_Scr_AddMethod( entMethodsObj, "getname",         GScr_Meth_GetName );
+    G_Scr_AddMethod( entMethodsObj, "getorigin",       GScr_Meth_GetOrigin );
+    G_Scr_AddMethod( entMethodsObj, "setorigin",       GScr_Meth_SetOrigin );
+    G_Scr_AddMethod( entMethodsObj, "gethealth",       GScr_Meth_GetHealth );
+    G_Scr_AddMethod( entMethodsObj, "sethealth",       GScr_Meth_SetHealth );
+    G_Scr_AddMethod( entMethodsObj, "getteam",         GScr_Meth_GetTeam );
+    G_Scr_AddMethod( entMethodsObj, "getclientnum",    GScr_Meth_GetClientNum );
+    G_Scr_AddMethod( entMethodsObj, "getentitynumber", GScr_Meth_GetEntityNumber );
+    G_Scr_AddMethod( entMethodsObj, "isplayer",        GScr_Meth_IsPlayer );
+    G_Scr_AddMethod( entMethodsObj, "isalive",         GScr_Meth_IsAlive );
+    G_Scr_AddMethod( entMethodsObj, "spawn",           GScr_Meth_Spawn );
+    G_Scr_AddMethod( entMethodsObj, "suicide",         GScr_Meth_Suicide );
+    G_Scr_AddMethod( entMethodsObj, "placespawnpoint", GScr_Meth_PlaceSpawnpoint );
+    G_Scr_AddMethod( entMethodsObj, "delete",          GScr_Meth_Delete );
+    G_Scr_AddMethod( entMethodsObj, "hide",            GScr_Meth_Hide );
+    G_Scr_AddMethod( entMethodsObj, "show",            GScr_Meth_Show );
+    G_Scr_AddMethod( entMethodsObj, "notsolid",        GScr_Meth_NotSolid );
+    G_Scr_AddMethod( entMethodsObj, "solid",           GScr_Meth_Solid );
+    G_Scr_AddMethod( entMethodsObj, "setmodel",        GScr_Meth_SetModel );
+    G_Scr_AddMethod( entMethodsObj, "istouching",      GScr_Meth_IsTouching );
+    G_Scr_AddMethod( entMethodsObj, "attach",          GScr_Meth_Attach );
+    G_Scr_AddMethod( entMethodsObj, "detach",          GScr_Meth_Detach );
+    G_Scr_AddMethod( entMethodsObj, "detachall",       GScr_Meth_DetachAll );
+    G_Scr_AddMethod( entMethodsObj, "playsound",       GScr_Meth_PlaySound );
+    G_Scr_AddMethod( entMethodsObj, "playlocalsound",  GScr_Meth_PlayLocalSound );
+    G_Scr_AddMethod( entMethodsObj, "playloopsound",   GScr_Meth_PlayLoopSound );
+    G_Scr_AddMethod( entMethodsObj, "stoploopsound",   GScr_Meth_StopLoopSound );
+    gsc_object_set_field( g_scrCtx, entProxyObj, "__call" );
 
-    /* Register entity methods on the methods object */
-    gsc_add_function( g_scrCtx, GScr_Meth_GetName );
-    gsc_object_set_field( g_scrCtx, methodsObj, "getname" );
+    /* ---- player proxy (inherits from ent proxy) ---- */
+    playerProxyObj = gsc_add_tagged_object( g_scrCtx, "#player_proxy" );
+    g_scrPlayerProxyIdx = playerProxyObj;
+    gsc_object_set_proxy( g_scrCtx, playerProxyObj, entProxyObj );
 
-    gsc_add_function( g_scrCtx, GScr_Meth_GetOrigin );
-    gsc_object_set_field( g_scrCtx, methodsObj, "getorigin" );
+    playerMethodsObj = gsc_add_object( g_scrCtx );
+    G_Scr_AddMethod( playerMethodsObj, "getguid",               GScr_Meth_GetGuid );
+    G_Scr_AddMethod( playerMethodsObj, "setclientcvar",         GScr_Meth_SetClientCvar );
+    G_Scr_AddMethod( playerMethodsObj, "openmenu",              GScr_Meth_OpenMenu );
+    G_Scr_AddMethod( playerMethodsObj, "closemenu",             GScr_Meth_CloseMenu );
+    G_Scr_AddMethod( playerMethodsObj, "closeingamemenu",       GScr_Meth_CloseInGameMenu );
+    G_Scr_AddMethod( playerMethodsObj, "attackbuttonpressed",   GScr_Meth_AttackButtonPressed );
+    G_Scr_AddMethod( playerMethodsObj, "usebuttonpressed",      GScr_Meth_UseButtonPressed );
+    G_Scr_AddMethod( playerMethodsObj, "meleebuttonpressed",    GScr_Meth_MeleeButtonPressed );
+    G_Scr_AddMethod( playerMethodsObj, "playerads",             GScr_Meth_PlayerADS );
+    G_Scr_AddMethod( playerMethodsObj, "isonground",            GScr_Meth_IsOnGround );
+    G_Scr_AddMethod( playerMethodsObj, "giveweapon",            GScr_Meth_GiveWeapon );
+    G_Scr_AddMethod( playerMethodsObj, "takeweapon",            GScr_Meth_TakeWeapon );
+    G_Scr_AddMethod( playerMethodsObj, "givemaxammo",           GScr_Meth_GiveMaxAmmo );
+    G_Scr_AddMethod( playerMethodsObj, "givestartammo",         GScr_Meth_GiveStartAmmo );
+    G_Scr_AddMethod( playerMethodsObj, "setspawnweapon",        GScr_Meth_SetSpawnWeapon );
+    G_Scr_AddMethod( playerMethodsObj, "setweaponslotweapon",   GScr_Meth_SetWeaponSlotWeapon );
+    G_Scr_AddMethod( playerMethodsObj, "setweaponslotammo",     GScr_Meth_SetWeaponSlotAmmo );
+    G_Scr_AddMethod( playerMethodsObj, "setweaponslotclipammo", GScr_Meth_SetWeaponSlotClipAmmo );
+    G_Scr_AddMethod( playerMethodsObj, "setweaponclipammo",     GScr_Meth_SetWeaponClipAmmo );
+    G_Scr_AddMethod( playerMethodsObj, "getweaponslotweapon",   GScr_Meth_GetWeaponSlotWeapon );
+    G_Scr_AddMethod( playerMethodsObj, "getweaponslotammo",     GScr_Meth_GetWeaponSlotAmmo );
+    G_Scr_AddMethod( playerMethodsObj, "getweaponslotclipammo", GScr_Meth_GetWeaponSlotClipAmmo );
+    G_Scr_AddMethod( playerMethodsObj, "getcurrentweapon",      GScr_Meth_GetCurrentWeapon );
+    G_Scr_AddMethod( playerMethodsObj, "getcurrentoffhand",     GScr_Meth_GetCurrentOffhand );
+    G_Scr_AddMethod( playerMethodsObj, "hasweapon",             GScr_Meth_HasWeapon );
+    G_Scr_AddMethod( playerMethodsObj, "switchtoweapon",        GScr_Meth_SwitchToWeapon );
+    G_Scr_AddMethod( playerMethodsObj, "switchtooffhand",       GScr_Meth_SwitchToOffhand );
+    G_Scr_AddMethod( playerMethodsObj, "setclientdvar",         GScr_Meth_SetClientDvar );
+    G_Scr_AddMethod( playerMethodsObj, "freezecontrols",        GScr_Meth_FreezeControls );
+    G_Scr_AddMethod( playerMethodsObj, "disableweapon",         GScr_Meth_DisableWeapon );
+    G_Scr_AddMethod( playerMethodsObj, "enableweapon",          GScr_Meth_EnableWeapon );
+    G_Scr_AddMethod( playerMethodsObj, "setentertime",          GScr_Meth_SetEnterTime );
+    G_Scr_AddMethod( playerMethodsObj, "pingplayer",            GScr_Meth_PingPlayer );
+    G_Scr_AddMethod( playerMethodsObj, "sayall",                GScr_Meth_SayAll );
+    G_Scr_AddMethod( playerMethodsObj, "sayteam",               GScr_Meth_SayTeam );
+    G_Scr_AddMethod( playerMethodsObj, "setviewmodel",          GScr_Meth_SetViewModel );
+    G_Scr_AddMethod( playerMethodsObj, "getviewmodel",          GScr_Meth_GetViewModel );
+    G_Scr_AddMethod( playerMethodsObj, "cloneplayer",           GScr_Meth_ClonePlayer );
+    G_Scr_AddMethod( playerMethodsObj, "dropitem",              GScr_Meth_DropItem );
+    G_Scr_AddMethod( playerMethodsObj, "finishplayerdamage",    GScr_Meth_FinishPlayerDamage );
+    G_Scr_AddMethod( playerMethodsObj, "allowspectateteam",     GScr_Meth_AllowSpectateTeam );
+    gsc_object_set_field( g_scrCtx, playerProxyObj, "__call" );
 
-    gsc_add_function( g_scrCtx, GScr_Meth_SetOrigin );
-    gsc_object_set_field( g_scrCtx, methodsObj, "setorigin" );
+    /* ---- HUD element proxy ---- */
+    hudProxyObj = gsc_add_tagged_object( g_scrCtx, "#hudelem_proxy" );
+    g_scrHudElemProxyIdx = hudProxyObj;
 
-    gsc_add_function( g_scrCtx, GScr_Meth_GetHealth );
-    gsc_object_set_field( g_scrCtx, methodsObj, "gethealth" );
-
-    gsc_add_function( g_scrCtx, GScr_Meth_SetHealth );
-    gsc_object_set_field( g_scrCtx, methodsObj, "sethealth" );
-
-    gsc_add_function( g_scrCtx, GScr_Meth_GetTeam );
-    gsc_object_set_field( g_scrCtx, methodsObj, "getteam" );
-
-    gsc_add_function( g_scrCtx, GScr_Meth_GetClientNum );
-    gsc_object_set_field( g_scrCtx, methodsObj, "getclientnum" );
-
-    gsc_add_function( g_scrCtx, GScr_Meth_IsPlayer );
-    gsc_object_set_field( g_scrCtx, methodsObj, "isplayer" );
-
-    gsc_add_function( g_scrCtx, GScr_Meth_IsAlive );
-    gsc_object_set_field( g_scrCtx, methodsObj, "isalive" );
-
-    gsc_add_function( g_scrCtx, GScr_Meth_Spawn );
-    gsc_object_set_field( g_scrCtx, methodsObj, "spawn" );
-
-    gsc_add_function( g_scrCtx, GScr_Meth_Suicide );
-    gsc_object_set_field( g_scrCtx, methodsObj, "suicide" );
-
-    gsc_add_function( g_scrCtx, GScr_Meth_PlaceSpawnpoint );
-    gsc_object_set_field( g_scrCtx, methodsObj, "placespawnpoint" );
-
-    /* methods object becomes the __call handler on the proxy */
-    gsc_object_set_field( g_scrCtx, proxyObj, "__call" );
-    /* Stack: [proxyObj] — methodsObj was consumed */
+    hudMethodsObj = gsc_add_object( g_scrCtx );
+    G_Scr_AddMethod( hudMethodsObj, "settext",       GScr_Meth_Hud_SetText );
+    G_Scr_AddMethod( hudMethodsObj, "setshader",     GScr_Meth_Hud_SetShader );
+    G_Scr_AddMethod( hudMethodsObj, "settimer",      GScr_Meth_Hud_SetTimer );
+    G_Scr_AddMethod( hudMethodsObj, "settimerup",    GScr_Meth_Hud_SetTimerUp );
+    G_Scr_AddMethod( hudMethodsObj, "settenthstimer", GScr_Meth_Hud_SetTenthsTimer );
+    G_Scr_AddMethod( hudMethodsObj, "setvalue",      GScr_Meth_Hud_SetValue );
+    G_Scr_AddMethod( hudMethodsObj, "fadeovertime",  GScr_Meth_Hud_FadeOverTime );
+    G_Scr_AddMethod( hudMethodsObj, "moveovertime",  GScr_Meth_Hud_MoveOverTime );
+    G_Scr_AddMethod( hudMethodsObj, "destroy",       GScr_Meth_Hud_Destroy );
+    G_Scr_AddMethod( hudMethodsObj, "delete",        GScr_Meth_Hud_Destroy );
+    gsc_object_set_field( g_scrCtx, hudProxyObj, "__call" );
 
     /* ---- level object (CoD compat global) ---- */
-    entObj = gsc_add_tagged_object( g_scrCtx, "#level" );
-    gsc_object_set_proxy( g_scrCtx, entObj, proxyObj );
+    levelObj = gsc_add_tagged_object( g_scrCtx, "#level" );
+    gsc_object_set_proxy( g_scrCtx, levelObj, entProxyObj );
     gsc_set_global( g_scrCtx, "level" );
 
     /* ---- game object ---- */
@@ -765,8 +1551,6 @@ static void G_Scr_CreateGlobals( void )
     /* ---- default self = level ---- */
     gsc_get_global( g_scrCtx, "level" );
     gsc_set_global( g_scrCtx, "self" );
-
-    /* Stack is now just [proxyObj] which lives here forever */
 }
 
 /* =========================================================================
@@ -781,7 +1565,7 @@ static void G_Scr_CreatePlayerObj( int clientNum )
     ent = &g_entities[ clientNum ];
 
     entObj = gsc_add_tagged_object( g_scrCtx, "#entity" );
-    gsc_object_set_proxy( g_scrCtx, entObj, g_scrEntityProxyIdx );
+    gsc_object_set_proxy( g_scrCtx, entObj, g_scrPlayerProxyIdx );
     gsc_object_set_userdata( g_scrCtx, entObj, ent );
 
     /* Store raw ptr so we can push it back later for callbacks */
