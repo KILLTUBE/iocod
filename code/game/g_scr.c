@@ -256,6 +256,67 @@ static gentity_t *G_Scr_GetSelf( gsc_Context *ctx )
     return (gentity_t *)gsc_object_get_userdata( ctx, selfIdx );
 }
 
+static void G_Scr_PushEntityObject( gsc_Context *ctx, gentity_t *ent )
+{
+    int entObj = gsc_add_tagged_object( ctx, "#entity" );
+    gsc_object_set_proxy( ctx, entObj, g_scrEntityProxyIdx );
+    gsc_object_set_userdata( ctx, entObj, ent );
+}
+
+static qboolean G_Scr_ClassnameMatches( const char *wanted, const char *actual )
+{
+    if ( !wanted || !wanted[0] || !actual || !actual[0] ) {
+        return qfalse;
+    }
+
+    if ( !Q_stricmp( wanted, actual ) ) {
+        return qtrue;
+    }
+
+    /*
+     * CoD MP spawn entities are remapped to Q3 spawn classes by the gamecode.
+     * Keep script lookups working by aliasing CoD class requests.
+     */
+    if ( !Q_stricmp( actual, "info_player_deathmatch" ) &&
+         !Q_stricmpn( wanted, "mp_", 3 ) &&
+         Q_stristr( wanted, "_spawn" ) ) {
+        return qtrue;
+    }
+
+    if ( !Q_stricmp( actual, "info_player_intermission" ) &&
+         !Q_stricmpn( wanted, "mp_", 3 ) &&
+         Q_stristr( wanted, "intermission" ) ) {
+        return qtrue;
+    }
+
+    return qfalse;
+}
+
+static qboolean G_Scr_EntityMatchesFilter( gentity_t *ent, const char *value, const char *key )
+{
+    if ( !ent || !ent->inuse || !value || !value[0] ) {
+        return qfalse;
+    }
+
+    if ( !key || !key[0] || !Q_stricmp( key, "classname" ) ) {
+        return G_Scr_ClassnameMatches( value, ent->classname );
+    }
+
+    if ( !Q_stricmp( key, "targetname" ) ) {
+        return ent->targetname && !Q_stricmp( ent->targetname, value );
+    }
+
+    if ( !Q_stricmp( key, "target" ) ) {
+        return ent->target && !Q_stricmp( ent->target, value );
+    }
+
+    if ( !Q_stricmp( key, "model" ) ) {
+        return ent->model && !Q_stricmp( ent->model, value );
+    }
+
+    return qfalse;
+}
+
 static int GScr_Meth_GetName( gsc_Context *ctx )
 {
     gentity_t *ent = G_Scr_GetSelf( ctx );
@@ -372,6 +433,20 @@ static int GScr_Meth_Suicide( gsc_Context *ctx )
     return 0;
 }
 
+/* CoD map setup helper used by gametype scripts on spawnpoint entities. */
+static int GScr_Meth_PlaceSpawnpoint( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    if ( !ent ) {
+        return 0;
+    }
+
+    VectorCopy( ent->s.origin, ent->s.pos.trBase );
+    VectorCopy( ent->s.origin, ent->r.currentOrigin );
+    trap_LinkEntity( ent );
+    return 0;
+}
+
 /* =========================================================================
    Global / free functions available to scripts
    ========================================================================= */
@@ -449,32 +524,73 @@ static int GScr_Fn_GetTime( gsc_Context *ctx )
     return 1;
 }
 
-/* getent( clientNum ) — returns the player entity object */
+/* getent() — supports getent(clientNum) and getent(value, key) */
 static int GScr_Fn_GetEnt( gsc_Context *ctx )
 {
     char globalName[ 32 ];
-    int  clientNum = (int)gsc_get_int( ctx, 0 );
+    int  clientNum;
     int  topBefore;
+    int  i;
+    const char *value;
+    const char *key;
 
-    if ( clientNum < 0 || clientNum >= MAX_CLIENTS ||
-         !g_scrPlayerObjPtrs[ clientNum ] ) {
-        return 0; /* undefined */
+    if ( gsc_get_type( ctx, 0 ) == GSC_TYPE_INTEGER ) {
+        clientNum = (int)gsc_get_int( ctx, 0 );
+        if ( clientNum < 0 || clientNum >= MAX_CLIENTS ||
+             !g_scrPlayerObjPtrs[ clientNum ] ) {
+            return 0; /* undefined */
+        }
+
+        topBefore = gsc_top( g_scrCtx );
+        gsc_push_object( g_scrCtx, g_scrPlayerObjPtrs[ clientNum ] );
+        if ( gsc_top( g_scrCtx ) <= topBefore ) {
+            /* Fallback: retrieve via the named global */
+            Com_sprintf( globalName, sizeof( globalName ), "player_%d", clientNum );
+            gsc_get_global( g_scrCtx, globalName );
+        }
+        return 1;
     }
 
-    topBefore = gsc_top( g_scrCtx );
-    gsc_push_object( g_scrCtx, g_scrPlayerObjPtrs[ clientNum ] );
-    if ( gsc_top( g_scrCtx ) <= topBefore ) {
-        /* Fallback: retrieve via the named global */
-        Com_sprintf( globalName, sizeof( globalName ), "player_%d", clientNum );
-        gsc_get_global( g_scrCtx, globalName );
+    value = gsc_get_string( ctx, 0 );
+    key = ( gsc_numargs( ctx ) > 1 ) ? gsc_get_string( ctx, 1 ) : "targetname";
+
+    for ( i = 0; i < level.num_entities; i++ ) {
+        gentity_t *ent = &g_entities[ i ];
+        if ( G_Scr_EntityMatchesFilter( ent, value, key ) ) {
+            G_Scr_PushEntityObject( ctx, ent );
+            return 1;
+        }
     }
-    return 1;
+
+    return 0; /* undefined */
 }
 
-/* getentarray() — CoD1 compat stub, returns empty array object */
+/* getentarray(value, key) — returns array-like object of matching entities */
 static int GScr_Fn_GetEntArray( gsc_Context *ctx )
 {
-    gsc_add_object( ctx );
+    int arrObj;
+    int i;
+    int count = 0;
+    char idxKey[ 32 ];
+    const char *value = gsc_get_string( ctx, 0 );
+    const char *key = ( gsc_numargs( ctx ) > 1 ) ? gsc_get_string( ctx, 1 ) : "classname";
+
+    arrObj = gsc_add_object( ctx );
+
+    for ( i = 0; i < level.num_entities; i++ ) {
+        gentity_t *ent = &g_entities[ i ];
+        if ( !G_Scr_EntityMatchesFilter( ent, value, key ) ) {
+            continue;
+        }
+
+        G_Scr_PushEntityObject( ctx, ent );
+        Com_sprintf( idxKey, sizeof( idxKey ), "%d", count );
+        gsc_object_set_field( ctx, arrObj, idxKey );
+        count++;
+    }
+
+    gsc_add_int( ctx, count );
+    gsc_object_set_field( ctx, arrObj, "size" );
     return 1;
 }
 
@@ -625,6 +741,9 @@ static void G_Scr_CreateGlobals( void )
 
     gsc_add_function( g_scrCtx, GScr_Meth_Suicide );
     gsc_object_set_field( g_scrCtx, methodsObj, "suicide" );
+
+    gsc_add_function( g_scrCtx, GScr_Meth_PlaceSpawnpoint );
+    gsc_object_set_field( g_scrCtx, methodsObj, "placespawnpoint" );
 
     /* methods object becomes the __call handler on the proxy */
     gsc_object_set_field( g_scrCtx, proxyObj, "__call" );

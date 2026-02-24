@@ -460,7 +460,10 @@ level.spawnVars[], then call the class specific spawn function
 void G_SpawnGEntityFromSpawnVars( void ) {
 	int			i;
 	gentity_t	*ent;
-	char		*s, *value, *gametypeName;
+	char		*value;
+	const char	*gametypeName = NULL;
+	const char	*codGametypeName = NULL;
+	char		rawGametype[ 64 ];
 	static char *gametypeNames[] = {"ffa", "tournament", "single", "team", "ctf", "oneflag", "obelisk", "harvester"};
 
 	// get the next free entity
@@ -512,16 +515,30 @@ void G_SpawnGEntityFromSpawnVars( void ) {
 	}
 #endif
 
+	trap_Cvar_VariableStringBuffer( "g_gametype", rawGametype, sizeof( rawGametype ) );
+	if ( !Q_stricmp( rawGametype, "dm" )  || !Q_stricmp( rawGametype, "tdm" ) ||
+	     !Q_stricmp( rawGametype, "hq" )  || !Q_stricmp( rawGametype, "sd" )  ||
+	     !Q_stricmp( rawGametype, "re" )  || !Q_stricmp( rawGametype, "bel" ) ) {
+		codGametypeName = rawGametype;
+	} else {
+		switch ( g_gametype.integer ) {
+			case GT_TEAM: codGametypeName = "tdm"; break;
+			case GT_CTF:  codGametypeName = "sd";  break;
+			default:      codGametypeName = "dm";  break;
+		}
+	}
+
 	if( G_SpawnString( "gametype", NULL, &value ) ) {
 		if( g_gametype.integer >= GT_FFA && g_gametype.integer < GT_MAX_GAME_TYPE ) {
 			gametypeName = gametypeNames[g_gametype.integer];
+		}
 
-			s = strstr( value, gametypeName );
-			if( !s ) {
+		if ( !Q_stristr( value, "all" ) &&
+		     !( gametypeName && Q_stristr( value, gametypeName ) ) &&
+		     !( codGametypeName && Q_stristr( value, codGametypeName ) ) ) {
 				ADJUST_AREAPORTAL();
 				G_FreeEntity( ent );
 				return;
-			}
 		}
 	}
 
