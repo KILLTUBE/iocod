@@ -634,8 +634,8 @@ static qboolean ParseStage( shaderStage_t *stage, char **text )
 				return qfalse;
 			}
 
-			// CoD1 extension: "map clamp <name>" is equivalent to "clampmap <name>"
-			if ( !Q_stricmp( token, "clamp" ) )
+			/* CoD1: "map clamp/clampx/clampy <name>" - clamp to edge (treat directional clamp as full clamp) */
+			if ( !Q_stricmp( token, "clamp" ) || !Q_stricmp( token, "clampx" ) || !Q_stricmp( token, "clampy" ) )
 			{
 				clampMap = qtrue;
 				token = COM_ParseExt( text, qfalse );
@@ -1717,6 +1717,12 @@ void ParseSort( char **text ) {
 		shader.sort = SS_NEAREST;
 	} else if ( !Q_stricmp( token, "underwater" ) ) {
 		shader.sort = SS_UNDERWATER;
+	} else if ( !Q_stricmp( token, "outerBlend" ) ) {
+		/* CoD1: outerBlend is used for decals/blended transparent surfaces */
+		shader.sort = SS_SEE_THROUGH;
+	} else if ( !Q_stricmp( token, "distortion" ) ) {
+		/* CoD1: distortion effects */
+		shader.sort = SS_BLEND1;
 	} else {
 		shader.sort = atof( token );
 	}
