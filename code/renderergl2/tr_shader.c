@@ -3615,21 +3615,30 @@ shader_t *R_FindShaderEx( const char *name, int lightmapIndex, qboolean mipRawIm
 	 * These surfaces have no explicit shader definition; the alpha channel carries the cutout mask.
 	 * Replace the two-pass lightmap shader with a single vertex-lit + alphaFunc GE128 pass so
 	 * transparent holes are actually discarded rather than rendered as black. */
-	if ( ( shader.lightmapIndex >= 0 ||
-	       shader.lightmapIndex == LIGHTMAP_BY_VERTEX ||
-	       shader.lightmapIndex == LIGHTMAP_WHITEIMAGE ) &&
-	     ( image->internalFormat == GL_COMPRESSED_RGBA_S3TC_DXT3_EXT ||
-	       image->internalFormat == GL_COMPRESSED_RGBA_S3TC_DXT5_EXT ||
-	       image->internalFormat == GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT ||
-	       image->internalFormat == GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT ||
-	       image->internalFormat == GL_COMPRESSED_RGBA_S3TC_DXT1_EXT ) )
 	{
-		stages[0].bundle[0].image[0] = image;
-		stages[0].active = qtrue;
-		stages[0].rgbGen = CGEN_EXACT_VERTEX;
-		stages[0].stateBits = GLS_DEFAULT | GLS_ATEST_GE_80;
-		shader.sort = SS_SEE_THROUGH;
-		return FinishShader();
+		/* CoD1 names alpha-masked surfaces with "_masked@" or puts them under "transparents/".
+		 * Also detect by DXT3/DXT5/DXT1-RGBA internalFormat which always carries real alpha. */
+		qboolean nameAlpha = ( Q_stristr( shader.name, "_masked@" ) != NULL ||
+		                       Q_stristr( shader.name, "transparents/" ) != NULL );
+		qboolean fmtAlpha  = ( image->internalFormat == GL_COMPRESSED_RGBA_S3TC_DXT3_EXT ||
+		                       image->internalFormat == GL_COMPRESSED_RGBA_S3TC_DXT5_EXT ||
+		                       image->internalFormat == GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT ||
+		                       image->internalFormat == GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT ||
+		                       image->internalFormat == GL_COMPRESSED_RGBA_S3TC_DXT1_EXT );
+		qboolean lmWorld   = ( shader.lightmapIndex >= 0 ||
+		                       shader.lightmapIndex == LIGHTMAP_BY_VERTEX ||
+		                       shader.lightmapIndex == LIGHTMAP_WHITEIMAGE );
+		if ( lmWorld && ( nameAlpha || fmtAlpha ) )
+		{
+			ri.Printf( PRINT_DEVELOPER, "AutoAlpha: %s (fmt=0x%x lm=%d name=%d fmt=%d)\n",
+			           shader.name, image->internalFormat, shader.lightmapIndex, nameAlpha, fmtAlpha );
+			stages[0].bundle[0].image[0] = image;
+			stages[0].active = qtrue;
+			stages[0].rgbGen = CGEN_IDENTITY;
+			stages[0].stateBits = GLS_DEFAULT | GLS_ATEST_GE_80;
+			shader.sort = SS_SEE_THROUGH;
+			return FinishShader();
+		}
 	}
 #endif
 	if ( shader.lightmapIndex == LIGHTMAP_NONE ) {
