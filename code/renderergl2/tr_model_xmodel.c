@@ -227,12 +227,12 @@ static int XModel_DecodeFanStrip(
 	idx2 = (glIndex_t)xmR_u16( r );
 	idx3 = (glIndex_t)xmR_u16( r );
 
-	/* First triangle — reversed winding to match CoD1 (D3D CW → GL CCW) */
+	/* First triangle */
 	if ( idx1 != idx2 && idx1 != idx3 && idx2 != idx3
 		&& alreadyWritten + written < maxTris ) {
-		outIdx[ written*3+0 ] = idx3;
+		outIdx[ written*3+0 ] = idx1;
 		outIdx[ written*3+1 ] = idx2;
-		outIdx[ written*3+2 ] = idx1;
+		outIdx[ written*3+2 ] = idx3;
 		written++;
 	}
 
@@ -243,9 +243,9 @@ static int XModel_DecodeFanStrip(
 
 		if ( idx4 != idx2 && idx4 != idx5 && idx2 != idx5
 			&& alreadyWritten + written < maxTris ) {
-			outIdx[ written*3+0 ] = idx5;
+			outIdx[ written*3+0 ] = idx4;
 			outIdx[ written*3+1 ] = idx2;
-			outIdx[ written*3+2 ] = idx4;
+			outIdx[ written*3+2 ] = idx5;
 			written++;
 		}
 
@@ -257,9 +257,9 @@ static int XModel_DecodeFanStrip(
 
 		if ( idx4 != idx2 && idx4 != idx3 && idx2 != idx3
 			&& alreadyWritten + written < maxTris ) {
-			outIdx[ written*3+0 ] = idx3;
+			outIdx[ written*3+0 ] = idx4;
 			outIdx[ written*3+1 ] = idx2;
-			outIdx[ written*3+2 ] = idx4;
+			outIdx[ written*3+2 ] = idx3;
 			written++;
 		}
 
