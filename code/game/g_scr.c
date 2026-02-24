@@ -332,6 +332,47 @@ static const char *G_Scr_TeamToString( team_t team )
     }
 }
 
+static int G_Scr_GetIntArg( gsc_Context *ctx, int arg, int defaultValue )
+{
+    int type;
+
+    if ( !ctx || gsc_numargs( ctx ) <= arg ) {
+        return defaultValue;
+    }
+
+    type = gsc_get_type( ctx, arg );
+    if ( type == GSC_TYPE_INTEGER ) {
+        return (int)gsc_get_int( ctx, arg );
+    }
+    if ( type == GSC_TYPE_FLOAT ) {
+        return (int)gsc_get_float( ctx, arg );
+    }
+    return defaultValue;
+}
+
+static void G_Scr_SetClientSessionTeam( gentity_t *ent, const char *sessionTeam )
+{
+    if ( !ent || !ent->client || !sessionTeam ) {
+        return;
+    }
+
+    if ( !Q_stricmp( sessionTeam, "spectator" ) ) {
+        ent->client->sess.sessionTeam = TEAM_SPECTATOR;
+        ent->client->sess.spectatorState = SPECTATOR_FREE;
+    } else if ( !Q_stricmp( sessionTeam, "allies" ) ||
+                !Q_stricmp( sessionTeam, "red" ) ) {
+        ent->client->sess.sessionTeam = TEAM_RED;
+        ent->client->sess.spectatorState = SPECTATOR_NOT;
+    } else if ( !Q_stricmp( sessionTeam, "axis" ) ||
+                !Q_stricmp( sessionTeam, "blue" ) ) {
+        ent->client->sess.sessionTeam = TEAM_BLUE;
+        ent->client->sess.spectatorState = SPECTATOR_NOT;
+    } else {
+        ent->client->sess.sessionTeam = TEAM_FREE;
+        ent->client->sess.spectatorState = SPECTATOR_NOT;
+    }
+}
+
 static gentity_t *G_Scr_GetEntityFromArg( gsc_Context *ctx, int arg )
 {
     int type = gsc_get_type( ctx, arg );
@@ -806,21 +847,7 @@ static void G_Scr_ApplyPlayerSessionFromObject( gsc_Context *ctx, gentity_t *ent
          gsc_type( ctx, -1 ) == GSC_TYPE_INTERNED_STRING ) {
         sessionTeam = gsc_to_string( ctx, -1 );
         if ( sessionTeam ) {
-            if ( !Q_stricmp( sessionTeam, "spectator" ) ) {
-                ent->client->sess.sessionTeam = TEAM_SPECTATOR;
-                ent->client->sess.spectatorState = SPECTATOR_FREE;
-            } else if ( !Q_stricmp( sessionTeam, "allies" ) ||
-                        !Q_stricmp( sessionTeam, "red" ) ) {
-                ent->client->sess.sessionTeam = TEAM_RED;
-                ent->client->sess.spectatorState = SPECTATOR_NOT;
-            } else if ( !Q_stricmp( sessionTeam, "axis" ) ||
-                        !Q_stricmp( sessionTeam, "blue" ) ) {
-                ent->client->sess.sessionTeam = TEAM_BLUE;
-                ent->client->sess.spectatorState = SPECTATOR_NOT;
-            } else {
-                ent->client->sess.sessionTeam = TEAM_FREE;
-                ent->client->sess.spectatorState = SPECTATOR_NOT;
-            }
+            G_Scr_SetClientSessionTeam( ent, sessionTeam );
         }
     }
     gsc_pop( ctx, 1 );
@@ -954,6 +981,228 @@ static int GScr_Meth_GetTeam( gsc_Context *ctx )
     }
     gsc_add_string( ctx, G_Scr_TeamToString( ent->client->sess.sessionTeam ) );
     return 1;
+}
+
+static void G_Scr_SetSelfFieldInt( gsc_Context *ctx, const char *field, int value )
+{
+    int selfObj;
+
+    if ( !ctx || !field || !field[0] ) {
+        return;
+    }
+
+    selfObj = gsc_get_object( ctx, -1 );
+    if ( selfObj < 0 ) {
+        return;
+    }
+
+    gsc_add_int( ctx, value );
+    gsc_object_set_field( ctx, selfObj, field );
+}
+
+static void G_Scr_SetSelfFieldString( gsc_Context *ctx, const char *field, const char *value )
+{
+    int selfObj;
+
+    if ( !ctx || !field || !field[0] ) {
+        return;
+    }
+
+    selfObj = gsc_get_object( ctx, -1 );
+    if ( selfObj < 0 ) {
+        return;
+    }
+
+    gsc_add_string( ctx, value ? value : "" );
+    gsc_object_set_field( ctx, selfObj, field );
+}
+
+static void G_Scr_SetSelfFieldVec3( gsc_Context *ctx, const char *field, const float v[3] )
+{
+    int selfObj;
+    float vec[3];
+
+    if ( !ctx || !field || !field[0] || !v ) {
+        return;
+    }
+
+    selfObj = gsc_get_object( ctx, -1 );
+    if ( selfObj < 0 ) {
+        return;
+    }
+
+    vec[0] = v[0];
+    vec[1] = v[1];
+    vec[2] = v[2];
+    gsc_add_vec3( ctx, vec );
+    gsc_object_set_field( ctx, selfObj, field );
+}
+
+static int GScr_Field_GetAngles( gsc_Context *ctx )
+{
+    float     zero[3] = { 0.0f, 0.0f, 0.0f };
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+
+    if ( !ent ) {
+        gsc_add_vec3( ctx, zero );
+        return 1;
+    }
+
+    gsc_add_vec3( ctx, ent->s.angles );
+    return 1;
+}
+
+static int GScr_Field_SetAngles( gsc_Context *ctx )
+{
+    vec3_t     angles;
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+
+    if ( !ent ) {
+        return 0;
+    }
+
+    gsc_get_vec3( ctx, 0, angles );
+    if ( ent->client ) {
+        SetClientViewAngle( ent, angles );
+    } else {
+        VectorCopy( angles, ent->s.angles );
+        VectorCopy( angles, ent->r.currentAngles );
+        trap_LinkEntity( ent );
+    }
+
+    G_Scr_SetSelfFieldVec3( ctx, "angles", angles );
+    return 0;
+}
+
+static int GScr_Field_GetScore( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    int score = 0;
+
+    if ( ent && ent->client ) {
+        score = ent->client->ps.persistant[ PERS_SCORE ];
+    }
+    gsc_add_int( ctx, score );
+    return 1;
+}
+
+static int GScr_Field_SetScore( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    int score = G_Scr_GetIntArg( ctx, 0, 0 );
+
+    if ( ent && ent->client ) {
+        ent->client->ps.persistant[ PERS_SCORE ] = score;
+    }
+    G_Scr_SetSelfFieldInt( ctx, "score", score );
+    return 0;
+}
+
+static int GScr_Field_GetDeaths( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    int deaths = 0;
+
+    if ( ent && ent->client ) {
+        deaths = ent->client->ps.persistant[ PERS_KILLED ];
+    }
+    gsc_add_int( ctx, deaths );
+    return 1;
+}
+
+static int GScr_Field_SetDeaths( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    int deaths = G_Scr_GetIntArg( ctx, 0, 0 );
+
+    if ( ent && ent->client ) {
+        ent->client->ps.persistant[ PERS_KILLED ] = deaths;
+    }
+    G_Scr_SetSelfFieldInt( ctx, "deaths", deaths );
+    return 0;
+}
+
+static int GScr_Field_GetMaxHealth( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    int maxHealth = 100;
+
+    if ( ent && ent->client && ent->client->pers.maxHealth > 0 ) {
+        maxHealth = ent->client->pers.maxHealth;
+    }
+    gsc_add_int( ctx, maxHealth );
+    return 1;
+}
+
+static int GScr_Field_SetMaxHealth( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    int maxHealth = G_Scr_GetIntArg( ctx, 0, 100 );
+
+    if ( maxHealth <= 0 ) {
+        maxHealth = 100;
+    }
+
+    if ( ent && ent->client ) {
+        ent->client->pers.maxHealth = maxHealth;
+        ent->client->ps.stats[ STAT_MAX_HEALTH ] = maxHealth;
+        if ( ent->health > maxHealth ) {
+            ent->health = maxHealth;
+            ent->client->ps.stats[ STAT_HEALTH ] = maxHealth;
+        }
+    }
+
+    G_Scr_SetSelfFieldInt( ctx, "maxhealth", maxHealth );
+    return 0;
+}
+
+static int GScr_Field_GetSessionTeam( gsc_Context *ctx )
+{
+    return GScr_Meth_GetTeam( ctx );
+}
+
+static int GScr_Field_SetSessionTeam( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    const char *sessionTeam = gsc_get_string( ctx, 0 );
+
+    if ( !sessionTeam ) {
+        sessionTeam = "none";
+    }
+
+    if ( ent && ent->client ) {
+        G_Scr_SetClientSessionTeam( ent, sessionTeam );
+        sessionTeam = G_Scr_TeamToString( ent->client->sess.sessionTeam );
+    }
+
+    G_Scr_SetSelfFieldString( ctx, "sessionteam", sessionTeam );
+    return 0;
+}
+
+static int GScr_Field_GetSpectatorClient( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    int spectatorClient = -1;
+
+    if ( ent && ent->client ) {
+        spectatorClient = ent->client->sess.spectatorClient;
+    }
+
+    gsc_add_int( ctx, spectatorClient );
+    return 1;
+}
+
+static int GScr_Field_SetSpectatorClient( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    int spectatorClient = G_Scr_GetIntArg( ctx, 0, -1 );
+
+    if ( ent && ent->client ) {
+        ent->client->sess.spectatorClient = spectatorClient;
+    }
+
+    G_Scr_SetSelfFieldInt( ctx, "spectatorclient", spectatorClient );
+    return 0;
 }
 
 static int GScr_Meth_GetClientNum( gsc_Context *ctx )
@@ -2557,8 +2806,12 @@ static void G_Scr_CreateGlobals( void )
 {
     int entProxyObj;
     int entMethodsObj;
+    int entGetObj;
+    int entSetObj;
     int playerProxyObj;
     int playerMethodsObj;
+    int playerGetObj;
+    int playerSetObj;
     int hudProxyObj;
     int hudMethodsObj;
     int levelObj;
@@ -2596,6 +2849,20 @@ static void G_Scr_CreateGlobals( void )
     G_Scr_AddMethod( entMethodsObj, "playloopsound",   GScr_Meth_PlayLoopSound );
     G_Scr_AddMethod( entMethodsObj, "stoploopsound",   GScr_Meth_StopLoopSound );
     gsc_object_set_field( g_scrCtx, entProxyObj, "__call" );
+
+    entGetObj = gsc_add_object( g_scrCtx );
+    G_Scr_AddMethod( entGetObj, "name",      GScr_Meth_GetName );
+    G_Scr_AddMethod( entGetObj, "origin",    GScr_Meth_GetOrigin );
+    G_Scr_AddMethod( entGetObj, "angles",    GScr_Field_GetAngles );
+    G_Scr_AddMethod( entGetObj, "health",    GScr_Meth_GetHealth );
+    G_Scr_AddMethod( entGetObj, "entitynum", GScr_Meth_GetEntityNumber );
+    gsc_object_set_field( g_scrCtx, entProxyObj, "__get" );
+
+    entSetObj = gsc_add_object( g_scrCtx );
+    G_Scr_AddMethod( entSetObj, "origin", GScr_Meth_SetOrigin );
+    G_Scr_AddMethod( entSetObj, "angles", GScr_Field_SetAngles );
+    G_Scr_AddMethod( entSetObj, "health", GScr_Meth_SetHealth );
+    gsc_object_set_field( g_scrCtx, entProxyObj, "__set" );
 
     /* ---- player proxy (inherits from ent proxy) ---- */
     playerProxyObj = gsc_add_tagged_object( g_scrCtx, "#player_proxy" );
@@ -2645,6 +2912,22 @@ static void G_Scr_CreateGlobals( void )
     G_Scr_AddMethod( playerMethodsObj, "finishplayerdamage",    GScr_Meth_FinishPlayerDamage );
     G_Scr_AddMethod( playerMethodsObj, "allowspectateteam",     GScr_Meth_AllowSpectateTeam );
     gsc_object_set_field( g_scrCtx, playerProxyObj, "__call" );
+
+    playerGetObj = gsc_add_object( g_scrCtx );
+    G_Scr_AddMethod( playerGetObj, "score",           GScr_Field_GetScore );
+    G_Scr_AddMethod( playerGetObj, "deaths",          GScr_Field_GetDeaths );
+    G_Scr_AddMethod( playerGetObj, "maxhealth",       GScr_Field_GetMaxHealth );
+    G_Scr_AddMethod( playerGetObj, "sessionteam",     GScr_Field_GetSessionTeam );
+    G_Scr_AddMethod( playerGetObj, "spectatorclient", GScr_Field_GetSpectatorClient );
+    gsc_object_set_field( g_scrCtx, playerProxyObj, "__get" );
+
+    playerSetObj = gsc_add_object( g_scrCtx );
+    G_Scr_AddMethod( playerSetObj, "score",           GScr_Field_SetScore );
+    G_Scr_AddMethod( playerSetObj, "deaths",          GScr_Field_SetDeaths );
+    G_Scr_AddMethod( playerSetObj, "maxhealth",       GScr_Field_SetMaxHealth );
+    G_Scr_AddMethod( playerSetObj, "sessionteam",     GScr_Field_SetSessionTeam );
+    G_Scr_AddMethod( playerSetObj, "spectatorclient", GScr_Field_SetSpectatorClient );
+    gsc_object_set_field( g_scrCtx, playerProxyObj, "__set" );
 
     /* ---- HUD element proxy ---- */
     hudProxyObj = gsc_add_tagged_object( g_scrCtx, "#hudelem_proxy" );
