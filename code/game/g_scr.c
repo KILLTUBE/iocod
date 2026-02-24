@@ -2271,6 +2271,27 @@ static int GScr_Fn_SetArchive( gsc_Context *ctx )
     return 0;
 }
 
+/*
+ * resetTimeout() — CoD builtin used by MP gametypes during spawn state changes.
+ * In this gamecode, map it to refreshing the inactivity drop timer for self.
+ */
+static int GScr_Fn_ResetTimeout( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+
+    if ( ent && ent->client ) {
+        if ( g_inactivity.integer > 0 ) {
+            ent->client->inactivityTime = level.time + g_inactivity.integer * 1000;
+        } else {
+            ent->client->inactivityTime = level.time + 60 * 1000;
+        }
+        ent->client->inactivityWarning = qfalse;
+    }
+
+    gsc_add_int( ctx, level.time );
+    return 1;
+}
+
 static int GScr_Fn_LogPrint( gsc_Context *ctx )
 {
     int  i, n = gsc_numargs( ctx );
@@ -2762,6 +2783,7 @@ static void G_Scr_RegisterFunctions( void )
     gsc_register_function( g_scrCtx, NULL, "maprestart",   GScr_Fn_MapRestart );
     gsc_register_function( g_scrCtx, NULL, "mapexists",    GScr_Fn_MapExists );
     gsc_register_function( g_scrCtx, NULL, "setarchive",   GScr_Fn_SetArchive );
+    gsc_register_function( g_scrCtx, NULL, "resettimeout", GScr_Fn_ResetTimeout );
     gsc_register_function( g_scrCtx, NULL, "setclientnamemode", GScr_Fn_SetClientNameMode );
     gsc_register_function( g_scrCtx, NULL, "obituary",     GScr_Fn_Obituary );
     gsc_register_function( g_scrCtx, NULL, "logprint",     GScr_Fn_LogPrint );
