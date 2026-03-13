@@ -87,18 +87,6 @@ location at `~/.steam/steam/steamapps/common/Call of Duty`.
 If you are targeting the web build, the expected `main/` asset layout is listed
 in [`code/web/client-config.json`](code/web/client-config.json).
 
-## Repository Layout
-
-- [`code/`](code/) contains the engine, renderer, client, server, game code,
-  and bundled third-party sources that are compiled as part of the project.
-- [`cmake/`](cmake/) contains the build definitions, including the `iocod`
-  project identity and standalone defaults.
-- [`docs/`](docs/) contains retained ioquake3 documentation, renderer notes,
-  and the preserved original id source release readme in
-  [`docs/id-readme.txt`](docs/id-readme.txt).
-- [`ref/`](ref/) contains reverse-engineering references, asset tools, and
-  external material kept with their own readmes and licenses.
-
 ## Credits And Provenance
 
 - id Software for the Quake III Arena GPL source release that made ioquake3,
@@ -117,9 +105,9 @@ original Call of Duty game assets.
 The core engine code in this repository is derived from Quake III Arena and
 ioquake3 and is distributed under the GNU GPL. See [`COPYING.txt`](COPYING.txt).
 
-Bundled or referenced third-party components may carry additional license
+Bundled or third-party components may carry additional license
 terms. Those notices are kept alongside the relevant material, especially under
-[`code/thirdparty/`](code/thirdparty/) and [`ref/`](ref/).
+[`code/thirdparty/`](code/thirdparty/).
 
 Original *Call of Duty* game assets, packs, and other proprietary content are
 not included and remain the property of their respective rightsholders.
