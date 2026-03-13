@@ -1121,7 +1121,6 @@ static void CM_PatchCollideFromGrid( cGrid_t *grid, patchCollide_t *pf ) {
 	Com_Memcpy( pf->planes, planes, numPlanes * sizeof( *pf->planes ) );
 }
 
-
 /*
 ===================
 CM_GeneratePatchCollide
@@ -1198,6 +1197,124 @@ struct patchCollide_s	*CM_GeneratePatchCollide( int width, int height, vec3_t *p
 	pf->bounds[1][2] += 1;
 
 	return pf;
+}
+
+// Arbitrary terrain collision for CoD1
+patchCollide_t *CM_GenerateTerrainCollide( int numVerts, const vec3_t *verts,
+                                           int numIndices, const uint16_t *indices )
+{
+    int             i, numTriangles;
+    patchCollide_t  *pc;
+    int             numFacetsLocal = 0;
+
+    numTriangles = numIndices / 3;
+    if ( numTriangles < 1 ) {
+        return NULL;
+    }
+
+    Com_Printf( "=== TERRAIN PATCH START: %d verts, %d indices (%d tris) ===\n",
+                numVerts, numIndices, numTriangles );
+
+    numPlanes = 0;
+    numFacets = 0;
+
+    for ( i = 0; i < numTriangles; i++ ) {
+        int     i1 = indices[i*3+0];
+        int     i2 = indices[i*3+1];
+        int     i3 = indices[i*3+2];
+        vec3_t  p1, p2, p3;
+
+        if ( i1 >= numVerts || i2 >= numVerts || i3 >= numVerts ) continue;
+
+        VectorCopy( verts[i1], p1 );
+        VectorCopy( verts[i2], p2 );
+        VectorCopy( verts[i3], p3 );
+
+        facet_t *facet = &facets[numFacets];
+        Com_Memset( facet, 0, sizeof( *facet ) );
+
+        // 1. Surface Plane
+        facet->surfacePlane = CM_FindPlane( p1, p2, p3 );
+        if ( facet->surfacePlane == -1 ) continue;
+
+        // 2. Border Planes using the "3rd Vertex Check"
+        facet->numBorders = 3;
+        qboolean badTriangle = qfalse;
+        
+        for ( int k = 0; k < 3; k++ ) {
+            vec3_t edgeP1, edgeP2, up, testVert;
+            patchPlane_t *surfPlane = &planes[facet->surfacePlane];
+            int bp;
+
+            // Setup Edge
+            if ( k == 0 )      { VectorCopy(p1, edgeP1); VectorCopy(p2, edgeP2); VectorCopy(p3, testVert); }
+            else if ( k == 1 ) { VectorCopy(p2, edgeP1); VectorCopy(p3, edgeP2); VectorCopy(p1, testVert); }
+            else               { VectorCopy(p3, edgeP1); VectorCopy(p1, edgeP2); VectorCopy(p2, testVert); }
+
+            // Calculate 'up'
+            VectorMA( edgeP1, 8.0f, surfPlane->plane, up );
+
+            // Try finding plane
+            bp = CM_FindPlane( edgeP1, edgeP2, up );
+            if ( bp == -1 ) { badTriangle = qtrue; break; }
+
+            // Check orientation using the 3rd vertex (testVert)
+            // The border plane must face INWARD, meaning testVert must be IN FRONT (Dist > 0).
+            patchPlane_t *borderPlane = &planes[bp];
+            float testDist = DotProduct( testVert, borderPlane->plane ) - borderPlane->plane[3];
+
+            if ( testDist < 0 ) {
+                // Plane points OUTWARD (3rd vertex is behind).
+                // Flip it by swapping edge points.
+                bp = CM_FindPlane( edgeP2, edgeP1, up );
+                if ( bp == -1 ) { badTriangle = qtrue; break; }
+            }
+
+            // We are now 100% sure the plane points Inward (3rd vert is in front).
+            // Standard PatchCollide expects Inward=1 for valid initial borders.
+            facet->borderPlanes[k]   = bp;
+            facet->borderInward[k]   = qtrue; 
+            facet->borderNoAdjust[k] = qfalse;
+        }
+
+        if ( badTriangle ) continue;
+
+        // --- DISABLE BEVELS FOR TERRAIN SOUP ---
+        // Bevels are too complex for arbitrary trisoup and often cause "invalid bevel" 
+        // and "winding chopped away" errors. 
+        // The 3 border planes are sufficient for basic collision.
+        // CM_AddFacetBevels( facet ); 
+
+        // --- Validate ---
+        if ( CM_ValidateFacet( facet ) ) {
+            numFacets++;
+            numFacetsLocal++;
+        } else {
+            // If validation fails even with perfect 3-vertex logic, 
+            // the triangle might be degenerate (zero area).
+            Com_Printf( "Validation failed for tri %d (Degenerate?)\n", i );
+        }
+    }
+
+    Com_Printf( "=== TERRAIN PATCH END: %d valid facets ===\n", numFacetsLocal );
+
+    if ( numFacetsLocal == 0 ) return NULL;
+
+    pc = Hunk_Alloc( sizeof( *pc ), h_high );
+    pc->numFacets = numFacets;
+    pc->facets    = Hunk_Alloc( numFacets * sizeof( facet_t ), h_high );
+    Com_Memcpy( pc->facets, facets, numFacets * sizeof( facet_t ) );
+
+    pc->numPlanes = numPlanes;
+    pc->planes    = Hunk_Alloc( numPlanes * sizeof( patchPlane_t ), h_high );
+    Com_Memcpy( pc->planes, planes, numPlanes * sizeof( patchPlane_t ) );
+
+    ClearBounds( pc->bounds[0], pc->bounds[1] );
+    for ( i = 0; i < numVerts; i++ ) {
+        AddPointToBounds( verts[i], pc->bounds[0], pc->bounds[1] );
+    }
+
+    return pc;
 }
 
 /*
