@@ -655,5 +655,14 @@ typedef struct {
     unsigned int portalVertexCount;/* Number of vertices defining portal poly */
 } cod1_portal_t;
 
+// CoD collision patch header (lump 24)
+typedef struct {
+	uint32_t	flags; // bit 0x10000 = TERRAIN (patchTerrainDef3), else BEZIER (patchDef5)
+	//                  BEZIER   / TERRAIN
+	uint16_t	a;		 // width    / numVerts
+	uint16_t	b;		 // height   / numIndices
+	uint32_t	c;		 // firstTri / firstVert
+	uint32_t	d;		 // firstRow / firstIndex
+} cod1_dcollisionheader_t;
 
 #endif

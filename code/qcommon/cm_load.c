@@ -538,6 +538,129 @@ void CMod_LoadPatches( lump_t *surfs, lump_t *verts ) {
 
 /*
 =================
+CMod_LoadCollisionPatches
+
+Loads CoD-style collision patches (BEZIER/patchDef5 + TERRAIN/patchTerrainDef3)
+from lumps 24/25/26.
+- BEZIER patches are converted to standard Q3 cPatch_t + CM_GeneratePatchCollide
+- TERRAIN patches are loaded (data is parsed) but triangle-mesh collision requires
+  a separate generator (added in cm_patch.c). Leaf surfaces now point to these patches.
+- Shader/contents unknown so far in the header, default to CONTENTS_SOLID (typical
+  for CoD collision patches). Still not sure about "flags" attribute.
+=================
+*/
+void CMod_LoadCollisionPatches( lump_t *headers_l, lump_t *rows_l, lump_t *indices_l ) {
+	int					count;
+	cod1_dcollisionheader_t	*in;
+	cPatch_t			**out;
+	int					i;
+	vec3_t				*patchRows;
+	uint16_t			*patchIndicesGlobal;
+	int					numRows, numIndicesGlobal;
+
+	// headers (16-byte structs)
+	if ( headers_l->filelen % 16 ) {
+		Com_Error( ERR_DROP, "CMod_LoadCollisionPatches: funny header lump size" );
+	}
+	count = headers_l->filelen / 16;
+	if ( count < 1 ) {
+		cm.numSurfaces = 0;
+		cm.surfaces = NULL;
+		return;
+	}
+
+	cm.numSurfaces = count;
+	cm.surfaces = Hunk_Alloc( count * sizeof( *cm.surfaces ), h_high );
+
+	// rows (vec3)
+	if ( rows_l->filelen % 12 ) {
+		Com_Error( ERR_DROP, "CMod_LoadCollisionPatches: funny rows lump size" );
+	}
+	numRows = rows_l->filelen / 12;
+	patchRows = Hunk_Alloc( numRows * sizeof( vec3_t ), h_high );
+	{
+		float *src = (float *)( cmod_base + rows_l->fileofs );
+		for ( i = 0; i < numRows; i++ ) {
+			patchRows[i][0] = LittleFloat( src[i*3+0] );
+			patchRows[i][1] = LittleFloat( src[i*3+1] );
+			patchRows[i][2] = LittleFloat( src[i*3+2] );
+		}
+	}
+
+	// indices (uint16)
+	if ( indices_l->filelen % 2 ) {
+		Com_Error( ERR_DROP, "CMod_LoadCollisionPatches: funny indices lump size" );
+	}
+	numIndicesGlobal = indices_l->filelen / 2;
+	patchIndicesGlobal = Hunk_Alloc( numIndicesGlobal * sizeof( uint16_t ), h_high );
+	{
+		uint16_t *src = (uint16_t *)( cmod_base + indices_l->fileofs );
+		for ( i = 0; i < numIndicesGlobal; i++ ) {
+			patchIndicesGlobal[i] = LittleShort( src[i] );
+		}
+	}
+
+	// parse headers
+	in  = (cod1_dcollisionheader_t *)( cmod_base + headers_l->fileofs );
+	out = cm.surfaces;
+
+	for ( i = 0; i < count; i++, in++, out++ ) {
+		uint32_t flags   = LittleLong( in->flags );
+		qboolean isTerrain = ( flags & 0x10000 ) != 0;   // TERRAIN bit
+
+		cPatch_t *patch = Hunk_Alloc( sizeof( *patch ), h_high );
+		*out = patch;
+
+		// no shaderNum in collision header → default solid (CoD collision patches are usually solid)
+		patch->contents    = CONTENTS_SOLID;
+		patch->surfaceFlags = 0;
+
+		if ( !isTerrain ) {
+			// ==================== BEZIER (patchDef5) ====================
+			int width    = LittleShort( in->a );
+			int height   = LittleShort( in->b );
+			int firstRow = LittleLong( in->d );   // c = firstTri (unused for collision)
+			int c        = width * height;
+
+			Com_Printf("LOAD BEZIER PATCH\n");
+
+			if ( c > MAX_PATCH_VERTS ) {
+				Com_Error( ERR_DROP, "CMod_LoadCollisionPatches: MAX_PATCH_VERTS" );
+			}
+			if ( firstRow + c > numRows ) {
+				Com_Error( ERR_DROP, "CMod_LoadCollisionPatches: bad firstRow" );
+			}
+
+			vec3_t points[MAX_PATCH_VERTS];
+			for ( int j = 0; j < c; j++ ) {
+				VectorCopy( patchRows[firstRow + j], points[j] );
+			}
+
+			patch->pc = CM_GeneratePatchCollide( width, height, points );
+		} else {
+			// ==================== TERRAIN (patchTerrainDef3) ====================
+			// numVerts / numIndices / firstVert / firstIndex exactly as in the JS source-of-truth
+			int numVerts   = LittleShort( in->a );
+			int numIndices = LittleShort( in->b );
+			int firstVert  = LittleLong( in->c );
+			int firstIndex = LittleLong( in->d );
+			Com_Printf("LOAD TERRAIN PATCH numVerts=%d numIndices=%d firstVert=%d firstIndex=%d\n", numVerts, numIndices, firstVert, firstIndex);
+			if ( firstVert + numVerts > numRows ) {
+				Com_Error( ERR_DROP, "CMod_LoadCollisionPatches: bad firstVert (terrain)" );
+			}
+			if ( firstIndex + numIndices > numIndicesGlobal ) {
+				Com_Error( ERR_DROP, "CMod_LoadCollisionPatches: bad firstIndex (terrain)" );
+			}
+			vec3_t   *patchVerts = patchRows + firstVert;
+			uint16_t *patchIdx   = patchIndicesGlobal + firstIndex;
+			patch->pc = CM_GenerateTerrainCollide( numVerts, patchVerts, numIndices, patchIdx );
+			Com_DPrintf( "Loaded terrain patch %d (%d verts, %d tris)\n", i, numVerts, numIndices/3 );
+		}
+	}
+}
+
+/*
+=================
 CMod_LoadLeafsCod1
 
 Loads CoD1 BSP leafs (36-byte format, no bounding box stored per leaf).
@@ -557,11 +680,8 @@ static void CMod_LoadLeafsCod1( const cod1_dleaf_t *in, int count ) {
 	for ( i = 0; i < count; i++, in++, out++ ) {
 		out->cluster          = LittleLong( in->cluster );
 		out->area             = LittleLong( in->area );
-		/* CoD1 leaf surfaces reference cell-based rendering data, not Q3
-		   bezier patches. cm.surfaces is never allocated for CoD1, so
-		   CM_TraceThroughLeaf must not iterate leaf surfaces. */
-		out->firstLeafSurface = 0;
-		out->numLeafSurfaces  = 0;
+		out->firstLeafSurface = LittleLong( in->firstLeafSurface );
+		out->numLeafSurfaces  = LittleLong( in->numLeafSurfaces );
 		out->firstLeafBrush   = LittleLong( in->firstLeafBrush );
 		out->numLeafBrushes   = LittleLong( in->numLeafBrushes );
 
@@ -773,10 +893,6 @@ void CMod_LoadSubmodelsCod1( lump_t *l ) {
 			indexes[j] = LittleLong( in->firstBrush ) + j;
 		}
 
-		/* CoD1: cm.surfaces is never allocated (rendering uses TriangleSoups,
-		   not Q3 bezier patches). CM_TraceThroughLeaf must not visit surfaces. */
-		out->leaf.numLeafSurfaces  = 0;
-		out->leaf.firstLeafSurface = 0;
 	}
 }
 
@@ -845,6 +961,15 @@ static void CM_LoadMapCod1( const byte *base, int length, int *checksum ) {
 		CMod_LoadLeafSurfaces( &ls_l );
 	}
 
+	/* --- Collision patches (BEZIER + TERRAIN) — lumps 24/25/26 (CoD support) */
+	{
+		Com_Printf("Loading Collision Patches (BEZIER + TERRAIN)...\n");
+		lump_t ch_l = CM_GetCod1Lump( base, 24 );
+		lump_t cr_l = CM_GetCod1Lump( base, 25 );
+		lump_t ci_l = CM_GetCod1Lump( base, 26 );
+		CMod_LoadCollisionPatches( &ch_l, &cr_l, &ci_l );
+	}
+
 	/* --- Models (lump 27): submodels including world (index 0) --- */
 	{
 		Com_Printf("Loading Models...\n");
@@ -867,9 +992,9 @@ static void CM_LoadMapCod1( const byte *base, int length, int *checksum ) {
 			totalLeafBrushRefs += cm.leafs[i].numLeafBrushes;
 		}
 		Com_Printf( "CoD1 CM: %d leafs (%d with brushes, %d total leaf-brush refs), "
-			"%d brushes, %d brushsides, %d planes\n",
+			"%d brushes, %d brushsides, %d planes, %d collision patches (BEZIER+TERRAIN)\n",
 			cm.numLeafs, leavesWithBrushes, totalLeafBrushRefs,
-			cm.numBrushes, cm.numBrushSides, cm.numPlanes );
+			cm.numBrushes, cm.numBrushSides, cm.numPlanes, cm.numSurfaces );
 	}
 
 	/* --- Visibility: skip CoD1 vis format, mark all clusters visible --- */

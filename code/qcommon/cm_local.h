@@ -190,7 +190,8 @@ qboolean CM_BoundsIntersectPoint( const vec3_t mins, const vec3_t maxs, const ve
 
 // cm_patch.c
 
-struct patchCollide_s	*CM_GeneratePatchCollide( int width, int height, vec3_t *points );
+struct patchCollide_s *CM_GeneratePatchCollide(int width, int height, vec3_t *points);
+struct patchCollide_s *CM_GenerateTerrainCollide(int numVerts, const vec3_t *verts, int numIndices, const uint16_t *indices);
 void CM_TraceThroughPatchCollide( traceWork_t *tw, const struct patchCollide_s *pc );
 qboolean CM_PositionTestInPatchCollide( traceWork_t *tw, const struct patchCollide_s *pc );
 void CM_ClearLevelPatches( void );
