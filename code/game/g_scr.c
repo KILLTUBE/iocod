@@ -51,14 +51,14 @@ Player object globals: "player_N" (N = clientNum, 0-based).
 static gsc_Context *g_scrCtx;
 static qboolean     g_scrActive;
 
-/* Stable proxy object handles (raw VM object pointers). */
-static void        *g_scrEntityProxyObj;
-static void        *g_scrPlayerProxyObj;
-static void        *g_scrHudElemProxyObj;
+/* Durable references to proxy/player objects via the GSC ref registry.
+   The VM tracks ownership — objects stay alive as long as refs are held. */
+static gsc_Ref      g_scrEntityProxyRef  = GSC_NOREF;
+static gsc_Ref      g_scrPlayerProxyRef  = GSC_NOREF;
+static gsc_Ref      g_scrHudElemProxyRef = GSC_NOREF;
 
-/* Per-client: raw pointer to the GSC object so we can push it later.
-   NULL if no object exists for this slot.                                  */
-static void        *g_scrPlayerObjPtrs[ MAX_CLIENTS ];
+/* Per-client ref handle into the GSC registry (GSC_NOREF = no object). */
+static gsc_Ref      g_scrPlayerRefs[ MAX_CLIENTS ];
 static qboolean     g_scrEntityObjAlive[ MAX_GENTITIES ];
 
 #define G_SCR_MAX_HUDELEMS 128
@@ -168,6 +168,17 @@ static void G_Scr_FreeMem( void *ctx, void *ptr )
 {
     (void)ctx;
     free( ptr );
+}
+
+static void G_Scr_ResetRefs( void )
+{
+    int i;
+    g_scrEntityProxyRef  = GSC_NOREF;
+    g_scrPlayerProxyRef  = GSC_NOREF;
+    g_scrHudElemProxyRef = GSC_NOREF;
+    for ( i = 0; i < MAX_CLIENTS; i++ ) {
+        g_scrPlayerRefs[ i ] = GSC_NOREF;
+    }
 }
 
 static void G_Scr_NormalizePathSlashes( char *path )
@@ -517,16 +528,16 @@ static void G_Scr_ClearGlobal( const char *name )
     gsc_set_global( g_scrCtx, name );
 }
 
-static qboolean G_Scr_SetObjectProxy( gsc_Context *ctx, int objIdx, void *proxyObj )
+static qboolean G_Scr_SetObjectProxy( gsc_Context *ctx, int objIdx, gsc_Ref proxyRef )
 {
     int topBefore;
 
-    if ( !ctx || !proxyObj ) {
+    if ( !ctx || proxyRef == GSC_NOREF ) {
         return qfalse;
     }
 
     topBefore = gsc_top( ctx );
-    gsc_push_object( ctx, proxyObj );
+    gsc_push_ref( ctx, proxyRef );
 
     if ( gsc_top( ctx ) <= topBefore || gsc_type( ctx, -1 ) != GSC_TYPE_OBJECT ) {
         if ( gsc_top( ctx ) > topBefore ) {
@@ -672,15 +683,19 @@ static void G_Scr_CreateEntityObject( gentity_t *ent, qboolean keepOnStack )
 
     entObj = gsc_add_tagged_object( g_scrCtx, "#entity" );
     if ( entNum < MAX_CLIENTS ) {
-        G_Scr_SetObjectProxy( g_scrCtx, entObj, g_scrPlayerProxyObj );
+        G_Scr_SetObjectProxy( g_scrCtx, entObj, g_scrPlayerProxyRef );
     } else {
-        G_Scr_SetObjectProxy( g_scrCtx, entObj, g_scrEntityProxyObj );
+        G_Scr_SetObjectProxy( g_scrCtx, entObj, g_scrEntityProxyRef );
     }
     gsc_object_set_userdata( g_scrCtx, entObj, ent );
     G_Scr_SetEntityObjectFields( g_scrCtx, entObj, ent );
 
     if ( entNum < MAX_CLIENTS ) {
-        g_scrPlayerObjPtrs[ entNum ] = gsc_get_ptr( g_scrCtx, entObj );
+        /* release old ref if any, then take a new one */
+        if ( g_scrPlayerRefs[ entNum ] != GSC_NOREF ) {
+            gsc_unref( g_scrCtx, g_scrPlayerRefs[ entNum ] );
+        }
+        g_scrPlayerRefs[ entNum ] = gsc_ref( g_scrCtx, entObj );
     } else {
         g_scrEntityObjAlive[ entNum ] = qtrue;
     }
@@ -689,8 +704,8 @@ static void G_Scr_CreateEntityObject( gentity_t *ent, qboolean keepOnStack )
     gsc_set_global( g_scrCtx, globalName ); /* pops entObj */
 
     if ( keepOnStack ) {
-        if ( entNum < MAX_CLIENTS && g_scrPlayerObjPtrs[ entNum ] ) {
-            gsc_push_object( g_scrCtx, g_scrPlayerObjPtrs[ entNum ] );
+        if ( entNum < MAX_CLIENTS && g_scrPlayerRefs[ entNum ] != GSC_NOREF ) {
+            gsc_push_ref( g_scrCtx, g_scrPlayerRefs[ entNum ] );
         } else {
             gsc_get_global( g_scrCtx, globalName );
         }
@@ -710,9 +725,9 @@ static void G_Scr_PushEntityObject( gsc_Context *ctx, gentity_t *ent )
     }
 
     if ( G_Scr_GetClientNumForEntity( ent, &clientNum ) &&
-         g_scrPlayerObjPtrs[ clientNum ] ) {
+         g_scrPlayerRefs[ clientNum ] != GSC_NOREF ) {
         topBefore = gsc_top( ctx );
-        gsc_push_object( ctx, g_scrPlayerObjPtrs[ clientNum ] );
+        gsc_push_ref( ctx, g_scrPlayerRefs[ clientNum ] );
         if ( gsc_top( ctx ) > topBefore && gsc_type( ctx, -1 ) == GSC_TYPE_OBJECT ) {
             entObj = gsc_top( ctx ) - 1;
             gsc_object_set_userdata( ctx, entObj, ent );
@@ -775,7 +790,7 @@ static void G_Scr_PushHudElemObject( gsc_Context *ctx, G_ScrHudScope_t scope, in
     hud = G_Scr_Hud_Alloc();
 
     obj = gsc_add_tagged_object( ctx, "#hudelem" );
-    G_Scr_SetObjectProxy( ctx, obj, g_scrHudElemProxyObj );
+    G_Scr_SetObjectProxy( ctx, obj, g_scrHudElemProxyRef );
 
     if ( hud ) {
         hud->scope = scope;
@@ -2938,13 +2953,13 @@ static int GScr_Fn_GetEnt( gsc_Context *ctx )
             return 0; /* undefined */
         }
 
-        if ( !g_scrPlayerObjPtrs[ clientNum ] ) {
+        if ( g_scrPlayerRefs[ clientNum ] == GSC_NOREF ) {
             G_Scr_CreatePlayerObj( clientNum );
         }
 
         topBefore = gsc_top( g_scrCtx );
-        if ( g_scrPlayerObjPtrs[ clientNum ] ) {
-            gsc_push_object( g_scrCtx, g_scrPlayerObjPtrs[ clientNum ] );
+        if ( g_scrPlayerRefs[ clientNum ] != GSC_NOREF ) {
+            gsc_push_ref( g_scrCtx, g_scrPlayerRefs[ clientNum ] );
         }
         if ( gsc_top( g_scrCtx ) <= topBefore || gsc_type( g_scrCtx, -1 ) != GSC_TYPE_OBJECT ) {
             /* Fallback: retrieve via the named global */
@@ -3376,7 +3391,7 @@ static void G_Scr_CreateGlobals( void )
 
     /* ---- base entity proxy ---- */
     entProxyObj = gsc_add_tagged_object( g_scrCtx, "#ent_proxy" );
-    g_scrEntityProxyObj = gsc_get_ptr( g_scrCtx, entProxyObj );
+    g_scrEntityProxyRef = gsc_ref( g_scrCtx, entProxyObj );
 
     entMethodsObj = gsc_add_object( g_scrCtx );
     G_Scr_AddMethod( entMethodsObj, "getname",         GScr_Meth_GetName );
@@ -3431,7 +3446,7 @@ static void G_Scr_CreateGlobals( void )
 
     /* ---- player proxy (inherits from ent proxy) ---- */
     playerProxyObj = gsc_add_tagged_object( g_scrCtx, "#player_proxy" );
-    g_scrPlayerProxyObj = gsc_get_ptr( g_scrCtx, playerProxyObj );
+    g_scrPlayerProxyRef = gsc_ref( g_scrCtx, playerProxyObj );
     gsc_object_set_proxy( g_scrCtx, playerProxyObj, entProxyObj );
 
     playerMethodsObj = gsc_add_object( g_scrCtx );
@@ -3496,7 +3511,7 @@ static void G_Scr_CreateGlobals( void )
 
     /* ---- HUD element proxy ---- */
     hudProxyObj = gsc_add_tagged_object( g_scrCtx, "#hudelem_proxy" );
-    g_scrHudElemProxyObj = gsc_get_ptr( g_scrCtx, hudProxyObj );
+    g_scrHudElemProxyRef = gsc_ref( g_scrCtx, hudProxyObj );
 
     hudMethodsObj = gsc_add_object( g_scrCtx );
     G_Scr_AddMethod( hudMethodsObj, "settext",       GScr_Meth_Hud_SetText );
@@ -3553,10 +3568,10 @@ static void G_Scr_SetSelfToPlayer( int clientNum )
         return;
     }
 
-    if ( !g_scrPlayerObjPtrs[ clientNum ] ) {
+    if ( g_scrPlayerRefs[ clientNum ] == GSC_NOREF ) {
         G_Scr_CreatePlayerObj( clientNum );
     }
-    if ( !g_scrPlayerObjPtrs[ clientNum ] ) {
+    if ( g_scrPlayerRefs[ clientNum ] == GSC_NOREF ) {
         return;
     }
 
@@ -3654,10 +3669,7 @@ void G_Scr_Init( void )
     g_scrCtx     = NULL;
     g_scrActive  = qfalse;
     g_scrSources = NULL;
-    g_scrEntityProxyObj = NULL;
-    g_scrPlayerProxyObj = NULL;
-    g_scrHudElemProxyObj = NULL;
-    Com_Memset( g_scrPlayerObjPtrs, 0, sizeof( g_scrPlayerObjPtrs ) );
+    G_Scr_ResetRefs();
     Com_Memset( g_scrEntityObjAlive, 0, sizeof( g_scrEntityObjAlive ) );
     Com_Memset( g_scrAttachStates, 0, sizeof( g_scrAttachStates ) );
     Com_Memset( g_scrViewModels, 0, sizeof( g_scrViewModels ) );
@@ -3845,7 +3857,7 @@ void G_Scr_Shutdown( void )
         g_scrCtx = NULL;
     }
     G_Scr_FreeSources();
-    Com_Memset( g_scrPlayerObjPtrs, 0, sizeof( g_scrPlayerObjPtrs ) );
+    G_Scr_ResetRefs();
     Com_Memset( g_scrEntityObjAlive, 0, sizeof( g_scrEntityObjAlive ) );
     Com_Memset( g_scrHudElems, 0, sizeof( g_scrHudElems ) );
     Com_Memset( g_scrAttachStates, 0, sizeof( g_scrAttachStates ) );
@@ -3853,9 +3865,6 @@ void G_Scr_Shutdown( void )
     Com_Memset( g_scrFxNames, 0, sizeof( g_scrFxNames ) );
     g_scrFxCount = 0;
     Com_Memset( g_scrObjectives, 0, sizeof( g_scrObjectives ) );
-    g_scrEntityProxyObj = NULL;
-    g_scrPlayerProxyObj = NULL;
-    g_scrHudElemProxyObj = NULL;
     g_scrCallbackFile[0] = '\0';
     g_scrActive = qfalse;
 }
@@ -3935,15 +3944,17 @@ static void G_Scr_NotifyPlayer( int clientNum, const char *eventName, int numArg
         return;
     }
 
-    if ( !g_scrPlayerObjPtrs[ clientNum ] ) {
+    if ( g_scrPlayerRefs[ clientNum ] == GSC_NOREF ) {
         G_Scr_CreatePlayerObj( clientNum );
     }
 
-    if ( !g_scrPlayerObjPtrs[ clientNum ] ) {
+    if ( g_scrPlayerRefs[ clientNum ] == GSC_NOREF ) {
         return;
     }
 
-    gsc_notify( g_scrCtx, g_scrPlayerObjPtrs[ clientNum ], eventName, numArgs );
+    gsc_push_ref( g_scrCtx, g_scrPlayerRefs[ clientNum ] );
+    gsc_notify( g_scrCtx, gsc_top( g_scrCtx ) - 1, eventName, numArgs );
+    gsc_pop( g_scrCtx, 1 );
 }
 
 void G_Scr_PlayerConnect( int clientNum )
@@ -4007,7 +4018,10 @@ void G_Scr_PlayerDisconnect( int clientNum )
     Com_sprintf( globalName, sizeof( globalName ), "player_%d", clientNum );
     G_Scr_ClearGlobal( globalName );
 
-    g_scrPlayerObjPtrs[ clientNum ] = NULL;
+    if ( g_scrPlayerRefs[ clientNum ] != GSC_NOREF ) {
+        gsc_unref( g_scrCtx, g_scrPlayerRefs[ clientNum ] );
+        g_scrPlayerRefs[ clientNum ] = GSC_NOREF;
+    }
 
     for ( i = 0; i < G_SCR_MAX_HUDELEMS; i++ ) {
         G_ScrHudElem_t *hud = &g_scrHudElems[ i ];
@@ -4025,12 +4039,12 @@ void G_Scr_PlayerSpawn( int clientNum )
         return;
     }
 
-    if ( !g_scrPlayerObjPtrs[ clientNum ] ) {
+    if ( g_scrPlayerRefs[ clientNum ] == GSC_NOREF ) {
         G_Scr_CreatePlayerObj( clientNum );
     }
 
     /* Update the userdata pointer/fields in case the entity was re-initialised. */
-    if ( g_scrPlayerObjPtrs[ clientNum ] ) {
+    if ( g_scrPlayerRefs[ clientNum ] != GSC_NOREF ) {
         char globalName[ 32 ];
         int  topBefore, entObjIdx;
 

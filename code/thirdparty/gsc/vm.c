@@ -393,6 +393,9 @@ static void decref(VM *vm, Variable *v)
 	--o->refcount;
 }
 
+void vm_incref(VM *vm, Variable *v) { incref(vm, v); }
+void vm_decref(VM *vm, Variable *v) { decref(vm, v); }
+
 static void free_var(VM *vm, Variable *v)
 {
 	switch(v->type)
@@ -2106,6 +2109,13 @@ const char *vm_cast_string(VM *vm, Variable *arg)
 			return str;
 		}
 		break;
+		case VAR_VECTOR:                                                                                        
+		{                                                                                                       
+			char *str = new(&vm->c_function_arena, char, 96);                                                     
+			snprintf(str, 96, "(%g, %g, %g)", arg->u.vval[0], arg->u.vval[1], arg->u.vval[2]);                    
+			return str;                                                                                           
+		}                                                                                                       
+		break;                                                                                 
 		default: vm_error(vm, "Not a string");
 	}
 	return "";
