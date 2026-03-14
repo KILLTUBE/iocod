@@ -915,6 +915,7 @@ static qboolean G_Scr_GetAutoMenuResponse( const char *menu, char *out, int outS
 static void G_Scr_ApplyPlayerSessionFromObject( gsc_Context *ctx, gentity_t *ent )
 {
     const char *sessionTeam;
+    const char *sessionState;
     int         selfObj;
 
     if ( !ctx || !ent || !ent->client ) {
@@ -932,6 +933,33 @@ static void G_Scr_ApplyPlayerSessionFromObject( gsc_Context *ctx, gentity_t *ent
         sessionTeam = gsc_to_string( ctx, -1 );
         if ( sessionTeam ) {
             G_Scr_SetClientSessionTeam( ent, sessionTeam );
+        }
+    }
+    gsc_pop( ctx, 1 );
+
+    /* sessionstate: CoD1 scripts set "playing"/"spectator"/"dead" to
+       control the player's movement type and spectator state. */
+    gsc_object_get_field( ctx, selfObj, "sessionstate" );
+    if ( gsc_type( ctx, -1 ) == GSC_TYPE_STRING ||
+         gsc_type( ctx, -1 ) == GSC_TYPE_INTERNED_STRING ) {
+        sessionState = gsc_to_string( ctx, -1 );
+        if ( sessionState ) {
+            if ( !Q_stricmp( sessionState, "playing" ) ) {
+                ent->client->ps.pm_type = PM_NORMAL;
+                ent->client->sess.spectatorState = SPECTATOR_NOT;
+                /* If team is still spectator, move to TEAM_FREE so they
+                   can actually play (script should set sessionteam first). */
+                if ( ent->client->sess.sessionTeam == TEAM_SPECTATOR ) {
+                    ent->client->sess.sessionTeam = TEAM_FREE;
+                }
+            } else if ( !Q_stricmp( sessionState, "spectator" ) ) {
+                ent->client->ps.pm_type = PM_SPECTATOR;
+                ent->client->sess.spectatorState = SPECTATOR_FREE;
+                ent->client->sess.sessionTeam = TEAM_SPECTATOR;
+            } else if ( !Q_stricmp( sessionState, "dead" ) ) {
+                ent->client->ps.pm_type = PM_DEAD;
+                ent->client->sess.spectatorState = SPECTATOR_NOT;
+            }
         }
     }
     gsc_pop( ctx, 1 );
@@ -1260,6 +1288,54 @@ static int GScr_Field_SetSessionTeam( gsc_Context *ctx )
     }
 
     G_Scr_SetSelfFieldString( ctx, "sessionteam", sessionTeam );
+    return 0;
+}
+
+static int GScr_Field_GetSessionState( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    const char *state = "dead";
+
+    if ( ent && ent->client ) {
+        if ( ent->client->sess.sessionTeam == TEAM_SPECTATOR ||
+             ent->client->ps.pm_type == PM_SPECTATOR ) {
+            state = "spectator";
+        } else if ( ent->health > 0 ) {
+            state = "playing";
+        }
+    }
+
+    gsc_add_string( ctx, state );
+    return 1;
+}
+
+static int GScr_Field_SetSessionState( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    const char *sessionState = gsc_get_string( ctx, 0 );
+
+    if ( !sessionState ) {
+        sessionState = "spectator";
+    }
+
+    if ( ent && ent->client ) {
+        if ( !Q_stricmp( sessionState, "playing" ) ) {
+            ent->client->ps.pm_type = PM_NORMAL;
+            ent->client->sess.spectatorState = SPECTATOR_NOT;
+            if ( ent->client->sess.sessionTeam == TEAM_SPECTATOR ) {
+                ent->client->sess.sessionTeam = TEAM_FREE;
+            }
+        } else if ( !Q_stricmp( sessionState, "spectator" ) ) {
+            ent->client->ps.pm_type = PM_SPECTATOR;
+            ent->client->sess.spectatorState = SPECTATOR_FREE;
+            ent->client->sess.sessionTeam = TEAM_SPECTATOR;
+        } else if ( !Q_stricmp( sessionState, "dead" ) ) {
+            ent->client->ps.pm_type = PM_DEAD;
+            ent->client->sess.spectatorState = SPECTATOR_NOT;
+        }
+    }
+
+    G_Scr_SetSelfFieldString( ctx, "sessionstate", sessionState );
     return 0;
 }
 
@@ -3498,6 +3574,7 @@ static void G_Scr_CreateGlobals( void )
     G_Scr_AddMethod( playerGetObj, "deaths",          GScr_Field_GetDeaths );
     G_Scr_AddMethod( playerGetObj, "maxhealth",       GScr_Field_GetMaxHealth );
     G_Scr_AddMethod( playerGetObj, "sessionteam",     GScr_Field_GetSessionTeam );
+    G_Scr_AddMethod( playerGetObj, "sessionstate",    GScr_Field_GetSessionState );
     G_Scr_AddMethod( playerGetObj, "spectatorclient", GScr_Field_GetSpectatorClient );
     gsc_object_set_field( g_scrCtx, playerProxyObj, "__get" );
 
@@ -3506,6 +3583,7 @@ static void G_Scr_CreateGlobals( void )
     G_Scr_AddMethod( playerSetObj, "deaths",          GScr_Field_SetDeaths );
     G_Scr_AddMethod( playerSetObj, "maxhealth",       GScr_Field_SetMaxHealth );
     G_Scr_AddMethod( playerSetObj, "sessionteam",     GScr_Field_SetSessionTeam );
+    G_Scr_AddMethod( playerSetObj, "sessionstate",    GScr_Field_SetSessionState );
     G_Scr_AddMethod( playerSetObj, "spectatorclient", GScr_Field_SetSpectatorClient );
     gsc_object_set_field( g_scrCtx, playerProxyObj, "__set" );
 
