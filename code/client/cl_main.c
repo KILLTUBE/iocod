@@ -3679,8 +3679,21 @@ void CL_Init( void ) {
 	Cvar_Get ("name", "UnnamedPlayer", CVAR_USERINFO | CVAR_ARCHIVE );
 	cl_rate = Cvar_Get ("rate", "25000", CVAR_USERINFO | CVAR_ARCHIVE );
 	Cvar_Get ("snaps", "20", CVAR_USERINFO | CVAR_ARCHIVE );
+#ifdef STANDALONE
+	/* CoD1 uses xmodel, not Q3 md3 player models — don't default to sarge.
+	   Force-clear any archived "sarge" value from old configs. */
+	{
+		cvar_t *modelCvar = Cvar_Get("model", "", CVAR_USERINFO | CVAR_ARCHIVE);
+		cvar_t *headCvar = Cvar_Get("headmodel", "", CVAR_USERINFO | CVAR_ARCHIVE);
+		if (!Q_stricmp(modelCvar->string, "sarge"))
+			Cvar_Set("model", "");
+		if (!Q_stricmp(headCvar->string, "sarge"))
+			Cvar_Set("headmodel", "");
+	}
+#else
 	Cvar_Get ("model", "sarge", CVAR_USERINFO | CVAR_ARCHIVE );
 	Cvar_Get ("headmodel", "sarge", CVAR_USERINFO | CVAR_ARCHIVE );
+#endif
 	Cvar_Get ("team_model", "james", CVAR_USERINFO | CVAR_ARCHIVE );
 	Cvar_Get ("team_headmodel", "*james", CVAR_USERINFO | CVAR_ARCHIVE );
 	Cvar_Get ("g_redTeam", "Stroggs", CVAR_SERVERINFO | CVAR_ARCHIVE);

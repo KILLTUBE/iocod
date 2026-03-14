@@ -524,6 +524,13 @@ static qboolean CG_RegisterClientModelname( clientInfo_t *ci, const char *modelN
 	const char		*headName;
 	char newTeamName[MAX_QPATH];
 
+#ifdef STANDALONE
+	/* CoD1 uses xmodel, not Q3 md3 player models — silently fail */
+	if ( !modelName[0] ) {
+		return qfalse;
+	}
+#endif
+
 	if ( headModelName[0] == '\0' ) {
 		headName = modelName;
 	}
@@ -674,6 +681,11 @@ static void CG_LoadClientInfo( int clientNum, clientInfo_t *ci ) {
 			CG_Error( "CG_RegisterClientModelname( %s, %s, %s, %s %s ) failed", ci->modelName, ci->skinName, ci->headModelName, ci->headSkinName, teamname );
 		}
 
+#ifdef STANDALONE
+		/* CoD1 uses xmodel system — Q3 md3 fallback models don't exist.
+		   Player will render invisible (hModel=0 early-out in CG_Player). */
+		modelloaded = qfalse;
+#else
 		// fall back to default team name
 		if( cgs.gametype >= GT_TEAM) {
 			// keep skin name
@@ -691,6 +703,7 @@ static void CG_LoadClientInfo( int clientNum, clientInfo_t *ci ) {
 			}
 		}
 		modelloaded = qfalse;
+#endif
 	}
 
 	ci->newAnims = qfalse;
