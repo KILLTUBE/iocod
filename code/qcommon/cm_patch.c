@@ -1310,7 +1310,7 @@ patchCollide_t *CM_GenerateTerrainCollide(int numVerts, const vec3_t *verts,
     patchCollide_t  *pc;
     int             i;
     facet_t         *facet;
-    vec3_t          *p1, *p2, *p3;
+    float           *p1, *p2, *p3;
     vec3_t          bounds[2];
     if (numVerts <= 2 || !verts || numIndices <= 2 || !indices) {
         Com_Error(ERR_DROP, "CM_GenerateTerrainCollide: bad parameters: (%i, %p, %i, %p)", 
@@ -1335,9 +1335,9 @@ patchCollide_t *CM_GenerateTerrainCollide(int numVerts, const vec3_t *verts,
         if (i1 >= numVerts || i2 >= numVerts || i3 >= numVerts) {
             continue;
         }
-        p1 = (vec3_t *) verts[i1];
-        p2 = (vec3_t *) verts[i2];
-        p3 = (vec3_t *) verts[i3];
+        p1 = (float *) verts[i1]; // A full point, aka vec3_t
+        p2 = (float *) verts[i2]; // A full point, aka vec3_t
+        p3 = (float *) verts[i3]; // A full point, aka vec3_t
         // 1. Update Bounds
         AddPointToBounds(p1, bounds[0], bounds[1]);
         AddPointToBounds(p2, bounds[0], bounds[1]);
