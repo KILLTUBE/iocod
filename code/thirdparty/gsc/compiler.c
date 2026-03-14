@@ -609,7 +609,7 @@ static void identifier(Compiler *c, ASTNode *n)
 	else
 	{
 		// emit2(c, OP_GLOBAL, string(c, n->ast_identifier_data.name), integer(1));
-		property(c, n, '.');
+		property(c, (ASTNode*)n, '.');
 		emit1(c, OP_GLOBAL, integer(1));
 		emit(c, OP_FIELD_REF);
 	}
@@ -818,13 +818,21 @@ IMPL_VISIT(ASTIdentifier)
 	{
 		entry = hash_trie_upsert(&c->variables, lowercase(c, n->name), NULL, false);
 		if(!entry)
-			error(c, "No variable '%s'", n->name);
-		emit4(c, OP_LOAD, integer(*(int *)entry->value), NONE, NONE, NONE);
+		{
+			// Create the local implicitly and let runtime default it to undefined.
+			// Allows reading locals before first assignment.
+			int idx = define_local_variable(c, n->name, false);
+			emit4(c, OP_LOAD, integer(idx), NONE, NONE, NONE);
+		}
+		else
+		{
+			emit4(c, OP_LOAD, integer(*(int *)entry->value), NONE, NONE, NONE);
+		}
 	}
 	else
 	{
 		// emit2(c, OP_GLOBAL, string(c, n->name), integer(0));
-		property(c, n, '.');
+		property(c, (ASTNode*)n, '.');
 		emit1(c, OP_GLOBAL, integer(0));
 		emit(c, OP_LOAD_FIELD);
 	}
