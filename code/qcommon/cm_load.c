@@ -622,7 +622,7 @@ void CMod_LoadCollisionPatches( lump_t *headers_l, lump_t *rows_l, lump_t *indic
 			int firstRow = LittleLong( in->d );   // c = firstTri (unused for collision)
 			int c        = width * height;
 
-			Com_Printf("LOAD BEZIER PATCH\n");
+			// Com_Printf("LOAD BEZIER PATCH\n");
 
 			if ( c > MAX_PATCH_VERTS ) {
 				Com_Error( ERR_DROP, "CMod_LoadCollisionPatches: MAX_PATCH_VERTS" );
@@ -644,7 +644,7 @@ void CMod_LoadCollisionPatches( lump_t *headers_l, lump_t *rows_l, lump_t *indic
 			int numIndices = LittleShort( in->b );
 			int firstVert  = LittleLong( in->c );
 			int firstIndex = LittleLong( in->d );
-			Com_Printf("LOAD TERRAIN PATCH numVerts=%d numIndices=%d firstVert=%d firstIndex=%d\n", numVerts, numIndices, firstVert, firstIndex);
+			// Com_Printf("LOAD TERRAIN PATCH numVerts=%d numIndices=%d firstVert=%d firstIndex=%d\n", numVerts, numIndices, firstVert, firstIndex);
 			if ( firstVert + numVerts > numRows ) {
 				Com_Error( ERR_DROP, "CMod_LoadCollisionPatches: bad firstVert (terrain)" );
 			}
@@ -654,7 +654,7 @@ void CMod_LoadCollisionPatches( lump_t *headers_l, lump_t *rows_l, lump_t *indic
 			vec3_t   *patchVerts = patchRows + firstVert;
 			uint16_t *patchIdx   = patchIndicesGlobal + firstIndex;
 			patch->pc = CM_GenerateTerrainCollide( numVerts, patchVerts, numIndices, patchIdx );
-			Com_DPrintf( "Loaded terrain patch %d (%d verts, %d tris)\n", i, numVerts, numIndices/3 );
+			// Com_DPrintf( "Loaded terrain patch %d (%d verts, %d tris)\n", i, numVerts, numIndices/3 );
 		}
 	}
 }

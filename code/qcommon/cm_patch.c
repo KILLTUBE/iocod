@@ -1199,121 +1199,198 @@ struct patchCollide_s	*CM_GeneratePatchCollide( int width, int height, vec3_t *p
 	return pf;
 }
 
-// Arbitrary terrain collision for CoD1
-patchCollide_t *CM_GenerateTerrainCollide( int numVerts, const vec3_t *verts,
-                                           int numIndices, const uint16_t *indices )
-{
-    int             i, numTriangles;
+
+/**
+ * @brief Determines the facing direction of a facet's border planes relative to the triangle.
+ * 
+ * @details The collision engine needs to know which side of a border plane is "solid" 
+ * (inside the triangle) and which side is "empty" (outside the triangle). This function 
+ * classifies the triangle's three vertices against each border plane.
+ * 
+ * Logic:
+ * - If all vertices are SIDE_FRONT: The border plane points INWARD (the solid part is behind the plane).
+ * - If all vertices are SIDE_BACK:  The border plane points OUTWARD.
+ * - If vertices are split (Front and Back): The geometry is degenerate or invalid; defaults to outward.
+ * 
+ * @param facet Pointer to the facet structure being constructed.
+ * @param p1    First vertex of the triangle (vec3_t).
+ * @param p2    Second vertex of the triangle (vec3_t).
+ * @param p3    Third vertex of the triangle (vec3_t).
+ */
+static void CM_SetTriangleSoupBorderInward(facet_t *facet, float *p1, float *p2, float *p3) {
+	int				k, l;
+	int				numPoints;
+	float			*points[4];
+	points[0] = p1;
+	points[1] = p2;
+	points[2] = p3;
+	numPoints = 3;
+	for (k = 0 ; k < facet->numBorders ; k++) {
+		int front, back;
+		front = 0;
+		back = 0;
+		for (l = 0; l < numPoints; l++) {
+			int side;
+			side = CM_PointOnPlaneSide(points[l], facet->borderPlanes[k]);
+			if (side == SIDE_FRONT) {
+				front++;
+			} if ( side == SIDE_BACK ) {
+				back++;
+			}
+		}
+		if (front && !back) {
+			facet->borderInward[k] = qtrue;
+		} else if (back && !front) {
+			facet->borderInward[k] = qfalse;
+		} else if (!front && !back) {
+			// flat side border
+			facet->borderPlanes[k] = -1;
+		} else {
+			// bisecting side border
+			Com_DPrintf( "WARNING: CM_SetTriangleSoupBorderInward: mixed plane sides\n" );
+			facet->borderInward[k] = qfalse;
+		}
+	}
+}
+
+/**
+ * @brief Generates a vertical border plane for a triangle edge.
+ * 
+ * @details This function creates a plane that is perpendicular to the triangle's 
+ * surface plane and runs along the edge defined by p1 and p2. This creates a 
+ * "wall" or "curb" around the triangle to prevent collision objects from 
+ * accidentally slipping off the edge during detection.
+ * 
+ * It calculates an 'up' vector by offsetting p1 along the surface normal.
+ * This ensures the generated border plane is orthogonal to the face.
+ * 
+ * @param surfacePlane The index of the surface plane (in the global planes array) 
+ *                     to which this edge belongs. Used to derive the normal vector.
+ * @param p1           The first vertex of the edge (vec3_t).
+ * @param p2           The second vertex of the edge (vec3_t).
+ * 
+ * @return             The index of the generated border plane in the global planes array.
+ */
+static int CM_GenerateBoundaryForPoints(int surfacePlane, float *p1, float *p2) {
+	vec3_t up;
+	VectorMA(p1, 4, planes[surfacePlane].plane, up);
+	return CM_FindPlane( p1, p2, up );
+}
+
+/**
+ * @brief Generates a patchCollide_t structure for arbitrary triangle meshes for CoD1.
+ * 
+ * @details This function converts raw vertex and index data into a 
+ * format usable by the Q3/CoD collision system. It implements the "Spearmint" 
+ * logic to ensure robust walking collision on terrain.
+ * 
+ * Key Implementation Details:
+ * 1. Single-Pass Optimization: Iterates through the index buffer once. 
+ *    During this pass, it:
+ *    - Calculates the surface plane.
+ *    - Generates orthogonal border planes (bevels) for edges.
+ *    - Validates the facet.
+ *    - Accumulates bounding box data.
+ * 
+ * 2. Bevels: Calls CM_AddFacetBevels to create additional collision planes 
+ *    for sharp edges, preventing players from snagging or falling through seams.
+ * 
+ * 3. Global Buffers: Utilizes the global `facets` and `planes` arrays for 
+ *    temporary storage before copying the final result to permanent Hunk memory.
+ * 
+ * @param numVerts   The number of vertices in the vertex array.
+ * @param verts      Pointer to the array of vertex positions (vec3_t).
+ * @param numIndices The number of indices in the index array.
+ * @param indices    Pointer to the array of uint16_t indices defining the triangles.
+ * 
+ * @return           A pointer to the allocated patchCollide_t structure, or NULL if generation failed.
+ */
+patchCollide_t *CM_GenerateTerrainCollide(int numVerts, const vec3_t *verts,
+                                          int numIndices, const uint16_t *indices) {
     patchCollide_t  *pc;
-    int             numFacetsLocal = 0;
-
-    numTriangles = numIndices / 3;
-    if ( numTriangles < 1 ) {
-        return NULL;
+    int             i;
+    facet_t         *facet;
+    float           *p1, *p2, *p3;
+    vec3_t          bounds[2];
+    if (numVerts <= 2 || !verts || numIndices <= 2 || !indices) {
+        Com_Error(ERR_DROP, "CM_GenerateTerrainCollide: bad parameters: (%i, %p, %i, %p)", 
+                  numVerts, verts, numIndices, indices);
     }
-
-    Com_Printf( "=== TERRAIN PATCH START: %d verts, %d indices (%d tris) ===\n",
-                numVerts, numIndices, numTriangles );
-
+    // Com_Printf("=== TERRAIN PATCH START: %d verts, %d indices (%d tris) ===\n", numVerts, numIndices, numTriangles );
+    // Initialize global counters
     numPlanes = 0;
     numFacets = 0;
-
-    for ( i = 0; i < numTriangles; i++ ) {
-        int     i1 = indices[i*3+0];
-        int     i2 = indices[i*3+1];
-        int     i3 = indices[i*3+2];
-        vec3_t  p1, p2, p3;
-
-        if ( i1 >= numVerts || i2 >= numVerts || i3 >= numVerts ) continue;
-
-        VectorCopy( verts[i1], p1 );
-        VectorCopy( verts[i2], p2 );
-        VectorCopy( verts[i3], p3 );
-
-        facet_t *facet = &facets[numFacets];
-        Com_Memset( facet, 0, sizeof( *facet ) );
-
-        // 1. Surface Plane
-        facet->surfacePlane = CM_FindPlane( p1, p2, p3 );
-        if ( facet->surfacePlane == -1 ) continue;
-
-        // 2. Border Planes using the "3rd Vertex Check"
-        facet->numBorders = 3;
-        qboolean badTriangle = qfalse;
-        
-        for ( int k = 0; k < 3; k++ ) {
-            vec3_t edgeP1, edgeP2, up, testVert;
-            patchPlane_t *surfPlane = &planes[facet->surfacePlane];
-            int bp;
-
-            // Setup Edge
-            if ( k == 0 )      { VectorCopy(p1, edgeP1); VectorCopy(p2, edgeP2); VectorCopy(p3, testVert); }
-            else if ( k == 1 ) { VectorCopy(p2, edgeP1); VectorCopy(p3, edgeP2); VectorCopy(p1, testVert); }
-            else               { VectorCopy(p3, edgeP1); VectorCopy(p1, edgeP2); VectorCopy(p2, testVert); }
-
-            // Calculate 'up'
-            VectorMA( edgeP1, 8.0f, surfPlane->plane, up );
-
-            // Try finding plane
-            bp = CM_FindPlane( edgeP1, edgeP2, up );
-            if ( bp == -1 ) { badTriangle = qtrue; break; }
-
-            // Check orientation using the 3rd vertex (testVert)
-            // The border plane must face INWARD, meaning testVert must be IN FRONT (Dist > 0).
-            patchPlane_t *borderPlane = &planes[bp];
-            float testDist = DotProduct( testVert, borderPlane->plane ) - borderPlane->plane[3];
-
-            if ( testDist < 0 ) {
-                // Plane points OUTWARD (3rd vertex is behind).
-                // Flip it by swapping edge points.
-                bp = CM_FindPlane( edgeP2, edgeP1, up );
-                if ( bp == -1 ) { badTriangle = qtrue; break; }
-            }
-
-            // We are now 100% sure the plane points Inward (3rd vert is in front).
-            // Standard PatchCollide expects Inward=1 for valid initial borders.
-            facet->borderPlanes[k]   = bp;
-            facet->borderInward[k]   = qtrue; 
-            facet->borderNoAdjust[k] = qfalse;
+    // Initialize local bounds for accumulation
+    ClearBounds(bounds[0], bounds[1]);
+    // --- Single Pass: Find Planes, Build Facets, AND Calculate Bounds ---
+    for (i = 0; i < numIndices; i += 3) {
+        // We cannot predict how many triangles will be valid, so we must check
+        // before writing to the global 'facets' array to prevent buffer overflow.
+        if (numFacets == MAX_FACETS) {
+            Com_Error(ERR_DROP, "MAX_FACETS");
         }
-
-        if ( badTriangle ) continue;
-
-        // --- DISABLE BEVELS FOR TERRAIN SOUP ---
-        // Bevels are too complex for arbitrary trisoup and often cause "invalid bevel" 
-        // and "winding chopped away" errors. 
-        // The 3 border planes are sufficient for basic collision.
-        // CM_AddFacetBevels( facet ); 
-
-        // --- Validate ---
-        if ( CM_ValidateFacet( facet ) ) {
+        int i1 = indices[i + 0];
+        int i2 = indices[i + 1];
+        int i3 = indices[i + 2];
+        if (i1 >= numVerts || i2 >= numVerts || i3 >= numVerts) {
+            continue;
+        }
+        p1 = (float *) verts[i1]; // A full point, aka vec3_t
+        p2 = (float *) verts[i2]; // A full point, aka vec3_t
+        p3 = (float *) verts[i3]; // A full point, aka vec3_t
+        // 1. Update Bounds
+        AddPointToBounds(p1, bounds[0], bounds[1]);
+        AddPointToBounds(p2, bounds[0], bounds[1]);
+        AddPointToBounds(p3, bounds[0], bounds[1]);
+        // 2. Prepare Facet
+        facet = &facets[numFacets];
+        Com_Memset(facet, 0, sizeof(*facet));
+        // 3. Find Plane
+        facet->surfacePlane = CM_FindPlane(p1, p2, p3);
+        if (facet->surfacePlane == -1) {
+            continue;
+        }
+        // 4. Setup Borders
+        facet->numBorders = 3;
+        facet->borderNoAdjust[0] = qfalse;
+        facet->borderNoAdjust[1] = qfalse;
+        facet->borderNoAdjust[2] = qfalse;
+        facet->borderPlanes[0] = CM_GenerateBoundaryForPoints(facet->surfacePlane, p1, p2);
+        facet->borderPlanes[1] = CM_GenerateBoundaryForPoints(facet->surfacePlane, p2, p3);
+        facet->borderPlanes[2] = CM_GenerateBoundaryForPoints(facet->surfacePlane, p3, p1);
+        CM_SetTriangleSoupBorderInward(facet, p1, p2, p3);
+        // 5. Validate and Bevel
+        if (CM_ValidateFacet(facet)) {
+            CM_AddFacetBevels(facet);
             numFacets++;
-            numFacetsLocal++;
         } else {
             // If validation fails even with perfect 3-vertex logic, 
             // the triangle might be degenerate (zero area).
-            Com_Printf( "Validation failed for tri %d (Degenerate?)\n", i );
+            // Com_Printf( "Validation failed for tri %d (Degenerate?)\n", i );
         }
     }
-
-    Com_Printf( "=== TERRAIN PATCH END: %d valid facets ===\n", numFacetsLocal );
-
-    if ( numFacetsLocal == 0 ) return NULL;
-
-    pc = Hunk_Alloc( sizeof( *pc ), h_high );
-    pc->numFacets = numFacets;
-    pc->facets    = Hunk_Alloc( numFacets * sizeof( facet_t ), h_high );
-    Com_Memcpy( pc->facets, facets, numFacets * sizeof( facet_t ) );
-
-    pc->numPlanes = numPlanes;
-    pc->planes    = Hunk_Alloc( numPlanes * sizeof( patchPlane_t ), h_high );
-    Com_Memcpy( pc->planes, planes, numPlanes * sizeof( patchPlane_t ) );
-
-    ClearBounds( pc->bounds[0], pc->bounds[1] );
-    for ( i = 0; i < numVerts; i++ ) {
-        AddPointToBounds( verts[i], pc->bounds[0], pc->bounds[1] );
+    // Com_Printf("=== TERRAIN PATCH END: %d valid facets ===\n", numFacets);
+    if (numFacets == 0) {
+        return NULL;
     }
-
+    // --- Copy results out to permanent memory ---
+    pc = Hunk_Alloc(sizeof(*pc), h_high);
+    pc->numPlanes = numPlanes;
+    pc->numFacets = numFacets;
+    pc->planes    = Hunk_Alloc(numPlanes * sizeof(patchPlane_t), h_high);
+    pc->facets    = Hunk_Alloc(numFacets * sizeof(facet_t     ), h_high);
+    Com_Memcpy(pc->planes, planes, numPlanes * sizeof(patchPlane_t));
+    Com_Memcpy(pc->facets, facets, numFacets * sizeof(facet_t     ));
+    // --- Copy local bounds to final structure ---
+    VectorCopy(bounds[0], pc->bounds[0]);
+    VectorCopy(bounds[1], pc->bounds[1]);
+    // Expand bounds for epsilon
+    pc->bounds[0][0] -= 1;
+    pc->bounds[0][1] -= 1;
+    pc->bounds[0][2] -= 1;
+    pc->bounds[1][0] += 1;
+    pc->bounds[1][1] += 1;
+    pc->bounds[1][2] += 1;
     return pc;
 }
 
