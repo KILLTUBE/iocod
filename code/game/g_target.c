@@ -271,8 +271,13 @@ void target_laser_think (gentity_t *self) {
 
 	if ( tr.entityNum ) {
 		// hurt it if we can
-		G_Damage ( &g_entities[tr.entityNum], self, self->activator, self->movedir, 
+#ifdef STANDALONE
+		G_Damage ( &g_entities[tr.entityNum], self, self->activator, self->movedir,
+			tr.endpos, self->damage, DAMAGE_NO_KNOCKBACK, MOD_EXPLOSIVE);
+#else
+		G_Damage ( &g_entities[tr.entityNum], self, self->activator, self->movedir,
 			tr.endpos, self->damage, DAMAGE_NO_KNOCKBACK, MOD_TARGET_LASER);
+#endif
 	}
 
 	VectorCopy (tr.endpos, self->s.origin2);

@@ -20,8 +20,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 //
-// g_weapon.c 
+// g_weapon.c
 // perform the server side effects of a weapon firing
+
+#ifndef STANDALONE	/* Q3 weapon code — not used in CoD1 standalone builds */
 
 #include "g_local.h"
 
@@ -1132,4 +1134,26 @@ void G_StartKamikaze( gentity_t *ent ) {
 	te->r.svFlags |= SVF_BROADCAST;
 	te->s.eventParm = GTS_KAMIKAZE;
 }
+#endif
+
+#endif /* !STANDALONE */
+
+#ifdef STANDALONE
+/* Utilities needed by other modules even in STANDALONE builds */
+#include "g_local.h"
+
+void SnapVectorTowards( vec3_t v, vec3_t to ) {
+	int i;
+	for ( i = 0 ; i < 3 ; i++ ) {
+		if ( to[i] <= v[i] ) {
+			v[i] = (float)((int)v[i]);
+		} else {
+			v[i] = (float)((int)v[i]) + 1;
+		}
+	}
+}
+
+/* Stubs for Q3 weapon functions still referenced by g_misc.c shooter entities */
+gentity_t *fire_plasma( gentity_t *self, vec3_t start, vec3_t dir ) { (void)self; (void)start; (void)dir; return NULL; }
+gentity_t *fire_rocket( gentity_t *self, vec3_t start, vec3_t dir ) { (void)self; (void)start; (void)dir; return NULL; }
 #endif

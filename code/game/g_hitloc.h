@@ -43,4 +43,8 @@ const char		*G_GetHitLocationString( int index );
 int				G_GetHitLocationIndexFromString( const char *name );
 int				G_CalcHitLocFromPoint( vec3_t point, gentity_t *target );
 
+#else /* !STANDALONE */
+
+#define G_ParseHitLocDmgTable()        ((void)0)
+
 #endif /* STANDALONE */

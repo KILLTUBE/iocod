@@ -137,9 +137,11 @@ static void CG_Obituary( entityState_t *ent ) {
 	case MOD_LAVA:
 		message = "does a back flip into the lava";
 		break;
+#ifndef STANDALONE
 	case MOD_TARGET_LASER:
 		message = "saw the light";
 		break;
+#endif
 	case MOD_TRIGGER_HURT:
 		message = "was in the wrong place";
 		break;
@@ -164,6 +166,7 @@ static void CG_Obituary( entityState_t *ent ) {
 			else
 				message = "tripped on his own grenade";
 			break;
+#ifndef STANDALONE
 		case MOD_ROCKET_SPLASH:
 			if ( gender == GENDER_FEMALE )
 				message = "blew herself up";
@@ -183,6 +186,7 @@ static void CG_Obituary( entityState_t *ent ) {
 		case MOD_BFG_SPLASH:
 			message = "should have used a smaller gun";
 			break;
+#endif
 #ifdef MISSIONPACK
 		case MOD_PROXIMITY_MINE:
 			if( gender == GENDER_FEMALE ) {
@@ -247,6 +251,22 @@ static void CG_Obituary( entityState_t *ent ) {
 
 	if ( attacker != ENTITYNUM_WORLD ) {
 		switch (mod) {
+#ifdef STANDALONE
+		case MOD_PISTOL_BULLET:
+		case MOD_RIFLE_BULLET:
+			message = "was killed by";
+			break;
+		case MOD_MELEE:
+			message = "was bashed by";
+			break;
+		case MOD_HEAD_SHOT:
+			message = "was headshot by";
+			break;
+		case MOD_PROJECTILE:
+		case MOD_PROJECTILE_SPLASH:
+			message = "was blown away by";
+			break;
+#else
 		case MOD_GRAPPLE:
 			message = "was caught by";
 			break;
@@ -258,14 +278,6 @@ static void CG_Obituary( entityState_t *ent ) {
 			break;
 		case MOD_SHOTGUN:
 			message = "was gunned down by";
-			break;
-		case MOD_GRENADE:
-			message = "ate";
-			message2 = "'s grenade";
-			break;
-		case MOD_GRENADE_SPLASH:
-			message = "was shredded by";
-			message2 = "'s shrapnel";
 			break;
 		case MOD_ROCKET:
 			message = "ate";
@@ -294,6 +306,7 @@ static void CG_Obituary( entityState_t *ent ) {
 			message = "was blasted by";
 			message2 = "'s BFG";
 			break;
+#endif
 #ifdef MISSIONPACK
 		case MOD_NAIL:
 			message = "was nailed by";

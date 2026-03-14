@@ -251,11 +251,18 @@ BotWeaponNameForMeansOfDeath
 
 char *BotWeaponNameForMeansOfDeath(int mod) {
 	switch(mod) {
+#ifdef STANDALONE
+		case MOD_PISTOL_BULLET: return "Pistol";
+		case MOD_RIFLE_BULLET: return "Rifle";
+		case MOD_MELEE: return "Melee";
+		case MOD_HEAD_SHOT: return "Headshot";
+		case MOD_PROJECTILE:
+		case MOD_PROJECTILE_SPLASH: return "Projectile";
+		case MOD_EXPLOSIVE: return "Explosive";
+#else
 		case MOD_SHOTGUN: return "Shotgun";
 		case MOD_GAUNTLET: return "Gauntlet";
 		case MOD_MACHINEGUN: return "Machinegun";
-		case MOD_GRENADE:
-		case MOD_GRENADE_SPLASH: return "Grenade Launcher";
 		case MOD_ROCKET:
 		case MOD_ROCKET_SPLASH: return "Rocket Launcher";
 		case MOD_PLASMA:
@@ -272,6 +279,9 @@ char *BotWeaponNameForMeansOfDeath(int mod) {
 		case MOD_JUICED: return "Prox mine";
 #endif
 		case MOD_GRAPPLE: return "Grapple";
+#endif
+		case MOD_GRENADE:
+		case MOD_GRENADE_SPLASH: return "Grenade";
 		default: return "[unknown weapon]";
 	}
 }
@@ -592,7 +602,9 @@ int BotChat_Death(bot_state_t *bs) {
 		else if (bs->botsuicide || //all other suicides by own weapon
 				bs->botdeathtype == MOD_CRUSH ||
 				bs->botdeathtype == MOD_SUICIDE ||
+#ifndef STANDALONE
 				bs->botdeathtype == MOD_TARGET_LASER ||
+#endif
 				bs->botdeathtype == MOD_TRIGGER_HURT ||
 				bs->botdeathtype == MOD_UNKNOWN)
 			BotAI_BotInitialChat(bs, "death_suicide", BotRandomOpponentName(bs), NULL);
@@ -603,17 +615,30 @@ int BotChat_Death(bot_state_t *bs) {
 			BotAI_BotInitialChat(bs, "death_kamikaze", name, NULL);
 #endif
 		else {
+#ifdef STANDALONE
+			if ((bs->botdeathtype == MOD_MELEE ||
+				bs->botdeathtype == MOD_HEAD_SHOT) && random() < 0.5) {
+#else
 			if ((bs->botdeathtype == MOD_GAUNTLET ||
 				bs->botdeathtype == MOD_RAILGUN ||
 				bs->botdeathtype == MOD_BFG ||
 				bs->botdeathtype == MOD_BFG_SPLASH) && random() < 0.5) {
+#endif
 
+#ifdef STANDALONE
+				if (bs->botdeathtype == MOD_MELEE)
+#else
 				if (bs->botdeathtype == MOD_GAUNTLET)
+#endif
 					BotAI_BotInitialChat(bs, "death_gauntlet",
 							name,												// 0
 							BotWeaponNameForMeansOfDeath(bs->botdeathtype),		// 1
 							NULL);
+#ifdef STANDALONE
+				else if (bs->botdeathtype == MOD_HEAD_SHOT)
+#else
 				else if (bs->botdeathtype == MOD_RAILGUN)
+#endif
 					BotAI_BotInitialChat(bs, "death_rail",
 							name,												// 0
 							BotWeaponNameForMeansOfDeath(bs->botdeathtype),		// 1
@@ -685,12 +710,21 @@ int BotChat_Kill(bot_state_t *bs) {
 			return qfalse;			// don't wait
 		}
 		//
+#ifdef STANDALONE
+		if (bs->enemydeathtype == MOD_MELEE) {
+			BotAI_BotInitialChat(bs, "kill_gauntlet", name, NULL);
+		}
+		else if (bs->enemydeathtype == MOD_HEAD_SHOT) {
+			BotAI_BotInitialChat(bs, "kill_rail", name, NULL);
+		}
+#else
 		if (bs->enemydeathtype == MOD_GAUNTLET) {
 			BotAI_BotInitialChat(bs, "kill_gauntlet", name, NULL);
 		}
 		else if (bs->enemydeathtype == MOD_RAILGUN) {
 			BotAI_BotInitialChat(bs, "kill_rail", name, NULL);
 		}
+#endif
 		else if (bs->enemydeathtype == MOD_TELEFRAG) {
 			BotAI_BotInitialChat(bs, "kill_telefrag", name, NULL);
 		}

@@ -852,23 +852,27 @@ void ClientThink_real( gentity_t *ent ) {
 		client->ps.speed *= 1.3;
 	}
 
+#ifndef STANDALONE
 	// Let go of the hook if we aren't firing
 	if ( client->ps.weapon == WP_GRAPPLING_HOOK &&
 		client->hook && !( ucmd->buttons & BUTTON_ATTACK ) ) {
 		Weapon_HookFree(client->hook);
 	}
+#endif
 
 	// set up for pmove
 	oldEventSequence = client->ps.eventSequence;
 
 	memset (&pm, 0, sizeof(pm));
 
+#ifndef STANDALONE
 	// check for the hit-scan gauntlet, don't let the action
 	// go through as an attack unless it actually hits something
 	if ( client->ps.weapon == WP_GAUNTLET && !( ucmd->buttons & BUTTON_TALK ) &&
 		( ucmd->buttons & BUTTON_ATTACK ) && client->ps.weaponTime <= 0 ) {
 		pm.gauntletHit = CheckGauntletAttack( ent );
 	}
+#endif
 
 	if ( ent->flags & FL_FORCE_GESTURE ) {
 		ent->flags &= ~FL_FORCE_GESTURE;

@@ -17,6 +17,8 @@ The weapon name is derived from the classname by stripping the leading
 "weapon_" or "mpweapon_" prefix.
 ===========================================================================
 */
+#ifdef STANDALONE
+
 #include "g_local.h"
 #include "../qcommon/bg_weapon_cod1.h"
 
@@ -172,3 +174,5 @@ void G_MeleeDamage( gentity_t *attacker )
     G_Damage( traceEnt, attacker, attacker, forward, tr.endpos,
               MELEE_DAMAGE, 0, MOD_MELEE );
 }
+
+#endif /* STANDALONE */

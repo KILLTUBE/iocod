@@ -555,12 +555,18 @@ void DropPortalDestination( gentity_t *ent );
 //
 // g_weapon.c
 //
+#ifdef STANDALONE
+static ID_INLINE qboolean LogAccuracyHit( gentity_t *target, gentity_t *attacker ) { (void)target; (void)attacker; return qfalse; }
+#else
 qboolean LogAccuracyHit( gentity_t *target, gentity_t *attacker );
+#endif
 void CalcMuzzlePoint ( gentity_t *ent, vec3_t forward, vec3_t right, vec3_t up, vec3_t muzzlePoint );
 void SnapVectorTowards( vec3_t v, vec3_t to );
+#ifndef STANDALONE
 qboolean CheckGauntletAttack( gentity_t *ent );
 void Weapon_HookFree (gentity_t *ent);
 void Weapon_HookThink (gentity_t *ent);
+#endif
 
 
 #ifdef STANDALONE
@@ -599,7 +605,11 @@ qboolean G_FilterPacket (char *from);
 //
 // g_weapon.c
 //
+#ifdef STANDALONE
+static ID_INLINE void FireWeapon( gentity_t *ent ) { (void)ent; }
+#else
 void FireWeapon( gentity_t *ent );
+#endif
 #ifdef MISSIONPACK
 void G_StartKamikaze( gentity_t *ent );
 #endif

@@ -361,6 +361,7 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace ) {
 	}
 #endif
 
+#ifndef STANDALONE
 	if (!strcmp(ent->classname, "hook")) {
 		gentity_t *nent;
 		vec3_t v;
@@ -405,6 +406,7 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace ) {
 
 		return;
 	}
+#endif
 
 	// is it cheaper in bandwidth to just remove this ent and create a new
 	// one, rather than changing the missile into the explosion?
@@ -513,6 +515,7 @@ void G_RunMissile( gentity_t *ent ) {
 
 //=============================================================================
 
+#ifndef STANDALONE
 /*
 =================
 fire_plasma
@@ -550,7 +553,8 @@ gentity_t *fire_plasma (gentity_t *self, vec3_t start, vec3_t dir) {
 	VectorCopy (start, bolt->r.currentOrigin);
 
 	return bolt;
-}	
+}
+#endif
 
 //=============================================================================
 
@@ -597,6 +601,7 @@ gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t dir) {
 //=============================================================================
 
 
+#ifndef STANDALONE
 /*
 =================
 fire_bfg
@@ -633,10 +638,12 @@ gentity_t *fire_bfg (gentity_t *self, vec3_t start, vec3_t dir) {
 
 	return bolt;
 }
+#endif
 
 //=============================================================================
 
 
+#ifndef STANDALONE
 /*
 =================
 fire_rocket
@@ -673,7 +680,9 @@ gentity_t *fire_rocket (gentity_t *self, vec3_t start, vec3_t dir) {
 
 	return bolt;
 }
+#endif
 
+#ifndef STANDALONE
 /*
 =================
 fire_grapple
@@ -709,6 +718,7 @@ gentity_t *fire_grapple (gentity_t *self, vec3_t start, vec3_t dir) {
 
 	return hook;
 }
+#endif
 
 
 #ifdef MISSIONPACK
