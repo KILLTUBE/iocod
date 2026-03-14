@@ -2346,6 +2346,25 @@ void PmoveSingle (pmove_t *pmove) {
 	// entering / leaving water splashes
 	PM_WaterEvents();
 
+#ifdef STANDALONE
+	// CoD1: clamp velocity when it exceeds 2x the actual displacement velocity
+	// This prevents retaining impossibly high velocity after hitting walls/obstacles
+	{
+		vec3_t	displacement;
+		float	vel_sq, disp_vel_sq;
+
+		VectorSubtract( pm->ps->origin, pml.previous_origin, displacement );
+		vel_sq = VectorLengthSquared( pm->ps->velocity );
+		disp_vel_sq = VectorLengthSquared( displacement ) / ( pml.frametime * pml.frametime );
+		if ( vel_sq * 0.25f > disp_vel_sq ) {
+			float inv_frametime = 1.0f / pml.frametime;
+			pm->ps->velocity[0] = displacement[0] * inv_frametime;
+			pm->ps->velocity[1] = displacement[1] * inv_frametime;
+			pm->ps->velocity[2] = displacement[2] * inv_frametime;
+		}
+	}
+#endif
+
 	// snap some parts of playerstate to save network bandwidth
 	trap_SnapVector( pm->ps->velocity );
 }

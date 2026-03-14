@@ -1264,7 +1264,13 @@ typedef enum {
 	TR_LINEAR,
 	TR_LINEAR_STOP,
 	TR_SINE,					// value = base + sin( time / duration ) * delta
-	TR_GRAVITY
+	TR_GRAVITY,
+#ifdef STANDALONE
+	TR_LOW_GRAVITY,				// CoD1: gravity = 120 (e.g. slow-falling debris)
+	TR_LOW_GRAVITY_FLOAT,		// CoD1: gravity = 80 (floating objects)
+	TR_INTERPOLATE2,			// CoD1: same as TR_STATIONARY
+	TR_ACCELERATE,				// CoD1: accelerating trajectory (quadratic, clamped by duration)
+#endif
 } trType_t;
 
 typedef struct {

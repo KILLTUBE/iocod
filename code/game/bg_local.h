@@ -24,7 +24,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #define	MIN_WALK_NORMAL	0.7f		// can't walk on very steep slopes
 
-#define	STEPSIZE		39			// CoD1: 39 (Q3: 18), confirmed from game.mp.i386.so rodata
+#define	STEPSIZE		18			// CoD1: 18 (PM_StepSlideMove hardcodes 18.0)
+#ifdef STANDALONE
+#define	STEPSIZE_PRONE	10			// CoD1: reduced step height when prone
+#endif
 #define	JUMP_HEIGHT		39.0f		// CoD1 jump height in game units; velocity = sqrt(2*h*gravity)
 
 // JUMP_VELOCITY removed: CoD1 computes it as sqrt(2 * JUMP_HEIGHT * ps->gravity)

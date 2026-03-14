@@ -1227,6 +1227,35 @@ void BG_EvaluateTrajectory( const trajectory_t *tr, int atTime, vec3_t result ) 
 		VectorMA( tr->trBase, deltaTime, tr->trDelta, result );
 		result[2] -= 0.5 * DEFAULT_GRAVITY * deltaTime * deltaTime;		// FIXME: local gravity...
 		break;
+#ifdef STANDALONE
+	case TR_LOW_GRAVITY:	// CoD1: gravity = 120
+		deltaTime = ( atTime - tr->trTime ) * 0.001;
+		result[0] = tr->trBase[0] + tr->trDelta[0] * deltaTime;
+		result[1] = tr->trBase[1] + tr->trDelta[1] * deltaTime;
+		result[2] = tr->trBase[2] + tr->trDelta[2] * deltaTime - 120.0f * deltaTime * deltaTime;
+		break;
+	case TR_LOW_GRAVITY_FLOAT:	// CoD1: gravity = 80
+		deltaTime = ( atTime - tr->trTime ) * 0.001;
+		result[0] = tr->trBase[0] + tr->trDelta[0] * deltaTime;
+		result[1] = tr->trBase[1] + tr->trDelta[1] * deltaTime;
+		result[2] = tr->trBase[2] + tr->trDelta[2] * deltaTime - 80.0f * deltaTime * deltaTime;
+		break;
+	case TR_INTERPOLATE2:
+		VectorCopy( tr->trBase, result );
+		break;
+	case TR_ACCELERATE: {	// CoD1: accelerating trajectory, clamped by duration
+		float	speed, accel;
+		if ( atTime > tr->trTime + tr->trDuration ) {
+			atTime = tr->trTime + tr->trDuration;
+		}
+		deltaTime = ( atTime - tr->trTime ) * 0.001;
+		speed = VectorLength( tr->trDelta );
+		VectorNormalize2( tr->trDelta, result );
+		accel = speed / ( 0.001f * tr->trDuration ) * 0.5f * deltaTime * deltaTime;
+		VectorMA( tr->trBase, accel, result, result );
+		break;
+	}
+#endif
 	default:
 		Com_Error( ERR_DROP, "BG_EvaluateTrajectory: unknown trType: %i", tr->trType );
 		break;
@@ -1270,6 +1299,29 @@ void BG_EvaluateTrajectoryDelta( const trajectory_t *tr, int atTime, vec3_t resu
 		VectorCopy( tr->trDelta, result );
 		result[2] -= DEFAULT_GRAVITY * deltaTime;		// FIXME: local gravity...
 		break;
+#ifdef STANDALONE
+	case TR_LOW_GRAVITY:	// CoD1: gravity velocity = 240 * dt
+		deltaTime = ( atTime - tr->trTime ) * 0.001;
+		VectorCopy( tr->trDelta, result );
+		result[2] -= 240.0f * deltaTime;
+		break;
+	case TR_LOW_GRAVITY_FLOAT:	// CoD1: gravity velocity = 160 * dt
+		deltaTime = ( atTime - tr->trTime ) * 0.001;
+		VectorCopy( tr->trDelta, result );
+		result[2] -= 160.0f * deltaTime;
+		break;
+	case TR_INTERPOLATE2:
+		VectorClear( result );
+		break;
+	case TR_ACCELERATE:	// CoD1: velocity = trDelta * dt (linear acceleration, clamped)
+		if ( atTime > tr->trTime + tr->trDuration ) {
+			VectorClear( result );
+			return;
+		}
+		deltaTime = ( atTime - tr->trTime ) * 0.001;
+		VectorScale( tr->trDelta, deltaTime, result );
+		break;
+#endif
 	default:
 		Com_Error( ERR_DROP, "BG_EvaluateTrajectoryDelta: unknown trType: %i", tr->trType );
 		break;

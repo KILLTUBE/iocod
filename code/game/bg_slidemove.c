@@ -41,7 +41,11 @@ PM_SlideMove
 Returns qtrue if the velocity was clipped in some way
 ==================
 */
+#ifdef STANDALONE
+#define	MAX_CLIP_PLANES	8	// CoD1: 8 (Q3: 5)
+#else
 #define	MAX_CLIP_PLANES	5
+#endif
 qboolean	PM_SlideMove( qboolean gravity ) {
 	int			bumpcount, numbumps;
 	vec3_t		dir;
@@ -128,7 +132,11 @@ qboolean	PM_SlideMove( qboolean gravity ) {
 		// non-axial planes
 		//
 		for ( i = 0 ; i < numplanes ; i++ ) {
-			if ( DotProduct( trace.plane.normal, planes[i] ) > 0.99 ) {
+	#ifdef STANDALONE
+		if ( DotProduct( trace.plane.normal, planes[i] ) > 0.999 ) {	// CoD1: 0.999 (Q3: 0.99)
+#else
+		if ( DotProduct( trace.plane.normal, planes[i] ) > 0.99 ) {
+#endif
 				VectorAdd( trace.plane.normal, pm->ps->velocity, pm->ps->velocity );
 				break;
 			}
