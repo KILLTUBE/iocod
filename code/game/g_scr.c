@@ -132,6 +132,19 @@ static G_ScrObjective_t g_scrObjectives[ G_SCR_MAX_OBJECTIVES ];
 /* The GSC file namespace (path without .gsc) where CodeCallback_* live.   */
 static char         g_scrCallbackFile[ MAX_QPATH ];
 
+/* Deferred auto-menu-responses: openMenu queues here, G_Scr_Frame fires them.
+   This ensures the response notification arrives after the script thread
+   reaches its waittill("menuresponse") suspension point. */
+#define G_SCR_MAX_DEFERRED_MENUS 8
+typedef struct {
+    int  clientNum;
+    char menu[ MAX_QPATH ];
+    char response[ 64 ];
+} G_ScrDeferredMenu_t;
+
+static G_ScrDeferredMenu_t g_scrDeferredMenus[ G_SCR_MAX_DEFERRED_MENUS ];
+static int                 g_scrDeferredMenuCount;
+
 /* Local forward declaration from g_spawn.c (not exposed in g_local.h). */
 qboolean G_CallSpawn( gentity_t *ent );
 static void G_Scr_CreatePlayerObj( int clientNum );
@@ -1605,9 +1618,16 @@ static int GScr_Meth_OpenMenu( gsc_Context *ctx )
 
     trap_SendServerCommand( clientNum, va( "scr_menu open \"%s\"", menuName ) );
 
+    /* Defer auto-response to next frame so the script thread can reach its
+       waittill("menuresponse") before the notification fires. */
     if ( G_Scr_ShouldAutoMenuResponse() &&
          G_Scr_GetAutoMenuResponse( menuName, autoResponse, sizeof( autoResponse ) ) ) {
-        G_Scr_PlayerMenuResponse( clientNum, menuName, autoResponse );
+        if ( g_scrDeferredMenuCount < G_SCR_MAX_DEFERRED_MENUS ) {
+            G_ScrDeferredMenu_t *d = &g_scrDeferredMenus[ g_scrDeferredMenuCount++ ];
+            d->clientNum = clientNum;
+            Q_strncpyz( d->menu, menuName, sizeof( d->menu ) );
+            Q_strncpyz( d->response, autoResponse, sizeof( d->response ) );
+        }
     }
 
     gsc_add_int( ctx, 1 );
@@ -3753,6 +3773,7 @@ void G_Scr_Init( void )
     Com_Memset( g_scrViewModels, 0, sizeof( g_scrViewModels ) );
     Com_Memset( g_scrFxNames, 0, sizeof( g_scrFxNames ) );
     g_scrFxCount = 0;
+    g_scrDeferredMenuCount = 0;
     Com_Memset( g_scrObjectives, 0, sizeof( g_scrObjectives ) );
     G_Scr_Hud_ResetAll( qfalse );
     g_scrCallbackFile[0] = '\0';
@@ -3952,9 +3973,27 @@ void G_Scr_Shutdown( void )
    ========================================================================= */
 void G_Scr_Frame( float dt )
 {
+    int i;
+
     if ( !g_scrActive || !g_scrCtx ) {
         return;
     }
+
+    /* Fire deferred auto-menu-responses before the VM tick so the
+       notification arrives in the same frame the thread resumes. */
+    if ( g_scrDeferredMenuCount > 0 ) {
+        int count = g_scrDeferredMenuCount;
+        G_ScrDeferredMenu_t pending[ G_SCR_MAX_DEFERRED_MENUS ];
+        Com_Memcpy( pending, g_scrDeferredMenus, sizeof( G_ScrDeferredMenu_t ) * count );
+        g_scrDeferredMenuCount = 0;
+
+        for ( i = 0; i < count; i++ ) {
+            G_Scr_PlayerMenuResponse( pending[ i ].clientNum,
+                                      pending[ i ].menu,
+                                      pending[ i ].response );
+        }
+    }
+
     gsc_update( g_scrCtx, dt );
     G_Scr_Hud_UpdateTimers();
 }
