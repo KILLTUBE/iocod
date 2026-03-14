@@ -1142,6 +1142,29 @@ void Script_RestartHide(itemDef_t *item, char **args) {
   Script_SavegameHide(item, args);
 }
 
+/*
+ * CoD1 scriptMenuResponse: sends the player's menu selection back to the
+ * server as a "menuresponse" command.  Usage in .menu files:
+ *   scriptMenuResponse "m1carbine_mp"
+ * The owning menu's name is used as the menu identifier.
+ */
+void Script_ScriptMenuResponse(itemDef_t *item, char **args) {
+  const char *response;
+  if (String_Parse(args, &response)) {
+    char svid[32];
+    char menuIdx[32];
+    char menuName[256];
+
+    (void)item;
+    DC->getCVarString("sv_serverid", svid, sizeof(svid));
+    DC->getCVarString("scr_menuindex", menuIdx, sizeof(menuIdx));
+    DC->getCVarString("g_scriptMainMenu", menuName, sizeof(menuName));
+
+    /* Forward menuresponse to server via 'cmd'. */
+    DC->executeText(EXEC_APPEND, va("cmd mr %s %s %s\n", svid, menuName, response));
+  }
+}
+
 void Menu_TransitionItemByName(menuDef_t *menu, const char *p, rectDef_t rectFrom, rectDef_t rectTo, int time, float amt) {
   itemDef_t *item;
   int i;
@@ -1300,7 +1323,8 @@ commandDef_t commandList[] =
   /* CoD1 compatibility */
   {"ingameclose",   &Script_InGameClose},
   {"savegamehide",  &Script_SavegameHide},
-  {"restarthide",   &Script_RestartHide}
+  {"restarthide",   &Script_RestartHide},
+  {"scriptmenuresponse", &Script_ScriptMenuResponse}
 };
 
 int scriptCommandCount = ARRAY_LEN(commandList);

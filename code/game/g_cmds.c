@@ -1269,6 +1269,7 @@ Cmd_MenuResponse_f
 ==================
 */
 static void Cmd_MenuResponse_f( gentity_t *ent ) {
+	char	menuArg[MAX_TOKEN_CHARS];
 	char	menuName[MAX_TOKEN_CHARS];
 	char	response[MAX_TOKEN_CHARS];
 	char	serverIdArg[MAX_TOKEN_CHARS];
@@ -1278,15 +1279,34 @@ static void Cmd_MenuResponse_f( gentity_t *ent ) {
 		return;
 	}
 
-	if ( trap_Argc() == 4 ) {
+	if ( trap_Argc() >= 4 ) {
 		trap_Argv( 1, serverIdArg, sizeof( serverIdArg ) );
 		trap_Cvar_VariableStringBuffer( "sv_serverid", serverIdCurrent, sizeof( serverIdCurrent ) );
-		if ( atoi( serverIdArg ) != atoi( serverIdCurrent ) ) {
+		/* Accept if server IDs match, or if client sent 0 (unknown) */
+		if ( atoi( serverIdArg ) != 0 &&
+		     atoi( serverIdArg ) != atoi( serverIdCurrent ) ) {
 			return;
 		}
 
-		trap_Argv( 2, menuName, sizeof( menuName ) );
+		trap_Argv( 2, menuArg, sizeof( menuArg ) );
 		trap_Argv( 3, response, sizeof( response ) );
+
+#ifdef STANDALONE
+		/* menuArg may be a configstring index (from scriptMenuResponse)
+		   or a menu name (from legacy path). Convert index to name. */
+		{
+			int menuIdx = atoi( menuArg );
+			if ( menuIdx >= 0 && menuIdx < MAX_SCRIPT_MENUS &&
+			     ( menuArg[0] >= '0' && menuArg[0] <= '9' ) ) {
+				trap_GetConfigstring( CS_SCRIPT_MENUS + menuIdx,
+				                      menuName, sizeof( menuName ) );
+			} else {
+				Q_strncpyz( menuName, menuArg, sizeof( menuName ) );
+			}
+		}
+#else
+		Q_strncpyz( menuName, menuArg, sizeof( menuName ) );
+#endif
 	} else {
 		menuName[0] = '\0';
 		Q_strncpyz( response, "bad", sizeof( response ) );

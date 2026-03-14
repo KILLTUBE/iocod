@@ -1593,9 +1593,28 @@ static int GScr_Meth_SetClientCvar( gsc_Context *ctx )
     return 0;
 }
 
+#ifdef STANDALONE
+/* Look up a precached menu name's configstring index (0-based).
+   Returns -1 if the menu was not precached. */
+static int G_Scr_GetMenuIndex( const char *menuName )
+{
+    char existing[ MAX_QPATH ];
+    int i;
+
+    if ( !menuName || !menuName[0] ) return -1;
+
+    for ( i = 0; i < MAX_SCRIPT_MENUS; i++ ) {
+        trap_GetConfigstring( CS_SCRIPT_MENUS + i, existing, sizeof( existing ) );
+        if ( existing[0] && !Q_stricmp( existing, menuName ) ) {
+            return i;
+        }
+    }
+    return -1;
+}
+#endif
+
 static int GScr_Meth_OpenMenu( gsc_Context *ctx )
 {
-    char        autoResponse[ 64 ];
     int         clientNum;
     const char *menuName;
     gentity_t  *ent = G_Scr_GetSelf( ctx );
@@ -1616,19 +1635,22 @@ static int GScr_Meth_OpenMenu( gsc_Context *ctx )
         return 1;
     }
 
-    trap_SendServerCommand( clientNum, va( "scr_menu open \"%s\"", menuName ) );
-
-    /* Defer auto-response to next frame so the script thread can reach its
-       waittill("menuresponse") before the notification fires. */
-    if ( G_Scr_ShouldAutoMenuResponse() &&
-         G_Scr_GetAutoMenuResponse( menuName, autoResponse, sizeof( autoResponse ) ) ) {
-        if ( g_scrDeferredMenuCount < G_SCR_MAX_DEFERRED_MENUS ) {
-            G_ScrDeferredMenu_t *d = &g_scrDeferredMenus[ g_scrDeferredMenuCount++ ];
-            d->clientNum = clientNum;
-            Q_strncpyz( d->menu, menuName, sizeof( d->menu ) );
-            Q_strncpyz( d->response, autoResponse, sizeof( d->response ) );
+#ifdef STANDALONE
+    {
+        int menuIdx = G_Scr_GetMenuIndex( menuName );
+        if ( menuIdx >= 0 ) {
+            /* Send index-based command (CoD2-style) */
+            trap_SendServerCommand( clientNum, va( "t %d", menuIdx ) );
+        } else {
+            /* Menu wasn't precached or VM bug returned wrong name.
+               Fall back to sending name directly. */
+            trap_SendServerCommand( clientNum,
+                va( "t %s", menuName ) );
         }
     }
+#else
+    trap_SendServerCommand( clientNum, va( "scr_menu open \"%s\"", menuName ) );
+#endif
 
     gsc_add_int( ctx, 1 );
     return 1;
@@ -1640,7 +1662,7 @@ static int GScr_Meth_CloseMenu( gsc_Context *ctx )
     gentity_t *ent = G_Scr_GetSelf( ctx );
 
     if ( ent && ent->client && G_Scr_GetClientNumForEntity( ent, &clientNum ) ) {
-        trap_SendServerCommand( clientNum, "scr_menu close" );
+        trap_SendServerCommand( clientNum, "u" );
     }
     return 0;
 }
@@ -1651,7 +1673,7 @@ static int GScr_Meth_CloseInGameMenu( gsc_Context *ctx )
     gentity_t *ent = G_Scr_GetSelf( ctx );
 
     if ( ent && ent->client && G_Scr_GetClientNumForEntity( ent, &clientNum ) ) {
-        trap_SendServerCommand( clientNum, "scr_menu closeingame" );
+        trap_SendServerCommand( clientNum, "u" );
     }
     return 0;
 }
@@ -2972,7 +2994,36 @@ static int GScr_Fn_Announcement( gsc_Context *ctx ) { (void)ctx; return 0; }
 static int GScr_Fn_ClientAnnouncement( gsc_Context *ctx ) { (void)ctx; return 0; }
 static int GScr_Fn_UpdateScores( gsc_Context *ctx ) { (void)ctx; return 0; }
 static int GScr_Fn_AddTestClient( gsc_Context *ctx ) { (void)ctx; return 0; }
-static int GScr_Fn_PrecacheMenu( gsc_Context *ctx ) { (void)ctx; return 0; }
+static int GScr_Fn_PrecacheMenu( gsc_Context *ctx )
+{
+#ifdef STANDALONE
+    const char *menuName = gsc_get_string( ctx, 0 );
+    char existing[ MAX_QPATH ];
+    int i;
+
+    if ( !menuName || !menuName[0] ) return 0;
+
+    /* Check if already precached */
+    for ( i = 0; i < MAX_SCRIPT_MENUS; i++ ) {
+        trap_GetConfigstring( CS_SCRIPT_MENUS + i, existing, sizeof( existing ) );
+        if ( !Q_stricmp( existing, menuName ) ) return 0;
+    }
+
+    /* Find first empty slot */
+    for ( i = 0; i < MAX_SCRIPT_MENUS; i++ ) {
+        trap_GetConfigstring( CS_SCRIPT_MENUS + i, existing, sizeof( existing ) );
+        if ( !existing[0] ) {
+            trap_SetConfigstring( CS_SCRIPT_MENUS + i, menuName );
+            return 0;
+        }
+    }
+
+    G_Printf( "GSC: precacheMenu overflow (max %d)\n", MAX_SCRIPT_MENUS );
+#else
+    (void)ctx;
+#endif
+    return 0;
+}
 static int GScr_Fn_PrecacheStatusIcon( gsc_Context *ctx ) { (void)ctx; return 0; }
 static int GScr_Fn_PrecacheHeadIcon( gsc_Context *ctx ) { (void)ctx; return 0; }
 static int GScr_Fn_PrecacheItem( gsc_Context *ctx ) { (void)ctx; return 0; }
@@ -3774,6 +3825,12 @@ void G_Scr_Init( void )
     Com_Memset( g_scrFxNames, 0, sizeof( g_scrFxNames ) );
     g_scrFxCount = 0;
     g_scrDeferredMenuCount = 0;
+#ifdef STANDALONE
+    /* Clear script menu configstrings from previous map */
+    for ( i = 0; i < MAX_SCRIPT_MENUS; i++ ) {
+        trap_SetConfigstring( CS_SCRIPT_MENUS + i, "" );
+    }
+#endif
     Com_Memset( g_scrObjectives, 0, sizeof( g_scrObjectives ) );
     G_Scr_Hud_ResetAll( qfalse );
     g_scrCallbackFile[0] = '\0';
@@ -3940,6 +3997,7 @@ void G_Scr_Init( void )
         G_Scr_ExecCallback( "CodeCallback_StartGameType" );
         gsc_update( g_scrCtx, 0.0f );
     }
+
 }
 
 /* =========================================================================
@@ -4079,6 +4137,7 @@ void G_Scr_PlayerConnect( int clientNum )
     if ( !g_scrActive || !g_scrCtx ) {
         return;
     }
+
     G_Scr_ClearEntityRuntimeState( clientNum );
     G_Scr_CreatePlayerObj( clientNum );
     G_Scr_Hud_SendAllToClient( clientNum );
@@ -4097,6 +4156,85 @@ void G_Scr_PlayerBegin( int clientNum )
 
     G_Scr_Hud_SendAllToClient( clientNum );
     G_Scr_NotifyPlayer( clientNum, "begin", 0 );
+}
+
+/* Read a string field from the game[] GSC object.
+   Returns a static buffer — copy if you need to keep it. */
+static const char *G_Scr_GetGameField( const char *field )
+{
+    static char buf[ MAX_QPATH ];
+    int topB, top;
+    const char *val = NULL;
+
+    buf[0] = '\0';
+    if ( !g_scrCtx ) return buf;
+
+    topB = gsc_top( g_scrCtx );
+    gsc_get_global( g_scrCtx, "game" );
+    top = gsc_top( g_scrCtx );
+    G_Printf( "  GetGameField('%s'): topB=%d top=%d type=%d\n",
+              field, topB, top,
+              top > topB ? gsc_type( g_scrCtx, top - 1 ) : -1 );
+    if ( top > topB &&
+         gsc_type( g_scrCtx, top - 1 ) == GSC_TYPE_OBJECT ) {
+        int gObj = top - 1;
+        gsc_object_get_field( g_scrCtx, gObj, field );
+        top = gsc_top( g_scrCtx );
+        G_Printf( "  field type=%d\n",
+                  gsc_type( g_scrCtx, top - 1 ) );
+        if ( gsc_type( g_scrCtx, top - 1 ) == GSC_TYPE_STRING ||
+             gsc_type( g_scrCtx, top - 1 ) == GSC_TYPE_INTERNED_STRING )
+            val = gsc_to_string( g_scrCtx, top - 1 );
+        if ( val )
+            Q_strncpyz( buf, val, sizeof( buf ) );
+        gsc_pop( g_scrCtx, 1 );
+    }
+    if ( gsc_top( g_scrCtx ) > topB )
+        gsc_pop( g_scrCtx, gsc_top( g_scrCtx ) - topB );
+
+    return buf;
+}
+
+/* After certain menu responses, open the next menu on the client.
+   This works around a VM bug where game["menu_team"] evaluates to
+   the wrong value inside the script but reads correctly from C. */
+/* Open the next script menu on the client by looking up the correct
+   menu name from game[] fields (C-side, bypassing the VM arg bug)
+   and sending the configstring index. */
+static void G_Scr_OpenNextMenu( int clientNum, const char *menu, const char *response )
+{
+    const char *nextMenu = NULL;
+    int idx;
+
+    if ( !menu || !response ) return;
+
+    /* serverinfo closed → open team menu */
+    if ( !Q_stricmpn( menu, "serverinfo_", 11 ) &&
+         !Q_stricmp( response, "close" ) ) {
+        nextMenu = G_Scr_GetGameField( "menu_team" );
+    }
+    /* team selected → open weapon menu */
+    else if ( !Q_stricmpn( menu, "team_", 5 ) &&
+              Q_stricmp( response, "close" ) &&
+              Q_stricmp( response, "open" ) ) {
+        if ( !Q_stricmp( response, "allies" ) ||
+             !Q_stricmp( response, "autoassign" ) ) {
+            nextMenu = G_Scr_GetGameField( "menu_weapon_allies" );
+        }
+        if ( !nextMenu || !nextMenu[0] ) {
+            nextMenu = G_Scr_GetGameField( "menu_weapon_axis" );
+        }
+    }
+
+    if ( nextMenu && nextMenu[0] ) {
+        idx = G_Scr_GetMenuIndex( nextMenu );
+        if ( idx >= 0 ) {
+            trap_SendServerCommand( clientNum, va( "t %d", idx ) );
+        } else {
+            /* Not precached — send name directly */
+            trap_SendServerCommand( clientNum, va( "t %s", nextMenu ) );
+        }
+    }
 }
 
 void G_Scr_PlayerMenuResponse( int clientNum, const char *menu, const char *response )

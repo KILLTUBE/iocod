@@ -96,9 +96,13 @@ static void CG_ScrMenu_ServerCommand( void )
 	}
 
 	if ( !Q_stricmp( op, "open" ) && trap_Argc() >= 3 ) {
-		trap_Cvar_Set( "g_scriptMainMenu", CG_Argv( 2 ) );
+		const char *menuName = CG_Argv( 2 );
+		trap_Cvar_Set( "g_scriptMainMenu", menuName );
+		/* Tell the UI module to load and display this script menu */
+		trap_SendConsoleCommand( va( "openmenu %s\n", menuName ) );
 	} else if ( !Q_stricmp( op, "close" ) || !Q_stricmp( op, "closeingame" ) ) {
 		trap_Cvar_Set( "g_scriptMainMenu", "" );
+		trap_SendConsoleCommand( "closemenu\n" );
 	}
 }
 
@@ -1132,6 +1136,39 @@ static void CG_ServerCommand( void ) {
 		return;
 	}
 #endif
+
+	/* CoD1 script menu commands: 't' = open (index-based or name), 'u' = close */
+	if ( !strcmp( cmd, "t" ) ) {
+		const char *arg = CG_Argv( 1 );
+		const char *menuName = NULL;
+		int menuIdx = -1;
+
+		/* Check if arg is a numeric index (from precached configstring) */
+		if ( arg[0] >= '0' && arg[0] <= '9' ) {
+			menuIdx = atoi( arg );
+			if ( menuIdx >= 0 && menuIdx < MAX_SCRIPT_MENUS ) {
+				menuName = CG_ConfigString( CS_SCRIPT_MENUS + menuIdx );
+			}
+		}
+
+		/* Fallback: arg is a menu name directly */
+		if ( !menuName || !menuName[0] ) {
+			menuName = arg;
+		}
+
+		if ( menuName[0] ) {
+			trap_Cvar_Set( "g_scriptMainMenu", menuName );
+			trap_Cvar_Set( "scr_menuindex", va( "%d", menuIdx ) );
+			trap_SendConsoleCommand( va( "openmenu %s\n", menuName ) );
+		}
+		return;
+	}
+	if ( !strcmp( cmd, "u" ) ) {
+		trap_Cvar_Set( "g_scriptMainMenu", "" );
+		trap_Cvar_Set( "scr_menuindex", "-1" );
+		trap_SendConsoleCommand( "closemenu\n" );
+		return;
+	}
 
 	/* CoD1 commands: 'f' for left-bottom, 'g' for center (bold) */
 	if ( !strcmp( cmd, "f" ) ) {

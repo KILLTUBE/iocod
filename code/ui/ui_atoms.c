@@ -400,6 +400,47 @@ qboolean UI_ConsoleCommand( int realTime ) {
 		return qtrue;
 	}
 
+#ifdef STANDALONE
+	/* CoD1 script menu commands */
+	if ( Q_stricmp( cmd, "openmenu" ) == 0 ) {
+		const char *menuName = UI_Argv( 1 );
+		if ( menuName && menuName[0] ) {
+			char menuFile[ MAX_QPATH ];
+
+			/* Load the menu file if not already loaded */
+			if ( !Menus_FindByName( menuName ) ) {
+				Com_sprintf( menuFile, sizeof( menuFile ),
+				             "ui_mp/scriptmenus/%s.menu", menuName );
+				UI_ParseMenu( menuFile );
+
+				/* Some CoD1 menus are in ui_mp/ directly */
+				if ( !Menus_FindByName( menuName ) ) {
+					Com_sprintf( menuFile, sizeof( menuFile ),
+					             "ui_mp/%s.menu", menuName );
+					UI_ParseMenu( menuFile );
+				}
+			}
+
+			if ( Menus_FindByName( menuName ) ) {
+				Menus_OpenByName( menuName );
+				trap_Key_SetCatcher( trap_Key_GetCatcher() | KEYCATCH_UI );
+			}
+		}
+		return qtrue;
+	}
+
+	if ( Q_stricmp( cmd, "closemenu" ) == 0 ) {
+		const char *menuName = UI_Argv( 1 );
+		if ( menuName && menuName[0] ) {
+			Menus_CloseByName( menuName );
+		} else {
+			Menus_CloseAll();
+		}
+		trap_Key_SetCatcher( trap_Key_GetCatcher() & ~KEYCATCH_UI );
+		return qtrue;
+	}
+#endif
+
 	return qfalse;
 }
 

@@ -5253,11 +5253,22 @@ void _UI_KeyEvent( int key, qboolean down ) {
   if (Menu_Count() > 0) {
     menuDef_t *menu = Menu_GetFocused();
 		if (menu) {
+#ifdef STANDALONE
+			/* Always let Menu_HandleKey process ESC so onESC scripts run
+			   (CoD1 script menus are popups, not fullscreen). */
+			Menu_HandleKey(menu, key, down);
+			/* If ESC closed the last menu, release the UI key catcher */
+			if (key == K_ESCAPE && down && !Menu_GetFocused()) {
+				trap_Key_SetCatcher( trap_Key_GetCatcher() & ~KEYCATCH_UI );
+				trap_Key_ClearStates();
+			}
+#else
 			if (key == K_ESCAPE && down && !Menus_AnyFullScreenVisible()) {
 				Menus_CloseAll();
 			} else {
 				Menu_HandleKey(menu, key, down );
 			}
+#endif
 		} else {
 			trap_Key_SetCatcher( trap_Key_GetCatcher() & ~KEYCATCH_UI );
 			trap_Key_ClearStates();
