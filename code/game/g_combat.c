@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "g_local.h"
 #include "g_scr.h"
+#include "g_hitloc.h"
 
 
 /*
@@ -279,6 +280,35 @@ void body_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int d
 
 
 // these are just for logging, the client prints its own messages
+#ifdef STANDALONE
+char	*modNames[] = {
+	"MOD_UNKNOWN",
+	"MOD_PISTOL_BULLET",
+	"MOD_RIFLE_BULLET",
+	"MOD_GRENADE",
+	"MOD_GRENADE_SPLASH",
+	"MOD_PROJECTILE",
+	"MOD_PROJECTILE_SPLASH",
+	"MOD_MELEE",
+	"MOD_HEAD_SHOT",
+	"MOD_MORTAR",
+	"MOD_MORTAR_SPLASH",
+	"MOD_KICKED",
+	"MOD_GRABBER",
+	"MOD_DYNAMITE",
+	"MOD_DYNAMITE_SPLASH",
+	"MOD_AIRSTRIKE",
+	"MOD_WATER",
+	"MOD_SLIME",
+	"MOD_LAVA",
+	"MOD_CRUSH",
+	"MOD_TELEFRAG",
+	"MOD_FALLING",
+	"MOD_SUICIDE",
+	"MOD_TRIGGER_HURT",
+	"MOD_EXPLOSIVE"
+};
+#else
 char	*modNames[] = {
 	"MOD_UNKNOWN",
 	"MOD_SHOTGUN",
@@ -312,6 +342,7 @@ char	*modNames[] = {
 #endif
 	"MOD_GRAPPLE"
 };
+#endif
 
 #ifdef MISSIONPACK
 /*
@@ -511,8 +542,9 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 		} else {
 			AddScore( attacker, self->r.currentOrigin, 1 );
 
+#ifndef STANDALONE
 			if( meansOfDeath == MOD_GAUNTLET ) {
-				
+
 				// play humiliation on player
 				attacker->client->ps.persistant[PERS_GAUNTLET_FRAG_COUNT]++;
 
@@ -524,6 +556,7 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 				// also play humiliation on target
 				self->client->ps.persistant[PERS_PLAYEREVENTS] ^= PLAYEREVENT_GAUNTLETREWARD;
 			}
+#endif
 
 			// check for two kills in a short amount of time
 			// if this is close enough to the last kill, give a reward sound
@@ -870,6 +903,12 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 				return;
 			}
 		}
+	}
+
+	// CoD1: apply hit location damage multiplier for player targets
+	if ( client && point ) {
+		int hitLoc = G_CalcHitLocFromPoint( point, targ );
+		damage = (int)( (float)damage * g_fHitLocDamageMult[hitLoc] );
 	}
 
 	if ( damage < 1 ) {

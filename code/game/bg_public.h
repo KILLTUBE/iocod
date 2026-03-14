@@ -584,6 +584,37 @@ typedef enum {
 } teamtask_t;
 
 // means of death
+#ifdef STANDALONE
+/* CoD1 means of death */
+typedef enum {
+	MOD_UNKNOWN,
+	MOD_PISTOL_BULLET,
+	MOD_RIFLE_BULLET,
+	MOD_GRENADE,
+	MOD_GRENADE_SPLASH,
+	MOD_PROJECTILE,
+	MOD_PROJECTILE_SPLASH,
+	MOD_MELEE,
+	MOD_HEAD_SHOT,
+	MOD_MORTAR,
+	MOD_MORTAR_SPLASH,
+	MOD_KICKED,
+	MOD_GRABBER,
+	MOD_DYNAMITE,
+	MOD_DYNAMITE_SPLASH,
+	MOD_AIRSTRIKE,
+	MOD_WATER,
+	MOD_SLIME,
+	MOD_LAVA,
+	MOD_CRUSH,
+	MOD_TELEFRAG,
+	MOD_FALLING,
+	MOD_SUICIDE,
+	MOD_TRIGGER_HURT,
+	MOD_EXPLOSIVE,
+	MOD_NUM
+} meansOfDeath_t;
+#else
 typedef enum {
 	MOD_UNKNOWN,
 	MOD_SHOTGUN,
@@ -617,6 +648,7 @@ typedef enum {
 #endif
 	MOD_GRAPPLE
 } meansOfDeath_t;
+#endif
 
 
 //---------------------------------------------------------

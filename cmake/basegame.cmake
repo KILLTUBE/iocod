@@ -89,6 +89,7 @@ if(BUILD_STANDALONE)
     list(APPEND GAME_SOURCES
         ${SOURCE_DIR}/game/g_scr.c
         ${SOURCE_DIR}/game/g_weapon_cod1.c
+        ${SOURCE_DIR}/game/g_hitloc.c
         ${SOURCE_DIR}/qcommon/bg_weapon_cod1.c
         ${GAME_GSC_SOURCES}
     )

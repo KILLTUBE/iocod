@@ -170,5 +170,5 @@ void G_MeleeDamage( gentity_t *attacker )
     if ( !traceEnt->takedamage ) return;
 
     G_Damage( traceEnt, attacker, attacker, forward, tr.endpos,
-              MELEE_DAMAGE, 0, MOD_GAUNTLET );
+              MELEE_DAMAGE, 0, MOD_MELEE );
 }

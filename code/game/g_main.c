@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "g_local.h"
 #include "g_scr.h"
+#include "g_hitloc.h"
 
 level_locals_t	level;
 
@@ -538,6 +539,9 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	
 	G_Printf("trap_SetConfigstring( CS_INTERMISSION )...\n");
 	trap_SetConfigstring( CS_INTERMISSION, "" );
+
+	/* Load CoD1 hit location damage multipliers */
+	G_ParseHitLocDmgTable();
 
 	/* Initialise GSC scripting — must be last so all entities are spawned */
 	G_Scr_Init();
