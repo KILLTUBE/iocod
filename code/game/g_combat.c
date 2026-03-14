@@ -807,9 +807,11 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 			   vec3_t dir, vec3_t point, int damage, int dflags, int mod ) {
 	gclient_t	*client;
 	int			take;
+#ifndef STANDALONE
 	int			asave;
 	int			knockback;
 	int			max;
+#endif
 #ifdef MISSIONPACK
 	vec3_t		bouncedir, impactpoint;
 #endif
@@ -839,6 +841,89 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	if ( !attacker ) {
 		attacker = &g_entities[ENTITYNUM_WORLD];
 	}
+
+#ifdef STANDALONE
+	/*
+	 * CoD1-style damage: no armor, no handicap, no battlesuit.
+	 * For player targets the script callback is notified.
+	 * For non-player entities damage is applied directly.
+	 */
+	client = targ->client;
+
+	if ( client && client->noclip ) {
+		return;
+	}
+
+	if ( dir ) {
+		VectorNormalize( dir );
+	}
+
+	// check for godmode
+	if ( targ->flags & FL_GODMODE ) {
+		return;
+	}
+
+	// friendly fire check
+	if ( !(dflags & DAMAGE_NO_PROTECTION) ) {
+		if ( targ != attacker && OnSameTeam( targ, attacker ) ) {
+			if ( !g_friendlyFire.integer ) {
+				return;
+			}
+		}
+	}
+
+	if ( damage < 1 ) {
+		damage = 1;
+	}
+	take = damage;
+
+	if ( g_debugDamage.integer ) {
+		G_Printf( "target:%i health:%i damage:%i\n",
+			targ->s.number, targ->health, take );
+	}
+
+	// CoD1: for player targets, fire script callback
+	if ( client ) {
+		int attackerNum = ( attacker && attacker->client )
+		                  ? attacker->s.number : ENTITYNUM_WORLD;
+
+		client->ps.persistant[PERS_ATTACKER] = attacker->s.number;
+		client->damage_blood += take;
+		if ( dir ) {
+			VectorCopy( dir, client->damage_from );
+			client->damage_fromWorld = qfalse;
+		} else {
+			VectorCopy( targ->r.currentOrigin, client->damage_from );
+			client->damage_fromWorld = qtrue;
+		}
+		client->lasthurt_client = attacker->s.number;
+		client->lasthurt_mod = mod;
+
+		G_Scr_PlayerDamage( targ->s.number, attackerNum, take, mod );
+	}
+
+	// apply damage
+	targ->health -= take;
+	if ( client ) {
+		client->ps.stats[STAT_HEALTH] = targ->health;
+	}
+
+	if ( targ->health <= 0 ) {
+		if ( client )
+			targ->flags |= FL_NO_KNOCKBACK;
+		if ( targ->health < -999 )
+			targ->health = -999;
+		targ->enemy = attacker;
+		if ( targ->die )
+			targ->die( targ, inflictor, attacker, take, mod );
+		return;
+	}
+
+	if ( targ->pain ) {
+		targ->pain( targ, attacker, take );
+	}
+
+#else /* !STANDALONE — original Q3 damage path */
 
 	// shootable doors / buttons don't actually have any health
 	if ( targ->s.eType == ET_MOVER ) {
@@ -923,7 +1008,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		// if the attacker was on the same team
 #ifdef MISSIONPACK
 		if ( mod != MOD_JUICED && targ != attacker && !(dflags & DAMAGE_NO_TEAM_PROTECTION) && OnSameTeam (targ, attacker)  ) {
-#else	
+#else
 		if ( targ != attacker && OnSameTeam (targ, attacker)  ) {
 #endif
 			if ( !g_friendlyFire.integer ) {
@@ -1014,7 +1099,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	// See if it's the player hurting the emeny flag carrier
 #ifdef MISSIONPACK
 	if( g_gametype.integer == GT_CTF || g_gametype.integer == GT_1FCTF ) {
-#else	
+#else
 	if( g_gametype.integer == GT_CTF) {
 #endif
 		Team_CheckHurtCarrier(targ, attacker);
@@ -1032,7 +1117,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		if ( targ->client ) {
 			targ->client->ps.stats[STAT_HEALTH] = targ->health;
 		}
-			
+
 		if ( targ->health <= 0 ) {
 			if ( client )
 				targ->flags |= FL_NO_KNOCKBACK;
@@ -1046,15 +1131,8 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		} else if ( targ->pain ) {
 			targ->pain (targ, attacker, take);
 		}
-
-		/* Fire GSC damage callback for surviving clients */
-		if ( client ) {
-			int attackerNum = ( attacker && attacker->client )
-			                  ? attacker->s.number : ENTITYNUM_WORLD;
-			G_Scr_PlayerDamage( targ->s.number, attackerNum, take, mod );
-		}
 	}
-
+#endif /* !STANDALONE */
 }
 
 
