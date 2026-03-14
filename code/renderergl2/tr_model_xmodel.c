@@ -124,17 +124,20 @@ typedef struct {
 static qboolean XModel_LoadHeader(
 	xmR_t  *r,
 	xmLod_t lods[XMODEL_MAX_LODS],
-	int    *numLods )
+	int    *numLods,
+	xmCollData_t *coll )
 {
 	int          i, j;
-	unsigned int paddingCount, subCount;
+	unsigned int numCollSurfs;
 
 	if ( xmR_u16( r ) != COD1_XMODEL_VERSION ) {
 		ri.Printf( PRINT_WARNING, "XModel_LoadHeader: bad version\n" );
 		return qfalse;
 	}
 
-	xmR_skip( r, 24 );		/* mins(12) + maxs(12) */
+	/* Model bounds */
+	xmR_vec3( r, coll->mins );
+	xmR_vec3( r, coll->maxs );
 
 	*numLods = 0;
 	for ( i = 0; i < XMODEL_MAX_LODS; i++ ) {
@@ -155,10 +158,63 @@ static qboolean XModel_LoadHeader(
 
 	xmR_skip( r, 4 );		/* collision LOD enum (i32) */
 
-	paddingCount = xmR_u32( r );
-	for ( i = 0; i < (int)paddingCount; i++ ) {
-		subCount = xmR_u32( r );
-		xmR_skip( r, (int)( subCount * 48 + 36 ) );
+	/* ---- Collision surfaces (was previously skipped as "padding") ---- */
+	numCollSurfs = xmR_u32( r );
+	coll->numSurfs = (int)numCollSurfs;
+	coll->surfs    = NULL;
+
+	if ( numCollSurfs > 0 && numCollSurfs < 4096 ) {
+		coll->surfs = (xmCollSurf_t *)ri.Hunk_Alloc(
+			sizeof(xmCollSurf_t) * numCollSurfs, h_low );
+
+		for ( i = 0; i < (int)numCollSurfs; i++ ) {
+			xmCollSurf_t *surf = &coll->surfs[i];
+			unsigned int numTris = xmR_u32( r );
+			surf->numCollTris = (int)numTris;
+
+			if ( numTris > 0 && numTris < 65536 ) {
+				surf->collTris = (xmCollTri_t *)ri.Hunk_Alloc(
+					sizeof(xmCollTri_t) * numTris, h_low );
+
+				for ( j = 0; j < (int)numTris; j++ ) {
+					xmCollTri_t *tri = &surf->collTris[j];
+					/* plane(4) + svec(4) + tvec(4) = 12 floats = 48 bytes */
+					tri->plane[0] = xmR_float( r );
+					tri->plane[1] = xmR_float( r );
+					tri->plane[2] = xmR_float( r );
+					tri->plane[3] = xmR_float( r );
+					tri->svec[0]  = xmR_float( r );
+					tri->svec[1]  = xmR_float( r );
+					tri->svec[2]  = xmR_float( r );
+					tri->svec[3]  = xmR_float( r );
+					tri->tvec[0]  = xmR_float( r );
+					tri->tvec[1]  = xmR_float( r );
+					tri->tvec[2]  = xmR_float( r );
+					tri->tvec[3]  = xmR_float( r );
+				}
+			} else {
+				surf->collTris = NULL;
+				surf->numCollTris = 0;
+			}
+
+			/* Bounds + bone index + contents + surfFlags = 36 bytes */
+			surf->mins[0] = xmR_float( r ) - 0.001f;
+			surf->mins[1] = xmR_float( r ) - 0.001f;
+			surf->mins[2] = xmR_float( r ) - 0.001f;
+			surf->maxs[0] = xmR_float( r ) + 0.001f;
+			surf->maxs[1] = xmR_float( r ) + 0.001f;
+			surf->maxs[2] = xmR_float( r ) + 0.001f;
+			surf->boneIdx = (int)xmR_u32( r );
+			surf->contents = (int)xmR_u32( r ) & 0xDFFFFFFB;
+			surf->surfFlags = (int)xmR_u32( r );
+		}
+
+		ri.Printf( PRINT_DEVELOPER, "XModel: loaded %d collision surfaces\n",
+			numCollSurfs );
+	} else if ( numCollSurfs > 0 ) {
+		ri.Printf( PRINT_WARNING, "XModel_LoadHeader: too many coll surfs (%u)\n",
+			numCollSurfs );
+		coll->numSurfs = 0;
 	}
 
 	/* Materials per LOD */
@@ -523,10 +579,18 @@ qhandle_t R_RegisterXModel( const char *name, model_t *mod )
 	}
 
 	xmR_init( &r, (const byte *)buf, fSize );
-	if ( !XModel_LoadHeader( &r, lods, &numLods ) ) {
-		ri.FS_FreeFile( buf );
-		mod->type = MOD_BAD;
-		return 0;
+	{
+		xmCollData_t coll;
+		Com_Memset( &coll, 0, sizeof(coll) );
+		if ( !XModel_LoadHeader( &r, lods, &numLods, &coll ) ) {
+			ri.FS_FreeFile( buf );
+			mod->type = MOD_BAD;
+			return 0;
+		}
+		if ( coll.numSurfs > 0 ) {
+			ri.Printf( PRINT_DEVELOPER, "R_RegisterXModel: '%s' has %d coll surfs\n",
+				name, coll.numSurfs );
+		}
 	}
 	ri.FS_FreeFile( buf );
 

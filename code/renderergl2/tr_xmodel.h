@@ -29,6 +29,55 @@ typedef struct {
 } xmBone_t;
 
 /* ===========================================================================
+   Per-bone collision bounds (XBoneInfo from CoD)
+   Loaded from xmodel file after LOD materials.
+   =========================================================================== */
+
+typedef struct {
+    vec3_t bounds[2];       /* [0]=mins, [1]=maxs (bone-local) */
+    vec3_t offset;          /* center = (mins+maxs)*0.5 */
+    float  radiusSquared;   /* squared radius from center to corner */
+} xmBoneInfo_t;
+
+/* ===========================================================================
+   Collision triangle (plane + texture basis vectors)
+   Each tri: plane(4f) + svec(4f) + tvec(4f) = 48 bytes
+   =========================================================================== */
+
+typedef struct {
+    vec4_t plane;   /* normal(3) + dist(1) */
+    vec4_t svec;    /* texture S axis */
+    vec4_t tvec;    /* texture T axis */
+} xmCollTri_t;
+
+/* ===========================================================================
+   Collision surface — a group of collision tris attached to a bone
+   =========================================================================== */
+
+typedef struct {
+    xmCollTri_t *collTris;
+    int          numCollTris;
+    vec3_t       mins;
+    vec3_t       maxs;
+    int          boneIdx;
+    int          contents;
+    int          surfFlags;
+} xmCollSurf_t;
+
+/* ===========================================================================
+   Complete collision data for one xmodel
+   =========================================================================== */
+
+typedef struct {
+    xmCollSurf_t *surfs;
+    int           numSurfs;
+    xmBoneInfo_t *boneInfo;
+    int           numBoneInfos;
+    vec3_t        mins;
+    vec3_t        maxs;
+} xmCollData_t;
+
+/* ===========================================================================
    Binary reader  (little-endian, sequential)
    =========================================================================== */
 
