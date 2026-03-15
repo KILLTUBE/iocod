@@ -638,6 +638,25 @@ void G_SetOrigin( gentity_t *ent, vec3_t origin ) {
 	VectorCopy( origin, ent->r.currentOrigin );
 }
 
+#ifdef STANDALONE
+/*
+================
+G_SetAngle
+
+CoD1: Sets the angle trajectory for a fixed angle, clears angular velocity.
+================
+*/
+void G_SetAngle( gentity_t *ent, vec3_t angle ) {
+	VectorCopy( angle, ent->s.apos.trBase );
+	ent->s.apos.trType = TR_STATIONARY;
+	ent->s.apos.trTime = 0;
+	ent->s.apos.trDuration = 0;
+	VectorClear( ent->s.apos.trDelta );
+
+	VectorCopy( angle, ent->r.currentAngles );
+}
+#endif
+
 /*
 ================
 DebugLine

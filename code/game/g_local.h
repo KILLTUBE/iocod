@@ -491,6 +491,9 @@ float vectoyaw( const vec3_t vec );
 void G_AddPredictableEvent( gentity_t *ent, int event, int eventParm );
 void G_AddEvent( gentity_t *ent, int event, int eventParm );
 void G_SetOrigin( gentity_t *ent, vec3_t origin );
+#ifdef STANDALONE
+void G_SetAngle( gentity_t *ent, vec3_t angle );
+#endif
 void AddRemap(const char *oldShader, const char *newShader, float timeOffset);
 const char *BuildShaderStateConfig( void );
 
