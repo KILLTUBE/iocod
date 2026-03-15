@@ -238,10 +238,12 @@ static void PM_Friction( void ) {
 		drop += speed*pm_waterfriction*pm->waterlevel*pml.frametime;
 	}
 
+#ifndef STANDALONE
 	// apply flying friction
 	if ( pm->ps->powerups[PW_FLIGHT]) {
 		drop += speed*pm_flightfriction*pml.frametime;
 	}
+#endif
 
 	// Note: ladder friction is handled inside PM_LadderMove, not here
 
@@ -2129,6 +2131,7 @@ static void PM_Weapon( void ) {
 	}
 
 	// start the animation even if out of ammo
+#ifndef STANDALONE
 	if ( pm->ps->weapon == WP_GAUNTLET ) {
 		// the guantlet only "fires" when it actually hits something
 		if ( !pm->gauntletHit ) {
@@ -2137,7 +2140,9 @@ static void PM_Weapon( void ) {
 			return;
 		}
 		PM_StartTorsoAnim( TORSO_ATTACK2 );
-	} else {
+	} else
+#endif
+	{
 		PM_StartTorsoAnim( TORSO_ATTACK );
 	}
 
@@ -2158,6 +2163,10 @@ static void PM_Weapon( void ) {
 	// fire weapon
 	PM_AddEvent( EV_FIRE_WEAPON );
 
+#ifdef STANDALONE
+	// CoD1: generic fire rate (weapon defs loaded client-side)
+	addTime = 100;	// default ~600 RPM, weapon-specific rates handled client-side
+#else
 	switch( pm->ps->weapon ) {
 	default:
 	case WP_GAUNTLET:
@@ -2202,6 +2211,7 @@ static void PM_Weapon( void ) {
 		break;
 #endif
 	}
+#endif
 
 #ifdef MISSIONPACK
 	if( bg_itemlist[pm->ps->stats[STAT_PERSISTANT_POWERUP]].giTag == PW_SCOUT ) {
@@ -2499,6 +2509,7 @@ void PmoveSingle (pmove_t *pmove) {
 		PM_InvulnerabilityMove();
 	} else
 #endif
+#ifndef STANDALONE
 	if ( pm->ps->powerups[PW_FLIGHT] ) {
 		// flight powerup doesn't allow jump and has different friction
 		PM_FlyMove();
@@ -2506,7 +2517,9 @@ void PmoveSingle (pmove_t *pmove) {
 		PM_GrappleMove();
 		// We can wiggle a bit
 		PM_AirMove();
-	} else if (pm->ps->pm_flags & PMF_ON_LADDER) {
+	} else
+#endif
+	if (pm->ps->pm_flags & PMF_ON_LADDER) {
 		PM_LadderMove();
 	} else if (pm->ps->pm_flags & PMF_TIME_WATERJUMP) {
 		PM_WaterJumpMove();
