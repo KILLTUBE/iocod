@@ -1191,6 +1191,14 @@ void ClientSpawn(gentity_t *ent) {
 
 	client->ps.clientNum = index;
 
+#ifdef STANDALONE
+	// CoD1: no Q3 weapons — weapon system is client-side
+	client->ps.stats[STAT_WEAPONS] = 0;
+	client->ps.weapon = 0;
+
+	// CoD1: health = max health exactly (no overheal)
+	ent->health = client->ps.stats[STAT_HEALTH] = client->ps.stats[STAT_MAX_HEALTH];
+#else
 	client->ps.stats[STAT_WEAPONS] = ( 1 << WP_MACHINEGUN );
 	if ( g_gametype.integer == GT_TEAM ) {
 		client->ps.ammo[WP_MACHINEGUN] = 50;
@@ -1204,6 +1212,7 @@ void ClientSpawn(gentity_t *ent) {
 
 	// health will count down towards max_health
 	ent->health = client->ps.stats[STAT_HEALTH] = client->ps.stats[STAT_MAX_HEALTH] + 25;
+#endif
 
 	G_SetOrigin( ent, spawn_origin );
 	VectorCopy( spawn_origin, client->ps.origin );
@@ -1228,9 +1237,14 @@ void ClientSpawn(gentity_t *ent) {
 	if (!level.intermissiontime) {
 		if (ent->client->sess.sessionTeam != TEAM_SPECTATOR) {
 			G_KillBox(ent);
+#ifdef STANDALONE
+			client->ps.weapon = 0;
+			client->ps.weaponstate = WEAPON_READY;
+#else
 			// force the base weapon up
 			client->ps.weapon = WP_MACHINEGUN;
 			client->ps.weaponstate = WEAPON_READY;
+#endif
 			// fire the targets of the spawn point
 			G_UseTargets(spawnPoint, ent);
 			// select the highest weapon number available, after any spawn given items have fired
