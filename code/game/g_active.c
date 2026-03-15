@@ -553,6 +553,7 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 		event = client->ps.events[ i & (MAX_PS_EVENTS-1) ];
 
 		switch ( event ) {
+		case EV_FALL_SHORT:
 		case EV_FALL_MEDIUM:
 		case EV_FALL_FAR:
 			if ( ent->s.eType != ET_PLAYER ) {
@@ -561,11 +562,30 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 			if ( g_dmflags.integer & DF_NO_FALLING ) {
 				break;
 			}
+#ifdef STANDALONE
+			{
+				// CoD1: event parameter is damage percentage (0-100)
+				// Applied as percentage of max health
+				int parm = client->ps.events[ i & (MAX_PS_EVENTS-1) ];
+				float frac;
+				(void)parm;
+				// eventParm carries the damage percent
+				parm = client->ps.eventParms[ i & (MAX_PS_EVENTS-1) ];
+				if ( parm <= 0 ) break;
+				if ( parm > 99 )
+					frac = 1.1f;
+				else
+					frac = (float)parm * 0.01f;
+				damage = (int)( frac * (float)client->ps.stats[STAT_MAX_HEALTH] );
+				if ( damage < 1 ) damage = 1;
+			}
+#else
 			if ( event == EV_FALL_FAR ) {
 				damage = 10;
 			} else {
 				damage = 5;
 			}
+#endif
 			ent->pain_debounce_time = level.time + 200;	// no normal pain sound
 			G_Damage (ent, NULL, NULL, NULL, NULL, damage, 0, MOD_FALLING);
 			break;

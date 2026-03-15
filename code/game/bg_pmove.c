@@ -1214,6 +1214,108 @@ PM_CrashLand
 Check for hard landings that generate sound events
 =================
 */
+#ifdef STANDALONE
+/*
+=================
+PM_CrashLand — CoD1 style
+
+Calculates fall height from velocity and gravity, then maps to a 0-100
+damage percentage using bg_fallDamageMinHeight / bg_fallDamageMaxHeight.
+The percentage is sent as the event parameter; the server applies it as
+a fraction of max health in ClientEvents.
+=================
+*/
+static float bg_fallDamageMinHeight_val = 128.0f;
+static float bg_fallDamageMaxHeight_val = 300.0f;
+
+static void PM_CrashLand( void ) {
+	float	dist, vel, acc, t, a, b, c, den;
+	float	landingVel, fallHeight;
+	int		damagePercent, stepSound;
+
+	// decide which landing animation to use
+	if ( pm->ps->pm_flags & PMF_BACKWARDS_JUMP ) {
+		PM_ForceLegsAnim( LEGS_LANDB );
+	} else {
+		PM_ForceLegsAnim( LEGS_LAND );
+	}
+
+	pm->ps->legsTimer = TIMER_LAND;
+
+	// calculate the exact landing velocity
+	dist = pm->ps->origin[2] - pml.previous_origin[2];
+	vel = pml.previous_velocity[2];
+	acc = -pm->ps->gravity;
+
+	a = acc / 2;
+	b = vel;
+	c = -dist;
+	den = b * b - 4 * a * c;
+	if ( den < 0 ) {
+		return;
+	}
+	t = ( -b - sqrt( den ) ) / ( 2 * a );
+	landingVel = -( vel + t * acc );
+
+	// CoD1: fall height = v^2 / (2*gravity)
+	fallHeight = landingVel * landingVel / ( (float)pm->ps->gravity * 2.0f );
+
+	// never take falling damage if completely underwater
+	if ( pm->waterlevel == 3 ) {
+		return;
+	}
+
+	// CoD1: calculate damage percentage from fall height
+	damagePercent = 0;
+	if ( bg_fallDamageMinHeight_val < bg_fallDamageMaxHeight_val &&
+		 bg_fallDamageMinHeight_val >= 0.0f ) {
+		if ( fallHeight >= bg_fallDamageMinHeight_val &&
+			 pm->ps->pm_type <= PM_NORMAL ) {
+			if ( fallHeight >= bg_fallDamageMaxHeight_val ) {
+				damagePercent = 100;
+			} else {
+				damagePercent = (int)( ( fallHeight - bg_fallDamageMinHeight_val ) /
+					( bg_fallDamageMaxHeight_val - bg_fallDamageMinHeight_val ) * 100.0f );
+				if ( damagePercent < 0 ) damagePercent = 0;
+				if ( damagePercent > 100 ) damagePercent = 100;
+			}
+		}
+	}
+
+	// CoD1: crouching halves fall damage
+	if ( pm->ps->pm_flags & PMF_DUCKED ) {
+		damagePercent = (int)( (float)damagePercent * 0.5f );
+	}
+
+	// Step sound based on fall height
+	if ( fallHeight > 12.0f ) {
+		stepSound = (int)( ( fallHeight - 12.0f ) / 26.0f * 4.0f + 4.0f );
+		if ( stepSound > 24 ) stepSound = 24;
+	} else {
+		stepSound = 0;
+	}
+
+	// SURF_NODAMAGE is used for bounce pads
+	if ( !(pml.groundTrace.surfaceFlags & SURF_NODAMAGE) ) {
+		if ( damagePercent > 0 ) {
+			// EV_FALL_SHORT/MEDIUM/FAR with damage percent as event parameter
+			if ( damagePercent > 50 ) {
+				BG_AddPredictableEventToPlayerstate( EV_FALL_FAR, damagePercent, pm->ps );
+			} else if ( damagePercent > 25 ) {
+				BG_AddPredictableEventToPlayerstate( EV_FALL_MEDIUM, damagePercent, pm->ps );
+			} else {
+				BG_AddPredictableEventToPlayerstate( EV_FALL_SHORT, damagePercent, pm->ps );
+			}
+		} else if ( stepSound > 0 ) {
+			PM_AddEvent( EV_FALL_SHORT );
+		} else {
+			PM_AddEvent( PM_FootstepForSurface() );
+		}
+	}
+
+	pm->ps->bobCycle = 0;
+}
+#else
 static void PM_CrashLand( void ) {
 	float		delta;
 	float		dist;
@@ -1292,6 +1394,7 @@ static void PM_CrashLand( void ) {
 	// start footstep cycle over
 	pm->ps->bobCycle = 0;
 }
+#endif
 
 /*
 =============
