@@ -213,7 +213,21 @@ static void PM_Friction( void ) {
 		if ( pml.walking && !(pml.groundTrace.surfaceFlags & SURF_SLICK) ) {
 			// if getting knocked back, no friction
 			if ( ! (pm->ps->pm_flags & PMF_TIME_KNOCKBACK) ) {
+#ifdef STANDALONE
+				// CoD1: stance-based friction speed
+				// Prone: use 30% of speed, Sprint: use 200% of speed
+				{
+					float frictionSpeed = speed;
+					if ( pm->ps->pm_flags & PMF_PRONE ) {
+						frictionSpeed = speed * 0.3f;
+					} else if ( pm->ps->pm_flags & PMF_DUCKED ) {
+						// ducked: normal friction
+					}
+					control = frictionSpeed < pm_stopspeed ? pm_stopspeed : frictionSpeed;
+				}
+#else
 				control = speed < pm_stopspeed ? pm_stopspeed : speed;
+#endif
 				drop += control*pm_friction*pml.frametime;
 			}
 		}

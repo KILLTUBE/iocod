@@ -236,6 +236,81 @@ Cmd_Give_f
 Give items to a client
 ==================
 */
+#ifdef STANDALONE
+/*
+==================
+Cmd_Give_f — CoD1 style
+
+Supports: give all, give health [N], give weapons, give ammo [N], give <weaponname>
+==================
+*/
+void Cmd_Give_f( gentity_t *ent )
+{
+	char	*name;
+	qboolean give_all;
+
+	if ( !CheatsOk( ent ) ) {
+		return;
+	}
+
+	name = ConcatArgs( 1 );
+	give_all = ( Q_stricmp( name, "all" ) == 0 );
+
+	if ( give_all || Q_stricmp( name, "health" ) == 0 ) {
+		ent->health = ent->client->ps.stats[STAT_MAX_HEALTH];
+		ent->client->ps.stats[STAT_HEALTH] = ent->health;
+		if ( !give_all )
+			return;
+	}
+
+	if ( give_all || Q_stricmp( name, "ammo" ) == 0 ) {
+		int i;
+		for ( i = 0; i < MAX_WEAPONS; i++ ) {
+			ent->client->ps.ammo[i] = 999;
+		}
+		if ( !give_all )
+			return;
+	}
+
+	// CoD1: give <weaponname> sends weapon pickup to client
+	if ( !give_all ) {
+		trap_SendServerCommand( ent->s.number,
+			va( "weapon %s 30 90", name ) );
+		trap_SendServerCommand( ent->s.number,
+			va( "print \"Gave weapon: %s\n\"", name ) );
+	}
+}
+
+/*
+==================
+Cmd_Take_f — CoD1 style
+
+Supports: take weapons, take ammo, take <weaponname>
+==================
+*/
+static void Cmd_Take_f( gentity_t *ent )
+{
+	char	*name;
+
+	if ( !CheatsOk( ent ) ) {
+		return;
+	}
+
+	name = ConcatArgs( 1 );
+
+	if ( Q_stricmp( name, "weapons" ) == 0 ) {
+		Com_Memset( ent->client->ps.ammo, 0, sizeof(ent->client->ps.ammo) );
+		ent->client->ps.stats[STAT_WEAPONS] = 0;
+		trap_SendServerCommand( ent->s.number, "print \"Took all weapons\n\"" );
+	} else if ( Q_stricmp( name, "ammo" ) == 0 ) {
+		Com_Memset( ent->client->ps.ammo, 0, sizeof(ent->client->ps.ammo) );
+		trap_SendServerCommand( ent->s.number, "print \"Took all ammo\n\"" );
+	} else {
+		trap_SendServerCommand( ent->s.number,
+			va( "print \"take: unknown '%s'\n\"", name ) );
+	}
+}
+#else
 void Cmd_Give_f (gentity_t *ent)
 {
 	char		*name;
@@ -265,7 +340,7 @@ void Cmd_Give_f (gentity_t *ent)
 
 	if (give_all || Q_stricmp(name, "weapons") == 0)
 	{
-		ent->client->ps.stats[STAT_WEAPONS] = (1 << WP_NUM_WEAPONS) - 1 - 
+		ent->client->ps.stats[STAT_WEAPONS] = (1 << WP_NUM_WEAPONS) - 1 -
 			( 1 << WP_GRAPPLING_HOOK ) - ( 1 << WP_NONE );
 		if (!give_all)
 			return;
@@ -328,6 +403,7 @@ void Cmd_Give_f (gentity_t *ent)
 		}
 	}
 }
+#endif
 
 
 /*
@@ -1880,6 +1956,10 @@ void ClientCommand( int clientNum ) {
 
 	if (Q_stricmp (cmd, "give") == 0)
 		Cmd_Give_f (ent);
+#ifdef STANDALONE
+	else if (Q_stricmp (cmd, "take") == 0)
+		Cmd_Take_f (ent);
+#endif
 	else if (Q_stricmp (cmd, "god") == 0)
 		Cmd_God_f (ent);
 	else if (Q_stricmp (cmd, "notarget") == 0)
