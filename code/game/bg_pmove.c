@@ -339,6 +339,15 @@ static float PM_CmdScale( usercmd_t *cmd ) {
 		+ cmd->rightmove * cmd->rightmove + cmd->upmove * cmd->upmove );
 	scale = (float)pm->ps->speed * max / ( 127.0 * total );
 
+#ifdef STANDALONE
+	// CoD1: pm_type speed multipliers
+	if ( pm->ps->pm_type == PM_NOCLIP ) {
+		scale *= 3.0f;
+	} else if ( pm->ps->pm_type == PM_UFO ) {
+		scale *= 6.0f;
+	}
+#endif
+
 	return scale;
 }
 

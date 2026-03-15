@@ -297,6 +297,12 @@ spawn_t	spawns[] = {
 	{"script_vehicle", SP_misc_model},
 	{"misc_gamemodel", SP_misc_model},
 
+	// Additional CoD1 entities
+	{"misc_spawner", SP_info_null},
+	{"trigger_once", SP_trigger_multiple},		// CoD1: trigger_once = trigger_multiple with wait -1
+	{"func_leaky", SP_func_static},				// CoD1: leaky brush (non-sealing)
+	{"misc_flak", SP_misc_model},
+
 	{NULL, 0}
 };
 
