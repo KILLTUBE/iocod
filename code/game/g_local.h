@@ -322,6 +322,16 @@ struct gclient_s {
 #ifdef STANDALONE
 	// CoD1 weapon system
 	int		nextMeleeTime;		/* earliest level.time for next melee */
+
+#define COD1_WEAPON_SLOT_NUM 7
+	// Server-side weapon slots (CoD1: primary, primaryb, pistol, grenade, smokegrenade)
+	struct {
+		char	name[64];		// weapon def name (empty = slot unused)
+		int		clipAmmo;
+		int		reserveAmmo;
+	} weaponSlots[COD1_WEAPON_SLOT_NUM];
+	int		currentWeaponSlot;	// index into weaponSlots, -1 = none
+	char	spawnWeapon[64];	// weapon to auto-switch on spawn
 #endif
 
 	char		*areabits;

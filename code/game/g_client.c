@@ -1209,9 +1209,19 @@ void ClientSpawn(gentity_t *ent) {
 	client->ps.clientNum = index;
 
 #ifdef STANDALONE
-	// CoD1: no Q3 weapons — weapon system is client-side
+	// CoD1: clear weapon slots — scripts will give weapons via giveWeapon/setSpawnWeapon
 	client->ps.stats[STAT_WEAPONS] = 0;
 	client->ps.weapon = 0;
+	{
+		int wi;
+		for ( wi = 0; wi < COD1_WEAPON_SLOT_NUM; wi++ ) {
+			client->weaponSlots[wi].name[0] = '\0';
+			client->weaponSlots[wi].clipAmmo = 0;
+			client->weaponSlots[wi].reserveAmmo = 0;
+		}
+		client->currentWeaponSlot = -1;
+		client->spawnWeapon[0] = '\0';
+	}
 
 	// CoD1: health = max health exactly (no overheal)
 	ent->health = client->ps.stats[STAT_HEALTH] = client->ps.stats[STAT_MAX_HEALTH];

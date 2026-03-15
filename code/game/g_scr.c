@@ -36,6 +36,7 @@ Player object globals: "player_N" (N = clientNum, 0-based).
 #include "g_local.h"
 #include "g_scr.h"
 #include "g_hitloc.h"
+#include "../qcommon/bg_weapon_cod1.h"
 #include "../thirdparty/gsc/include/gsc.h"
 
 extern char *modNames[];
@@ -1711,22 +1712,399 @@ static int GScr_Meth_IsOnGround( gsc_Context *ctx )
     return 1;
 }
 
-static int GScr_Meth_GiveWeapon( gsc_Context *ctx )          { return G_Scr_NoopReturn0( ctx ); }
-static int GScr_Meth_TakeWeapon( gsc_Context *ctx )          { return G_Scr_NoopReturn0( ctx ); }
-static int GScr_Meth_GiveMaxAmmo( gsc_Context *ctx )         { return G_Scr_NoopReturn0( ctx ); }
-static int GScr_Meth_GiveStartAmmo( gsc_Context *ctx )       { return G_Scr_NoopReturn0( ctx ); }
-static int GScr_Meth_SetSpawnWeapon( gsc_Context *ctx )      { return G_Scr_NoopReturn0( ctx ); }
-static int GScr_Meth_SetWeaponSlotWeapon( gsc_Context *ctx ) { return G_Scr_NoopReturn0( ctx ); }
-static int GScr_Meth_SetWeaponSlotAmmo( gsc_Context *ctx )   { return G_Scr_NoopReturn0( ctx ); }
-static int GScr_Meth_SetWeaponSlotClipAmmo( gsc_Context *ctx ){ return G_Scr_NoopReturn0( ctx ); }
-static int GScr_Meth_SetWeaponClipAmmo( gsc_Context *ctx )   { return G_Scr_NoopReturn0( ctx ); }
-static int GScr_Meth_GetWeaponSlotAmmo( gsc_Context *ctx )   { return G_Scr_NoopZero( ctx ); }
-static int GScr_Meth_GetWeaponSlotClipAmmo( gsc_Context *ctx ){ return G_Scr_NoopZero( ctx ); }
-static int GScr_Meth_GetWeaponSlotWeapon( gsc_Context *ctx ) { return G_Scr_NoopNoneString( ctx ); }
-static int GScr_Meth_GetCurrentWeapon( gsc_Context *ctx )    { return G_Scr_NoopNoneString( ctx ); }
+/* =========================================================================
+   CoD1 weapon slot helpers
+   ========================================================================= */
+static int G_WeaponSlotForName( const char *slotName )
+{
+    if ( !Q_stricmp( slotName, "primary" ) )       return 0;
+    if ( !Q_stricmp( slotName, "primaryb" ) )      return 1;
+    if ( !Q_stricmp( slotName, "pistol" ) )        return 2;
+    if ( !Q_stricmp( slotName, "grenade" ) )       return 3;
+    if ( !Q_stricmp( slotName, "smokegrenade" ) )  return 4;
+    return 0; /* default to primary */
+}
+
+static int G_FindWeaponSlot( gclient_t *cl, const char *weapName )
+{
+    int i;
+    for ( i = 0; i < COD1_WEAPON_SLOT_NUM; i++ ) {
+        if ( cl->weaponSlots[i].name[0] &&
+             !Q_stricmp( cl->weaponSlots[i].name, weapName ) )
+            return i;
+    }
+    return -1;
+}
+
+static qboolean G_IsValidWeaponName( const char *name )
+{
+    if ( !name || !name[0] ) return qfalse;
+    if ( !Q_stricmp( name, "undefined" ) ) return qfalse;
+    if ( !Q_stricmp( name, "none" ) ) return qfalse;
+    if ( name[0] >= '0' && name[0] <= '9' ) return qfalse; /* reject numbers like "2" */
+    return qtrue;
+}
+
+static void G_SendWeaponToClient( int clientNum, const char *weapName,
+                                  int clipAmmo, int reserveAmmo )
+{
+    trap_SendServerCommand( clientNum,
+        va( "weapon %s %d %d", weapName, clipAmmo, reserveAmmo ) );
+}
+
+/* =========================================================================
+   GSC weapon methods — called on player entity objects
+   ========================================================================= */
+
+/* self giveWeapon( weaponName ) */
+static int GScr_Meth_GiveWeapon( gsc_Context *ctx )
+{
+    gentity_t   *ent = G_Scr_GetSelf( ctx );
+    const char  *weapName;
+    weaponDef_t wd;
+    int         slotIdx;
+
+    if ( !ent || !ent->client || gsc_numargs( ctx ) < 1 ) return 0;
+    weapName = gsc_to_string( ctx, 0 );
+    if ( !G_IsValidWeaponName( weapName ) ) return 0;
+
+    /* already have it? */
+    if ( G_FindWeaponSlot( ent->client, weapName ) >= 0 ) return 0;
+
+    /* parse weapon def to get slot type and ammo */
+    if ( !BG_ParseWeaponDef( weapName, &wd ) ) {
+        G_Printf( "GSC giveWeapon: unknown weapon '%s'\n", weapName );
+        return 0;
+    }
+
+    slotIdx = G_WeaponSlotForName( wd.weaponSlot );
+
+    /* if slot occupied, try next available of same type or overflow slots */
+    if ( ent->client->weaponSlots[slotIdx].name[0] ) {
+        int i;
+        int found = -1;
+        /* try slot+1 (e.g. primaryb for primary) */
+        if ( slotIdx == 0 && !ent->client->weaponSlots[1].name[0] ) {
+            found = 1;
+        } else {
+            /* find any empty slot */
+            for ( i = 5; i < COD1_WEAPON_SLOT_NUM; i++ ) {
+                if ( !ent->client->weaponSlots[i].name[0] ) {
+                    found = i;
+                    break;
+                }
+            }
+        }
+        if ( found < 0 ) {
+            G_Printf( "GSC giveWeapon: no empty slot for '%s'\n", weapName );
+            return 0;
+        }
+        slotIdx = found;
+    }
+
+    Q_strncpyz( ent->client->weaponSlots[slotIdx].name, weapName,
+                sizeof( ent->client->weaponSlots[slotIdx].name ) );
+    ent->client->weaponSlots[slotIdx].clipAmmo    = wd.clipSize;
+    ent->client->weaponSlots[slotIdx].reserveAmmo = wd.startAmmo;
+
+    /* auto-switch if player has no current weapon */
+    if ( ent->client->currentWeaponSlot < 0 ) {
+        ent->client->currentWeaponSlot = slotIdx;
+        G_SendWeaponToClient( ent->s.number, weapName,
+            wd.clipSize, wd.startAmmo );
+    }
+
+    return 0;
+}
+
+/* self takeWeapon( weaponName ) */
+static int GScr_Meth_TakeWeapon( gsc_Context *ctx )
+{
+    gentity_t  *ent = G_Scr_GetSelf( ctx );
+    const char *weapName;
+    int         slot;
+
+    if ( !ent || !ent->client || gsc_numargs( ctx ) < 1 ) return 0;
+    weapName = gsc_to_string( ctx, 0 );
+    slot = G_FindWeaponSlot( ent->client, weapName );
+    if ( slot >= 0 ) {
+        ent->client->weaponSlots[slot].name[0] = '\0';
+        ent->client->weaponSlots[slot].clipAmmo = 0;
+        ent->client->weaponSlots[slot].reserveAmmo = 0;
+        if ( ent->client->currentWeaponSlot == slot )
+            ent->client->currentWeaponSlot = -1;
+    }
+    return 0;
+}
+
+/* self takeAllWeapons() — used by scripts before giving loadout */
+static int GScr_Meth_TakeAllWeapons( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    int i;
+
+    if ( !ent || !ent->client ) return 0;
+    for ( i = 0; i < COD1_WEAPON_SLOT_NUM; i++ ) {
+        ent->client->weaponSlots[i].name[0] = '\0';
+        ent->client->weaponSlots[i].clipAmmo = 0;
+        ent->client->weaponSlots[i].reserveAmmo = 0;
+    }
+    ent->client->currentWeaponSlot = -1;
+    ent->client->spawnWeapon[0] = '\0';
+    /* tell client to drop weapon */
+    trap_SendServerCommand( ent->s.number, "weapon none 0 0" );
+    return 0;
+}
+
+/* self giveMaxAmmo( weaponName ) */
+static int GScr_Meth_GiveMaxAmmo( gsc_Context *ctx )
+{
+    gentity_t  *ent = G_Scr_GetSelf( ctx );
+    const char *weapName;
+    int         slot;
+    weaponDef_t wd;
+
+    if ( !ent || !ent->client || gsc_numargs( ctx ) < 1 ) return 0;
+    weapName = gsc_to_string( ctx, 0 );
+    slot = G_FindWeaponSlot( ent->client, weapName );
+    if ( slot >= 0 && BG_ParseWeaponDef( weapName, &wd ) ) {
+        ent->client->weaponSlots[slot].clipAmmo    = wd.clipSize;
+        ent->client->weaponSlots[slot].reserveAmmo = wd.maxAmmo;
+        /* resend to client if this is the current weapon */
+        if ( slot == ent->client->currentWeaponSlot ) {
+            G_SendWeaponToClient( ent->s.number, weapName,
+                wd.clipSize, wd.maxAmmo );
+        }
+    }
+    return 0;
+}
+
+/* self giveStartAmmo( weaponName ) */
+static int GScr_Meth_GiveStartAmmo( gsc_Context *ctx )
+{
+    gentity_t  *ent = G_Scr_GetSelf( ctx );
+    const char *weapName;
+    int         slot;
+    weaponDef_t wd;
+
+    if ( !ent || !ent->client || gsc_numargs( ctx ) < 1 ) return 0;
+    weapName = gsc_to_string( ctx, 0 );
+    slot = G_FindWeaponSlot( ent->client, weapName );
+    if ( slot >= 0 && BG_ParseWeaponDef( weapName, &wd ) ) {
+        ent->client->weaponSlots[slot].clipAmmo    = wd.clipSize;
+        ent->client->weaponSlots[slot].reserveAmmo = wd.startAmmo;
+    }
+    return 0;
+}
+
+/* self setSpawnWeapon( weaponName ) — weapon to auto-switch to after spawn */
+static int GScr_Meth_SetSpawnWeapon( gsc_Context *ctx )
+{
+    gentity_t  *ent = G_Scr_GetSelf( ctx );
+    const char *weapName;
+
+    if ( !ent || !ent->client || gsc_numargs( ctx ) < 1 ) return 0;
+    weapName = gsc_to_string( ctx, 0 );
+    if ( !G_IsValidWeaponName( weapName ) ) return 0;
+    Q_strncpyz( ent->client->spawnWeapon, weapName,
+                sizeof( ent->client->spawnWeapon ) );
+
+    /* auto-switch to spawn weapon */
+    {
+        int slot = G_FindWeaponSlot( ent->client, weapName );
+        if ( slot >= 0 ) {
+            ent->client->currentWeaponSlot = slot;
+            G_SendWeaponToClient( ent->s.number, weapName,
+                ent->client->weaponSlots[slot].clipAmmo,
+                ent->client->weaponSlots[slot].reserveAmmo );
+        }
+    }
+    return 0;
+}
+
+/* self switchToWeapon( weaponName ) */
+static int GScr_Meth_SwitchToWeapon( gsc_Context *ctx )
+{
+    gentity_t  *ent = G_Scr_GetSelf( ctx );
+    const char *weapName;
+    int         slot;
+
+    if ( !ent || !ent->client || gsc_numargs( ctx ) < 1 ) {
+        gsc_add_bool( ctx, qfalse );
+        return 1;
+    }
+    weapName = gsc_to_string( ctx, 0 );
+    slot = G_FindWeaponSlot( ent->client, weapName );
+    if ( slot < 0 ) {
+        gsc_add_bool( ctx, qfalse );
+        return 1;
+    }
+
+    ent->client->currentWeaponSlot = slot;
+    G_SendWeaponToClient( ent->s.number, weapName,
+        ent->client->weaponSlots[slot].clipAmmo,
+        ent->client->weaponSlots[slot].reserveAmmo );
+    gsc_add_bool( ctx, qtrue );
+    return 1;
+}
+
+/* self getCurrentWeapon() */
+static int GScr_Meth_GetCurrentWeapon( gsc_Context *ctx )
+{
+    gentity_t *ent = G_Scr_GetSelf( ctx );
+    int slot;
+
+    if ( !ent || !ent->client ||
+         ( slot = ent->client->currentWeaponSlot ) < 0 ||
+         !ent->client->weaponSlots[slot].name[0] ) {
+        gsc_add_string( ctx, "none" );
+        return 1;
+    }
+    gsc_add_string( ctx, ent->client->weaponSlots[slot].name );
+    return 1;
+}
+
+/* self hasWeapon( weaponName ) */
+static int GScr_Meth_HasWeapon( gsc_Context *ctx )
+{
+    gentity_t  *ent = G_Scr_GetSelf( ctx );
+    const char *weapName;
+
+    if ( !ent || !ent->client || gsc_numargs( ctx ) < 1 ) {
+        gsc_add_bool( ctx, qfalse );
+        return 1;
+    }
+    weapName = gsc_to_string( ctx, 0 );
+    gsc_add_bool( ctx, G_FindWeaponSlot( ent->client, weapName ) >= 0 );
+    return 1;
+}
+
+/* self getWeaponSlotWeapon( slotName ) */
+static int GScr_Meth_GetWeaponSlotWeapon( gsc_Context *ctx )
+{
+    gentity_t  *ent = G_Scr_GetSelf( ctx );
+    const char *slotName;
+    int         slot;
+
+    if ( !ent || !ent->client || gsc_numargs( ctx ) < 1 ) {
+        gsc_add_string( ctx, "none" );
+        return 1;
+    }
+    slotName = gsc_to_string( ctx, 0 );
+    slot = G_WeaponSlotForName( slotName );
+    if ( ent->client->weaponSlots[slot].name[0] )
+        gsc_add_string( ctx, ent->client->weaponSlots[slot].name );
+    else
+        gsc_add_string( ctx, "none" );
+    return 1;
+}
+
+/* self setWeaponSlotWeapon( slotName, weaponName ) */
+static int GScr_Meth_SetWeaponSlotWeapon( gsc_Context *ctx )
+{
+    gentity_t  *ent = G_Scr_GetSelf( ctx );
+    const char *slotName, *weapName;
+    int         slot;
+    weaponDef_t wd;
+
+    if ( !ent || !ent->client || gsc_numargs( ctx ) < 2 ) return 0;
+    slotName = gsc_to_string( ctx, 0 );
+    weapName = gsc_to_string( ctx, 1 );
+    slot = G_WeaponSlotForName( slotName );
+
+    if ( !weapName[0] || !Q_stricmp( weapName, "none" ) ) {
+        ent->client->weaponSlots[slot].name[0] = '\0';
+        return 0;
+    }
+    Q_strncpyz( ent->client->weaponSlots[slot].name, weapName,
+                sizeof( ent->client->weaponSlots[slot].name ) );
+    if ( BG_ParseWeaponDef( weapName, &wd ) ) {
+        ent->client->weaponSlots[slot].clipAmmo    = wd.clipSize;
+        ent->client->weaponSlots[slot].reserveAmmo = wd.startAmmo;
+    }
+    return 0;
+}
+
+/* self setWeaponSlotAmmo( slotName, ammo ) */
+static int GScr_Meth_SetWeaponSlotAmmo( gsc_Context *ctx )
+{
+    gentity_t  *ent = G_Scr_GetSelf( ctx );
+    const char *slotName;
+    int         slot;
+
+    if ( !ent || !ent->client || gsc_numargs( ctx ) < 2 ) return 0;
+    slotName = gsc_to_string( ctx, 0 );
+    slot = G_WeaponSlotForName( slotName );
+    if ( ent->client->weaponSlots[slot].name[0] )
+        ent->client->weaponSlots[slot].reserveAmmo = gsc_to_int( ctx, 1 );
+    return 0;
+}
+
+/* self setWeaponSlotClipAmmo( slotName, ammo ) */
+static int GScr_Meth_SetWeaponSlotClipAmmo( gsc_Context *ctx )
+{
+    gentity_t  *ent = G_Scr_GetSelf( ctx );
+    const char *slotName;
+    int         slot;
+
+    if ( !ent || !ent->client || gsc_numargs( ctx ) < 2 ) return 0;
+    slotName = gsc_to_string( ctx, 0 );
+    slot = G_WeaponSlotForName( slotName );
+    if ( ent->client->weaponSlots[slot].name[0] )
+        ent->client->weaponSlots[slot].clipAmmo = gsc_to_int( ctx, 1 );
+    return 0;
+}
+
+/* self setWeaponClipAmmo( weaponName, ammo ) */
+static int GScr_Meth_SetWeaponClipAmmo( gsc_Context *ctx )
+{
+    gentity_t  *ent = G_Scr_GetSelf( ctx );
+    const char *weapName;
+    int         slot;
+
+    if ( !ent || !ent->client || gsc_numargs( ctx ) < 2 ) return 0;
+    weapName = gsc_to_string( ctx, 0 );
+    slot = G_FindWeaponSlot( ent->client, weapName );
+    if ( slot >= 0 )
+        ent->client->weaponSlots[slot].clipAmmo = gsc_to_int( ctx, 1 );
+    return 0;
+}
+
+/* self getWeaponSlotAmmo( slotName ) */
+static int GScr_Meth_GetWeaponSlotAmmo( gsc_Context *ctx )
+{
+    gentity_t  *ent = G_Scr_GetSelf( ctx );
+    const char *slotName;
+    int         slot;
+
+    if ( !ent || !ent->client || gsc_numargs( ctx ) < 1 ) {
+        gsc_add_int( ctx, 0 );
+        return 1;
+    }
+    slotName = gsc_to_string( ctx, 0 );
+    slot = G_WeaponSlotForName( slotName );
+    gsc_add_int( ctx, ent->client->weaponSlots[slot].reserveAmmo );
+    return 1;
+}
+
+/* self getWeaponSlotClipAmmo( slotName ) */
+static int GScr_Meth_GetWeaponSlotClipAmmo( gsc_Context *ctx )
+{
+    gentity_t  *ent = G_Scr_GetSelf( ctx );
+    const char *slotName;
+    int         slot;
+
+    if ( !ent || !ent->client || gsc_numargs( ctx ) < 1 ) {
+        gsc_add_int( ctx, 0 );
+        return 1;
+    }
+    slotName = gsc_to_string( ctx, 0 );
+    slot = G_WeaponSlotForName( slotName );
+    gsc_add_int( ctx, ent->client->weaponSlots[slot].clipAmmo );
+    return 1;
+}
+
 static int GScr_Meth_GetCurrentOffhand( gsc_Context *ctx )   { return G_Scr_NoopNoneString( ctx ); }
-static int GScr_Meth_HasWeapon( gsc_Context *ctx )           { return G_Scr_NoopFalse( ctx ); }
-static int GScr_Meth_SwitchToWeapon( gsc_Context *ctx )      { return G_Scr_NoopReturn1( ctx ); }
 static int GScr_Meth_SwitchToOffhand( gsc_Context *ctx )     { return G_Scr_NoopReturn1( ctx ); }
 static int GScr_Meth_SetClientDvar( gsc_Context *ctx )       { return GScr_Meth_SetClientCvar( ctx ); }
 static int GScr_Meth_FreezeControls( gsc_Context *ctx )      { return G_Scr_NoopReturn0( ctx ); }
@@ -3608,6 +3986,7 @@ static void G_Scr_CreateGlobals( void )
     G_Scr_AddMethod( playerMethodsObj, "isonground",            GScr_Meth_IsOnGround );
     G_Scr_AddMethod( playerMethodsObj, "giveweapon",            GScr_Meth_GiveWeapon );
     G_Scr_AddMethod( playerMethodsObj, "takeweapon",            GScr_Meth_TakeWeapon );
+    G_Scr_AddMethod( playerMethodsObj, "takeallweapons",        GScr_Meth_TakeAllWeapons );
     G_Scr_AddMethod( playerMethodsObj, "givemaxammo",           GScr_Meth_GiveMaxAmmo );
     G_Scr_AddMethod( playerMethodsObj, "givestartammo",         GScr_Meth_GiveStartAmmo );
     G_Scr_AddMethod( playerMethodsObj, "setspawnweapon",        GScr_Meth_SetSpawnWeapon );

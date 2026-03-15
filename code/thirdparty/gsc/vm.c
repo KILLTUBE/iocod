@@ -96,9 +96,12 @@ static const char *variable_string(VM *vm, Variable *v)
 {
 	switch(v->type)
 	{
-		default: vm_error(vm, "Not a string");
 		case VAR_STRING: return (const char *)v->u.sval.data;
 		case VAR_INTERNED_STRING: return string(vm, v->u.ival);
+		default:
+			fprintf(stderr, "  \033[1;33mwarn\033[0m: expected string, got '%s'\n",
+				variable_type_names[v->type]);
+			return "";
 	}
 	return NULL;
 }
@@ -2312,14 +2315,22 @@ const char *vm_cast_string(VM *vm, Variable *arg)
 			return str;
 		}
 		break;
-		case VAR_VECTOR:                                                                                        
-		{                                                                                                       
-			char *str = new(&vm->c_function_arena, char, 96);                                                     
-			snprintf(str, 96, "(%g, %g, %g)", arg->u.vval[0], arg->u.vval[1], arg->u.vval[2]);                    
-			return str;                                                                                           
-		}                                                                                                       
-		break;                                                                                 
-		default: vm_error(vm, "Not a string");
+		case VAR_VECTOR:
+		{
+			char *str = new(&vm->c_function_arena, char, 96);
+			snprintf(str, 96, "(%g, %g, %g)", arg->u.vval[0], arg->u.vval[1], arg->u.vval[2]);
+			return str;
+		}
+		break;
+		case VAR_OBJECT:
+		{
+			char *str = new(&vm->c_function_arena, char, 32);
+			snprintf(str, 32, "[object %p]", (void*)arg->u.oval);
+			return str;
+		}
+		break;
+		case VAR_FUNCTION: return "[function]";
+		default: return "";
 	}
 	return "";
 }
@@ -2393,9 +2404,16 @@ bool vm_cast_bool(VM *vm, Variable *arg)
 
 int64_t vm_cast_int(VM *vm, Variable *arg)
 {
-	if(arg->type != VAR_INTEGER)
-		vm_error(vm, "Not a integer");
-	return arg->u.ival;
+	if(arg->type == VAR_INTEGER || arg->type == VAR_BOOLEAN)
+		return arg->u.ival;
+	if(arg->type == VAR_FLOAT)
+		return (int64_t)arg->u.fval;
+	if(arg->type == VAR_INTERNED_STRING || arg->type == VAR_STRING)
+		return strtoll(variable_string(vm, arg), NULL, 10);
+	if(arg->type == VAR_UNDEFINED)
+		return 0;
+	vm_error(vm, "Cannot convert '%s' to integer", variable_type_names[arg->type]);
+	return 0;
 }
 
 void vm_pushstring_n(VM *vm, const char *str, size_t n) // n is without \0

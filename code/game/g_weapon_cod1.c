@@ -64,6 +64,33 @@ static void Touch_WeaponCod1( gentity_t *ent, gentity_t *other, trace_t *trace )
     clipAmmo    = ent->count;    /* clip size stored during spawn   */
     reserveAmmo = ent->damage;   /* reserve ammo stored during spawn */
 
+    /* Store in player's weapon slots */
+    {
+        weaponDef_t wd;
+        int slotIdx = 0, i;
+
+        if ( BG_ParseWeaponDef( weapName, &wd ) ) {
+            slotIdx = !Q_stricmp(wd.weaponSlot,"pistol") ? 2 :
+                      !Q_stricmp(wd.weaponSlot,"grenade") ? 3 :
+                      !Q_stricmp(wd.weaponSlot,"smokegrenade") ? 4 : 0;
+        }
+        /* if slot occupied, try primaryb or any empty */
+        if ( client->weaponSlots[slotIdx].name[0] ) {
+            if ( slotIdx == 0 && !client->weaponSlots[1].name[0] ) {
+                slotIdx = 1;
+            } else {
+                for ( i = 5; i < COD1_WEAPON_SLOT_NUM; i++ ) {
+                    if ( !client->weaponSlots[i].name[0] ) { slotIdx = i; break; }
+                }
+            }
+        }
+        Q_strncpyz( client->weaponSlots[slotIdx].name, weapName,
+                    sizeof(client->weaponSlots[slotIdx].name) );
+        client->weaponSlots[slotIdx].clipAmmo = clipAmmo;
+        client->weaponSlots[slotIdx].reserveAmmo = reserveAmmo;
+        client->currentWeaponSlot = slotIdx;
+    }
+
     /* Send weapon pickup notification to the client */
     trap_SendServerCommand( other->s.number,
         va( "weapon %s %d %d", weapName, clipAmmo, reserveAmmo ) );
