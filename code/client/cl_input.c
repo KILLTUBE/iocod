@@ -1070,6 +1070,8 @@ void CL_InitInput( void ) {
 	Cmd_AddCommand ("-reload", IN_ReloadUp);
 	Cmd_AddCommand ("+melee", IN_MeleeDown);
 	Cmd_AddCommand ("-melee", IN_MeleeUp);
+	Cmd_AddCommand ("+activate", IN_Button2Down);	// CoD1: +activate = use/interact
+	Cmd_AddCommand ("-activate", IN_Button2Up);
 	Cmd_AddCommand ("+mlook", IN_MLookDown);
 	Cmd_AddCommand ("-mlook", IN_MLookUp);
 
@@ -1161,6 +1163,8 @@ void CL_ShutdownInput(void)
 	Cmd_RemoveCommand("-reload");
 	Cmd_RemoveCommand("+melee");
 	Cmd_RemoveCommand("-melee");
+	Cmd_RemoveCommand("+activate");
+	Cmd_RemoveCommand("-activate");
 	Cmd_RemoveCommand("+mlook");
 	Cmd_RemoveCommand("-mlook");
 
