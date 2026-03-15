@@ -170,9 +170,7 @@ typedef enum {
 #define PMF_SCOREBOARD		8192	// spectate as a scoreboard
 #define PMF_INVULEXPAND		16384	// invulnerability sphere set to full size
 #define PMF_PRONE			32768	// CoD1: player is in prone stance
-#define PMF_TIME_SLOWDOWN	524288	// CoD2: jump slowdown from landing
-
-#define	PMF_ALL_TIMES	(PMF_TIME_WATERJUMP|PMF_TIME_LAND|PMF_TIME_KNOCKBACK|PMF_TIME_LADDER|PMF_TIME_SLOWDOWN)
+#define	PMF_ALL_TIMES	(PMF_TIME_WATERJUMP|PMF_TIME_LAND|PMF_TIME_KNOCKBACK|PMF_TIME_LADDER)
 
 #define	MAXTOUCH	32
 typedef struct {

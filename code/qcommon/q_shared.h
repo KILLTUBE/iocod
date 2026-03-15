@@ -1201,6 +1201,12 @@ typedef struct playerState_s {
 	int			pmove_framecount;
 	int			jumppad_frame;
 	int			entityEventSequence;
+
+#ifdef STANDALONE
+	float		jumpOriginZ;	// CoD1: expected peak Z of current jump (origin[2] + JUMP_HEIGHT)
+								// used by PM_StepSlideMove to allow step-up during jumps
+	int			jumpTime;		// CoD1: serverTime of last jump, 500ms cooldown before next jump
+#endif
 } playerState_t;
 
 

@@ -249,12 +249,236 @@ PM_StepSlideMove
 
 ==================
 */
+#ifdef STANDALONE
+/*
+CoD1-style PM_StepSlideMove: allows step-up during jumps by tracking the
+expected jump peak (ps->jumpOriginZ).  When stepping up mid-jump the step
+height is clamped so the player never rises above the peak, and the upward
+velocity is recalculated to preserve the correct arc.
+*/
 void PM_StepSlideMove( qboolean gravity ) {
 	vec3_t		start_o, start_v;
-//	vec3_t		down_o, down_v;
+	vec3_t		slide_o, slide_v;		// result of initial SlideMove
 	trace_t		trace;
-//	float		down_dist, up_dist;
-//	vec3_t		delta, delta2;
+	vec3_t		up, down;
+	float		stepSize;
+	float		stepHeight;				// actual height gained from step-up trace
+	qboolean	isJumpStep;				// stepping while in a jump arc
+	qboolean	doProne;				// prone down-step behaviour
+	float		slideXYdot, stepXYdot;	// for "did step help?" comparison
+
+	VectorCopy( pm->ps->origin, start_o );
+	VectorCopy( pm->ps->velocity, start_v );
+
+	// determine step size: 18 normally, 10 when prone
+	stepSize = STEPSIZE;
+#ifdef STEPSIZE_PRONE
+	if ( pm->ps->pm_flags & PMF_PRONE )
+		stepSize = STEPSIZE_PRONE;
+#endif
+	doProne = ( pml.walking && !(pm->ps->pm_flags & PMF_JUMP_HELD) );
+
+	if ( PM_SlideMove( gravity ) == 0 ) {
+		// moved without hitting anything — but still check for down-step
+		// if on ground, so the player sticks to slopes/stairs going down
+		if ( pm->ps->groundEntityNum == ENTITYNUM_NONE ) {
+			// in air with no collision → check if we should still do ground snap
+			if ( !(pm->ps->pm_flags & PMF_JUMP_HELD) && pm->ps->velocity[2] > 0 ) {
+				// walked off an edge with upward velocity — allow step logic to continue
+			} else {
+				return;
+			}
+		}
+		// on ground, no collision — fall through to step-down logic below
+	}
+
+	// save the SlideMove result
+	VectorCopy( pm->ps->origin, slide_o );
+	VectorCopy( pm->ps->velocity, slide_v );
+
+	isJumpStep = qfalse;
+
+	// --- decide whether to attempt step-up ---
+	if ( pm->ps->jumpOriginZ > 0.001f ) {
+		// player is in a jump arc — clamp step size to remaining room below jump peak
+		if ( pm->ps->groundEntityNum != ENTITYNUM_NONE ) {
+			// landed on something — normal step
+		} else {
+			float room = pm->ps->jumpOriginZ - start_o[2];
+			if ( room < 1.0f )
+				goto downstep;	// already at/above jump peak, don't step up
+
+			if ( stepSize > room )
+				stepSize = room;
+
+			isJumpStep = qtrue;
+		}
+	} else if ( pm->ps->jumpOriginZ < -0.001f ) {
+		// shouldn't happen, but be safe
+		goto downstep;
+	} else {
+		// jumpOriginZ == 0: not in a jump
+		// Q3-compatible check: don't step up when flying upward with no ground
+		if ( pm->ps->groundEntityNum == ENTITYNUM_NONE
+			&& !(pm->ps->pm_flags & PMF_JUMP_HELD)
+			&& pm->ps->velocity[2] > 0 ) {
+			// walked off an edge going up — allow step (CoD1 does)
+		} else if ( pm->ps->groundEntityNum == ENTITYNUM_NONE ) {
+			goto downstep;
+		}
+	}
+
+	// --- step-up: trace upward from start ---
+	VectorCopy( start_o, up );
+	up[2] += stepSize + 1.0f;	// CoD1 traces stepSize+1, then subtracts 1
+
+	pm->trace( &trace, start_o, pm->mins, pm->maxs, up, pm->ps->clientNum, pm->tracemask );
+	stepHeight = (stepSize + 1.0f) * trace.fraction - 1.0f;
+
+	if ( stepHeight < 1.0f ) {
+		if ( pm->debugLevel )
+			Com_Printf( "%i:not enough step room\n", c_pmove );
+		goto downstep;
+	}
+
+	// place player at stepped-up position, restore original velocity, re-slide
+	VectorCopy( start_o, pm->ps->origin );
+	pm->ps->origin[2] += stepHeight;
+	VectorCopy( start_v, pm->ps->velocity );
+
+	if ( pm->debugLevel && isJumpStep )
+		Com_Printf( "%i:jump step to:%.2f jump peak at:%.2f\n",
+			c_pmove, pm->ps->origin[2], pm->ps->jumpOriginZ );
+
+	PM_SlideMove( gravity );
+
+	// --- step-down: push back down to ground ---
+	if ( doProne || stepHeight > 0 ) {
+		VectorCopy( pm->ps->origin, down );
+		if ( doProne )
+			down[2] = pm->ps->origin[2] - stepHeight - stepSize * 0.5f;
+		else
+			down[2] = pm->ps->origin[2] - stepHeight;
+
+		pm->trace( &trace, pm->ps->origin, pm->mins, pm->maxs, down,
+			pm->ps->clientNum, pm->tracemask );
+
+		if ( trace.fraction < 0.0625f ) {
+			// trace hit almost immediately — step result is worse, revert
+			VectorCopy( slide_o, pm->ps->origin );
+			VectorCopy( slide_v, pm->ps->velocity );
+			goto jumpfix;
+		}
+
+		if ( trace.fraction < 1.0f ) {
+			VectorCopy( trace.endpos, pm->ps->origin );
+			PM_ClipVelocity( pm->ps->velocity, trace.plane.normal,
+				pm->ps->velocity, OVERCLIP );
+		} else if ( stepHeight > 0 ) {
+			// didn't find ground below — undo step height
+			pm->ps->origin[2] -= stepHeight;
+		}
+	}
+
+	// --- verify step result is an improvement ---
+	// compare XY progress: dot(newMove, slideMove) with original velocity direction
+	{
+		float sx = slide_o[2] - start_o[2];	// just used as temp
+		(void)sx;
+		// XY dot of stepped displacement with original velocity
+		stepXYdot = (pm->ps->origin[0] - start_o[0]) * start_v[0]
+				  + (pm->ps->origin[1] - start_o[1]) * start_v[1];
+		slideXYdot = (slide_o[0] - start_o[0]) * start_v[0]
+				   + (slide_o[1] - start_o[1]) * start_v[1];
+	}
+
+	if ( stepXYdot + 0.001f < slideXYdot ) {
+		// step result went backwards — revert
+		VectorCopy( slide_o, pm->ps->origin );
+		VectorCopy( slide_v, pm->ps->velocity );
+		if ( pm->debugLevel ) {
+			if ( isJumpStep )
+				Com_Printf( "%i:didn't use jump step results because it went too high\n", c_pmove );
+			else
+				Com_Printf( "%i:didn't use step results\n", c_pmove );
+		}
+		// even though we reverted, still try prone down-step
+		if ( doProne ) {
+			VectorCopy( pm->ps->origin, down );
+			down[2] -= stepSize * 0.5f;
+			pm->trace( &trace, pm->ps->origin, pm->mins, pm->maxs, down,
+				pm->ps->clientNum, pm->tracemask );
+			if ( trace.fraction < 1.0f ) {
+				VectorCopy( trace.endpos, pm->ps->origin );
+				PM_ClipVelocity( pm->ps->velocity, trace.plane.normal,
+					pm->ps->velocity, OVERCLIP );
+				if ( pm->debugLevel )
+					Com_Printf( "%i:did down step after not using step results\n", c_pmove );
+			}
+		}
+	}
+
+jumpfix:
+	// --- CoD1 jump velocity adjustment ---
+	// after stepping up during a jump, recalculate velocity[2] so the player
+	// still reaches the same peak height (not higher from the step-up boost)
+	if ( isJumpStep && pm->ps->origin[2] > start_o[2] ) {
+		float remaining = pm->ps->jumpOriginZ - pm->ps->origin[2];
+		if ( remaining < 0.1f ) {
+			pm->ps->velocity[2] = 0;
+		} else {
+			float newVel = (float)sqrt( 2.0f * remaining * (float)pm->ps->gravity );
+			if ( newVel < pm->ps->velocity[2] ) {
+				if ( pm->debugLevel )
+					Com_Printf( "%i:adjusted jump vel: %.1f -> %.1f\n",
+						c_pmove, pm->ps->velocity[2], newVel );
+				pm->ps->velocity[2] = newVel;
+			}
+		}
+	}
+
+	// step event
+	{
+		float delta = pm->ps->origin[2] - start_o[2];
+		if ( delta > 2 ) {
+			if ( delta < 7 )
+				PM_AddEvent( EV_STEP_4 );
+			else if ( delta < 11 )
+				PM_AddEvent( EV_STEP_8 );
+			else if ( delta < 15 )
+				PM_AddEvent( EV_STEP_12 );
+			else
+				PM_AddEvent( EV_STEP_16 );
+		}
+		if ( pm->debugLevel && delta > 0 )
+			Com_Printf( "%i:jump step %2i\n", c_pmove, (int)delta );
+	}
+	return;
+
+downstep:
+	// no step-up was performed — just use the slide result and check for
+	// down-step if the player is walking (keeps them glued to slopes)
+	VectorCopy( slide_o, pm->ps->origin );
+	VectorCopy( slide_v, pm->ps->velocity );
+
+	if ( pm->ps->groundEntityNum != ENTITYNUM_NONE ) {
+		VectorCopy( pm->ps->origin, down );
+		down[2] -= stepSize;
+		pm->trace( &trace, pm->ps->origin, pm->mins, pm->maxs, down,
+			pm->ps->clientNum, pm->tracemask );
+		if ( trace.fraction < 1.0f && trace.plane.normal[2] >= MIN_WALK_NORMAL ) {
+			VectorCopy( trace.endpos, pm->ps->origin );
+			PM_ClipVelocity( pm->ps->velocity, trace.plane.normal,
+				pm->ps->velocity, OVERCLIP );
+		}
+	}
+}
+
+#else /* !STANDALONE — original Q3 PM_StepSlideMove */
+
+void PM_StepSlideMove( qboolean gravity ) {
+	vec3_t		start_o, start_v;
+	trace_t		trace;
 	vec3_t		up, down;
 	float		stepSize;
 
@@ -262,7 +486,7 @@ void PM_StepSlideMove( qboolean gravity ) {
 	VectorCopy (pm->ps->velocity, start_v);
 
 	if ( PM_SlideMove( gravity ) == 0 ) {
-		return;		// we got exactly where we wanted to go first try	
+		return;		// we got exactly where we wanted to go first try
 	}
 
 	VectorCopy(start_o, down);
@@ -274,9 +498,6 @@ void PM_StepSlideMove( qboolean gravity ) {
 										DotProduct(trace.plane.normal, up) < 0.7)) {
 		return;
 	}
-
-	//VectorCopy (pm->ps->origin, down_o);
-	//VectorCopy (pm->ps->velocity, down_v);
 
 	VectorCopy (start_o, up);
 	up[2] += STEPSIZE;
@@ -308,18 +529,6 @@ void PM_StepSlideMove( qboolean gravity ) {
 		PM_ClipVelocity( pm->ps->velocity, trace.plane.normal, pm->ps->velocity, OVERCLIP );
 	}
 
-#if 0
-	// if the down trace can trace back to the original position directly, don't step
-	pm->trace( &trace, pm->ps->origin, pm->mins, pm->maxs, start_o, pm->ps->clientNum, pm->tracemask);
-	if ( trace.fraction == 1.0 ) {
-		// use the original move
-		VectorCopy (down_o, pm->ps->origin);
-		VectorCopy (down_v, pm->ps->velocity);
-		if ( pm->debugLevel ) {
-			Com_Printf("%i:bend\n", c_pmove);
-		}
-	} else 
-#endif
 	{
 		// use the step move
 		float	delta;
@@ -341,4 +550,5 @@ void PM_StepSlideMove( qboolean gravity ) {
 		}
 	}
 }
+#endif /* STANDALONE */
 

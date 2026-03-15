@@ -57,11 +57,6 @@ float	pm_ladderfriction = 16.0f;		// friction while on ladder
 float	pm_ladderPushVel = 128.0f;		// velocity when jumping off ladder
 float	pm_shellshockScale = 0.4f;		// movement scale during shellshock
 
-// CoD2 jump slowdown parameters
-int		pm_jump_slowdownEnable = 1;	// enable jump slowdown from landing
-float	pm_jump_height = 39.0f;		// max jump height for velocity clamping
-int		pm_jump_slowdown_time = 1800;	// ms that jump slowdown lasts after landing
-
 int		c_pmove = 0;
 
 
@@ -395,31 +390,6 @@ static void PM_SetMovementDir( void ) {
 
 /*
 =============
-PM_JumpSlowdownFactor
-
-CoD2: Returns jump slowdown factor (1.0 to 2.5) based on pm_time.
-Higher value = more jump height reduction.
-=============
-*/
-static float PM_JumpSlowdownFactor( void ) {
-	if ( !pm_jump_slowdownEnable ) {
-		return 1.0f;
-	}
-
-	// pm_time decreases from pm_jump_slowdown_time to 0
-	// When pm_time > 1699ms, factor = 2.5 (max slowdown)
-	// When pm_time <= 1699ms, factor scales from 1.0 to 2.5
-	if ( pm->ps->pm_time > 1699 ) {
-		return 2.5f;
-	}
-	// Scale: 1.0 + (pm_time * 1.5 / 2550) = 1.0 + pm_time * 0.00058823527
-	return 1.0f + (pm->ps->pm_time * 1.5f * 0.00058823527f);
-}
-
-
-
-/*
-=============
 PM_CheckJump
 =============
 */
@@ -433,14 +403,17 @@ static qboolean PM_CheckJump( void ) {
 		return qfalse;
 	}
 
-	// CoD1/2: not allowed to jump if just landed (PMF_TIME_LAND)
-	// This prevents bunny hopping
-	if ( pm->ps->pm_flags & PMF_TIME_LAND ) {
+#ifdef STANDALONE
+	// CoD1: 500ms cooldown between jumps (replaces PMF_TIME_LAND anti-bunny-hop)
+	if ( pm->cmd.serverTime - pm->ps->jumpTime <= 499 ) {
+		pm->cmd.upmove = 0;	// clear so cmdscale doesn't slow ground movement
 		return qfalse;
 	}
+#endif
 
 	// first jump press while prone transitions out of prone stance
 	if ( pm->ps->pm_flags & PMF_PRONE ) {
+		pm->cmd.upmove = 0;
 		pm->ps->pm_flags &= ~PMF_PRONE;
 		return qfalse;
 	}
@@ -458,14 +431,12 @@ static qboolean PM_CheckJump( void ) {
 
 	pm->ps->groundEntityNum = ENTITYNUM_NONE;
 	// CoD1: velocity = sqrt(2 * jump_height * gravity), jump_height = 39 units
-	// CoD2: apply slowdown if PMF_TIME_SLOWDOWN is set
-	{
-		float jumpVel = (float)sqrt( 2.0f * JUMP_HEIGHT * (float)pm->ps->gravity );
-		if ( pm->ps->pm_flags & PMF_TIME_SLOWDOWN ) {
-			jumpVel /= PM_JumpSlowdownFactor();
-		}
-		pm->ps->velocity[2] = jumpVel;
-	}
+	pm->ps->velocity[2] = (float)sqrt( 2.0f * JUMP_HEIGHT * (float)pm->ps->gravity );
+#ifdef STANDALONE
+	// CoD1: store expected jump peak for PM_StepSlideMove
+	pm->ps->jumpOriginZ = pm->ps->origin[2] + JUMP_HEIGHT;
+	pm->ps->jumpTime = pm->cmd.serverTime;	// 500ms cooldown starts now
+#endif
 	PM_AddEvent( EV_JUMP );
 
 	if ( pm->cmd.forwardmove >= 0 ) {
@@ -1494,6 +1465,9 @@ static void PM_GroundTraceMissed( void ) {
 	pm->ps->groundEntityNum = ENTITYNUM_NONE;
 	pml.groundPlane = qfalse;
 	pml.walking = qfalse;
+#ifdef STANDALONE
+	pm->ps->jumpOriginZ = 0;	// not a jump, clear peak tracking
+#endif
 }
 
 
@@ -1576,29 +1550,10 @@ static void PM_GroundTrace( void ) {
 			Com_Printf("%i:Land\n", c_pmove);
 		}
 
+#ifdef STANDALONE
+		pm->ps->jumpOriginZ = 0;	// landed — clear jump peak tracking
+#endif
 		PM_CrashLand();
-
-		// CoD1/2: ALL landings set PMF_TIME_LAND to prevent bunny hopping
-		// Duration depends on impact velocity
-		pm->ps->pm_flags |= PMF_TIME_LAND;
-		if ( pml.previous_velocity[2] < -200 ) {
-			// Hard landing: longer delay
-			pm->ps->pm_time = 250;
-		} else {
-			// Soft landing: brief delay
-			pm->ps->pm_time = 100;
-		}
-
-		// CoD2: jump slowdown - if landing with high downward velocity, apply slowdown
-		if ( pml.previous_velocity[2] < -200 && pm_jump_slowdownEnable ) {
-			// Store where we landed (use grapplePoint[2] since we don't use grapple)
-			pm->ps->grapplePoint[2] = pm->ps->origin[2];
-			pm->ps->pm_flags |= PMF_TIME_SLOWDOWN;
-			// Note: PMF_TIME_SLOWDOWN shares pm_time with PMF_TIME_LAND, set to full duration
-			if ( pm->ps->pm_time < pm_jump_slowdown_time ) {
-				pm->ps->pm_time = pm_jump_slowdown_time;
-			}
-		}
 	}
 
 	pm->ps->groundEntityNum = trace.entityNum;

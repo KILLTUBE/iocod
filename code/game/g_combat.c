@@ -624,7 +624,19 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	}
 
 	/* Fire GSC player killed callback */
-	G_Scr_PlayerKilled( self->s.number, killer, meansOfDeath );
+	{
+		int hitLoc = 0;
+		vec3_t deathDir;
+		if ( self->client ) {
+			VectorCopy( self->client->damage_from, deathDir );
+			VectorSubtract( deathDir, self->r.currentOrigin, deathDir );
+			VectorNormalize( deathDir );
+		} else {
+			VectorClear( deathDir );
+		}
+		G_Scr_PlayerKilled( self->s.number, inflictor, attacker,
+			damage, meansOfDeath, "", deathDir, hitLoc );
+	}
 
 	self->takedamage = qtrue;	// can still be gibbed
 
@@ -907,40 +919,41 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		}
 	}
 
-	// CoD1: apply hit location damage multiplier for player targets
-	if ( client && point ) {
-		int hitLoc = G_CalcHitLocFromPoint( point, targ );
-		damage = (int)( (float)damage * g_fHitLocDamageMult[hitLoc] );
-	}
-
-	if ( damage < 1 ) {
-		damage = 1;
-	}
-	take = damage;
-
-	if ( g_debugDamage.integer ) {
-		G_Printf( "target:%i health:%i damage:%i\n",
-			targ->s.number, targ->health, take );
-	}
-
-	// CoD1: for player targets, fire script callback
-	if ( client ) {
-		int attackerNum = ( attacker && attacker->client )
-		                  ? attacker->s.number : ENTITYNUM_WORLD;
-
-		client->ps.persistant[PERS_ATTACKER] = attacker->s.number;
-		client->damage_blood += take;
-		if ( dir ) {
-			VectorCopy( dir, client->damage_from );
-			client->damage_fromWorld = qfalse;
-		} else {
-			VectorCopy( targ->r.currentOrigin, client->damage_from );
-			client->damage_fromWorld = qtrue;
+	// CoD1: compute hit location for player targets
+	{
+		int hitLoc = 0;
+		if ( client && point ) {
+			hitLoc = G_CalcHitLocFromPoint( point, targ );
+			damage = (int)( (float)damage * g_fHitLocDamageMult[hitLoc] );
 		}
-		client->lasthurt_client = attacker->s.number;
-		client->lasthurt_mod = mod;
 
-		G_Scr_PlayerDamage( targ->s.number, attackerNum, take, mod );
+		if ( damage < 1 ) {
+			damage = 1;
+		}
+		take = damage;
+
+		if ( g_debugDamage.integer ) {
+			G_Printf( "target:%i health:%i damage:%i\n",
+				targ->s.number, targ->health, take );
+		}
+
+		// CoD1: for player targets, fire script callback
+		if ( client ) {
+			client->ps.persistant[PERS_ATTACKER] = attacker ? attacker->s.number : targ->s.number;
+			client->damage_blood += take;
+			if ( dir ) {
+				VectorCopy( dir, client->damage_from );
+				client->damage_fromWorld = qfalse;
+			} else {
+				VectorCopy( targ->r.currentOrigin, client->damage_from );
+				client->damage_fromWorld = qtrue;
+			}
+			client->lasthurt_client = attacker ? attacker->s.number : targ->s.number;
+			client->lasthurt_mod = mod;
+
+			G_Scr_PlayerDamage( targ->s.number, inflictor, attacker,
+				take, dflags, mod, "", point, dir, hitLoc );
+		}
 	}
 
 	// apply damage

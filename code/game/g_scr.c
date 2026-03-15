@@ -35,7 +35,10 @@ Player object globals: "player_N" (N = clientNum, 0-based).
 
 #include "g_local.h"
 #include "g_scr.h"
+#include "g_hitloc.h"
 #include "../thirdparty/gsc/include/gsc.h"
+
+extern char *modNames[];
 
 #include <ctype.h>
 #include <math.h>
@@ -4335,18 +4338,62 @@ void G_Scr_PlayerSpawn( int clientNum )
     G_Scr_ExecPlayerCallback( clientNum, "CodeCallback_PlayerSpawn" );
 }
 
-void G_Scr_PlayerKilled( int clientNum, int attackerNum, int mod )
+/*
+ * CoD1 CodeCallback_PlayerKilled(eInflictor, eAttacker, iDamage, sMeansOfDeath,
+ *                                sWeapon, vDir, sHitLoc)
+ * 7 args
+ */
+void G_Scr_PlayerKilled( int clientNum, gentity_t *inflictor, gentity_t *attacker,
+                         int damage, int mod, const char *weapon, vec3_t dir,
+                         int hitLoc )
 {
+    int attackerNum;
+    float vdir[3] = { 0, 0, 0 };
+
     if ( !g_scrActive || !g_scrCtx ) {
         return;
     }
+    if ( !g_scrCallbackFile[0] ) {
+        return;
+    }
+
+    attackerNum = ( attacker && attacker->client )
+                  ? attacker->s.number : ENTITYNUM_WORLD;
+
     G_Scr_SetSelfToPlayer( clientNum );
-    /* Push attacker and MOD as arguments */
-    gsc_add_int( g_scrCtx, attackerNum );
-    gsc_add_int( g_scrCtx, mod );
-    if ( g_scrCallbackFile[0] ) {
+
+    /* eInflictor */
+    if ( inflictor && g_scrPlayerRefs[ inflictor->s.number ] != GSC_NOREF ) {
+        gsc_push_ref( g_scrCtx, g_scrPlayerRefs[ inflictor->s.number ] );
+    } else {
+        gsc_add_int( g_scrCtx, inflictor ? inflictor->s.number : ENTITYNUM_WORLD );
+    }
+    /* eAttacker */
+    if ( attacker && attacker->client
+         && g_scrPlayerRefs[ attackerNum ] != GSC_NOREF ) {
+        gsc_push_ref( g_scrCtx, g_scrPlayerRefs[ attackerNum ] );
+    } else {
+        gsc_add_int( g_scrCtx, attackerNum );
+    }
+    /* iDamage */
+    gsc_add_int( g_scrCtx, damage );
+    /* sMeansOfDeath */
+    if ( mod >= 0 && mod < MOD_NUM ) {
+        gsc_add_string( g_scrCtx, modNames[mod] );
+    } else {
+        gsc_add_string( g_scrCtx, "MOD_UNKNOWN" );
+    }
+    /* sWeapon */
+    gsc_add_string( g_scrCtx, weapon ? weapon : "" );
+    /* vDir */
+    if ( dir ) { VectorCopy( dir, vdir ); }
+    gsc_add_vec3( g_scrCtx, vdir );
+    /* sHitLoc */
+    gsc_add_string( g_scrCtx, G_GetHitLocationString( hitLoc ) );
+
+    {
         int status = gsc_call( g_scrCtx, g_scrCallbackFile,
-                               "CodeCallback_PlayerKilled", 2 );
+                               "CodeCallback_PlayerKilled", 7 );
         if ( status != GSC_OK && status != GSC_NOT_FOUND ) {
             G_Printf( "GSC: error in CodeCallback_PlayerKilled (status %d)\n",
                       status );
@@ -4354,18 +4401,68 @@ void G_Scr_PlayerKilled( int clientNum, int attackerNum, int mod )
     }
 }
 
-void G_Scr_PlayerDamage( int clientNum, int attackerNum, int damage, int mod )
+/*
+ * CoD1 CodeCallback_PlayerDamage(eInflictor, eAttacker, iDamage, iDFlags,
+ *                                sMeansOfDeath, sWeapon, vPoint, vDir, sHitLoc)
+ * 9 args
+ */
+void G_Scr_PlayerDamage( int clientNum, gentity_t *inflictor, gentity_t *attacker,
+                         int damage, int dflags, int mod, const char *weapon,
+                         vec3_t point, vec3_t dir, int hitLoc )
 {
+    int attackerNum;
+    float vpoint[3] = { 0, 0, 0 };
+    float vdir[3] = { 0, 0, 0 };
+
     if ( !g_scrActive || !g_scrCtx ) {
         return;
     }
+    if ( !g_scrCallbackFile[0] ) {
+        return;
+    }
+
+    attackerNum = ( attacker && attacker->client )
+                  ? attacker->s.number : ENTITYNUM_WORLD;
+
     G_Scr_SetSelfToPlayer( clientNum );
-    gsc_add_int( g_scrCtx, attackerNum );
+
+    /* eInflictor */
+    if ( inflictor && g_scrPlayerRefs[ inflictor->s.number ] != GSC_NOREF ) {
+        gsc_push_ref( g_scrCtx, g_scrPlayerRefs[ inflictor->s.number ] );
+    } else {
+        gsc_add_int( g_scrCtx, inflictor ? inflictor->s.number : ENTITYNUM_WORLD );
+    }
+    /* eAttacker */
+    if ( attacker && attacker->client
+         && g_scrPlayerRefs[ attackerNum ] != GSC_NOREF ) {
+        gsc_push_ref( g_scrCtx, g_scrPlayerRefs[ attackerNum ] );
+    } else {
+        gsc_add_int( g_scrCtx, attackerNum );
+    }
+    /* iDamage */
     gsc_add_int( g_scrCtx, damage );
-    gsc_add_int( g_scrCtx, mod );
-    if ( g_scrCallbackFile[0] ) {
+    /* iDFlags */
+    gsc_add_int( g_scrCtx, dflags );
+    /* sMeansOfDeath */
+    if ( mod >= 0 && mod < MOD_NUM ) {
+        gsc_add_string( g_scrCtx, modNames[mod] );
+    } else {
+        gsc_add_string( g_scrCtx, "MOD_UNKNOWN" );
+    }
+    /* sWeapon */
+    gsc_add_string( g_scrCtx, weapon ? weapon : "" );
+    /* vPoint */
+    if ( point ) { VectorCopy( point, vpoint ); }
+    gsc_add_vec3( g_scrCtx, vpoint );
+    /* vDir */
+    if ( dir ) { VectorCopy( dir, vdir ); }
+    gsc_add_vec3( g_scrCtx, vdir );
+    /* sHitLoc */
+    gsc_add_string( g_scrCtx, G_GetHitLocationString( hitLoc ) );
+
+    {
         int status = gsc_call( g_scrCtx, g_scrCallbackFile,
-                               "CodeCallback_PlayerDamage", 3 );
+                               "CodeCallback_PlayerDamage", 9 );
         if ( status != GSC_OK && status != GSC_NOT_FOUND ) {
             G_Printf( "GSC: error in CodeCallback_PlayerDamage (status %d)\n",
                       status );

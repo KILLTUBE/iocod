@@ -621,13 +621,18 @@ int vm_sp(VM *vm)
 static Variable pop_thread(VM *vm, Thread *thr)
 {
 	if(thr->sp <= 0)
-		vm_error(vm, "stack ptr < 0");
+	{
+		if(thr == &vm->temp_thread)
+		{
+			fprintf(stderr, "  \033[1;33mwarn\033[0m: API stack underflow (sp=%d), resetting\n", thr->sp);
+			thr->sp = 0;
+			return (Variable) { .type = VAR_UNDEFINED };
+		}
+		vm_error(vm, "stack underflow");
+	}
 	if(thr->sp > COUNT_OF(thr->stack))
-		vm_error(vm, "stack ptr > max");
-    Variable *top = &thr->stack[--thr->sp];
-    // Variable ret = *top;
-    // decref(vm, &top);
-    return *top;
+		vm_error(vm, "stack overflow");
+    return thr->stack[--thr->sp];
 }
 
 static Variable pop(VM *vm)
@@ -2645,6 +2650,16 @@ static bool call_function(VM *vm, Thread *thr, const char *file, const char *fun
 
 bool vm_call_function_thread(VM *vm, const char *file, const char *function, size_t nargs, Variable *self)
 {
+	Thread *old_thread = vm->thread; // temp_thread — args were pushed here by C API
+	Variable arg_buf[64]; // temp buffer to reverse pop order
+	size_t k;
+
+	// pop args from temp_thread into buffer (LIFO → reversed)
+	if(nargs > COUNT_OF(arg_buf))
+		vm_error(vm, "too many args for vm_call_function_thread (%d)", (int)nargs);
+	for(k = 0; k < nargs; ++k)
+		arg_buf[k] = pop_thread(vm, old_thread);
+
 	vm->thread = object_pool_allocate(&vm->pool.threads, Thread);
 	if(!vm->thread)
 		vm_error(vm, "No threads left");
@@ -2652,7 +2667,7 @@ bool vm_call_function_thread(VM *vm, const char *file, const char *function, siz
 	vm->thread->bp = 0;
 	vm->thread->return_value = NULL;
 	vm->thread->state = VM_THREAD_ACTIVE;
-	// push_thread(vm, vm->thread, self ? *self : vm->globals[VAR_GLOB_LEVEL]);
+	// push self onto new thread
 	if(self)
 	{
 		push_thread(vm, vm->thread, *self);
@@ -2661,10 +2676,13 @@ bool vm_call_function_thread(VM *vm, const char *file, const char *function, siz
 	{
 		gsc_get_global(vm->ctx, vm->default_self);
 	}
-	push_thread(vm, vm->thread, integer(vm, nargs));
 	if(self && self->type != VAR_OBJECT)
 		vm_error(vm, "'%s' is not an object", variable_type_names[self->type]);
-	bool result = call_function(vm, vm->thread, file, function, vm_string_index(vm, function), nargs, false, 0);
+	// push args in original order: arg_buf was filled in reverse, so iterate backwards
+	for(k = nargs; k > 0; --k)
+		push_thread(vm, vm->thread, arg_buf[k - 1]);
+	push_thread(vm, vm->thread, integer(vm, nargs));
+	bool result = call_function(vm, vm->thread, file, function, vm_string_index(vm, function), nargs, true, 0);
 	add_thread(vm, vm->thread);
 	vm->thread = &vm->temp_thread;
 	return result;
