@@ -611,10 +611,9 @@ qboolean G_FilterPacket (char *from);
 //
 // g_weapon.c
 //
-#ifdef STANDALONE
-static ID_INLINE void FireWeapon( gentity_t *ent ) { (void)ent; }
-#else
 void FireWeapon( gentity_t *ent );
+#ifdef STANDALONE
+void FireWeaponMelee( gentity_t *ent );
 #endif
 #ifdef MISSIONPACK
 void G_StartKamikaze( gentity_t *ent );

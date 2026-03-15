@@ -107,7 +107,11 @@ void P_WorldEffects( gentity_t *ent ) {
 
 	waterlevel = ent->waterlevel;
 
+#ifdef STANDALONE
+	envirosuit = qfalse;	// CoD1: no envirosuit
+#else
 	envirosuit = ent->client->ps.powerups[PW_BATTLESUIT] > level.time;
+#endif
 
 	//
 	// check for drowning

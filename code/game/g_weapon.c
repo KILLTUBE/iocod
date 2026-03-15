@@ -1139,8 +1139,12 @@ void G_StartKamikaze( gentity_t *ent ) {
 #endif /* !STANDALONE */
 
 #ifdef STANDALONE
-/* Utilities needed by other modules even in STANDALONE builds */
+/* =====================================================================
+   STANDALONE (CoD1) weapon code
+   ===================================================================== */
 #include "g_local.h"
+#include "g_hitloc.h"
+#include "../qcommon/bg_weapon_cod1.h"
 
 void SnapVectorTowards( vec3_t v, vec3_t to ) {
 	int i;
@@ -1156,4 +1160,136 @@ void SnapVectorTowards( vec3_t v, vec3_t to ) {
 /* Stubs for Q3 weapon functions still referenced by g_misc.c shooter entities */
 gentity_t *fire_plasma( gentity_t *self, vec3_t start, vec3_t dir ) { (void)self; (void)start; (void)dir; return NULL; }
 gentity_t *fire_rocket( gentity_t *self, vec3_t start, vec3_t dir ) { (void)self; (void)start; (void)dir; return NULL; }
+
+/*
+===============
+Bullet_Fire_Cod1
+
+CoD1-style hitscan bullet trace from muzzle to endpoint.
+Applies hit location damage with multiplier.
+===============
+*/
+static void Bullet_Fire_Cod1( gentity_t *ent, vec3_t muzzle, vec3_t end, int damage )
+{
+	trace_t		tr;
+	gentity_t	*traceEnt;
+	int			hitLoc;
+
+	trap_Trace( &tr, muzzle, NULL, NULL, end, ent->s.number, MASK_SHOT );
+
+	if ( tr.fraction == 1.0f ) {
+		return;		// missed everything
+	}
+
+	traceEnt = &g_entities[ tr.entityNum ];
+
+	// bullet impact event
+	if ( traceEnt->takedamage && traceEnt->client ) {
+		G_TempEntity( tr.endpos, EV_BULLET_HIT_FLESH );
+	} else if ( tr.entityNum != ENTITYNUM_NONE ) {
+		G_TempEntity( tr.endpos, EV_BULLET_HIT_WALL );
+	}
+
+	if ( !traceEnt->takedamage ) {
+		return;
+	}
+
+	// calculate hit location for damage multiplier
+	hitLoc = G_CalcHitLocFromPoint( tr.endpos, traceEnt );
+	if ( hitLoc >= 0 && hitLoc < HITLOC_NUM ) {
+		damage = (int)( (float)damage * g_fHitLocDamageMult[hitLoc] );
+	}
+
+	if ( damage < 1 ) {
+		damage = 1;
+	}
+
+	G_Damage( traceEnt, ent, ent, NULL, tr.endpos, damage, 0, MOD_RIFLE_BULLET );
+}
+
+/*
+===============
+FireWeapon — CoD1 style
+
+Dispatches weapon firing based on weapon definition.
+Currently implements hitscan bullets with spread.
+===============
+*/
+void FireWeapon( gentity_t *ent )
+{
+	vec3_t		forward, right, up;
+	vec3_t		muzzle, end;
+	float		spread, spreadRad, rndX, rndY;
+	weaponDef_t	wd;
+	const char	*weapName;
+	int			damage;
+
+	if ( !ent || !ent->client ) {
+		return;
+	}
+
+	// Build muzzle point from origin + viewheight
+	AngleVectors( ent->client->ps.viewangles, forward, right, up );
+	VectorCopy( ent->client->ps.origin, muzzle );
+	muzzle[2] += ent->client->ps.viewheight;
+
+	// Snap to integer (CoD1 snaps muzzle coords)
+	muzzle[0] = (float)(int)muzzle[0];
+	muzzle[1] = (float)(int)muzzle[1];
+	muzzle[2] = (float)(int)muzzle[2];
+
+	// Try to load weapon def for damage/spread
+	weapName = NULL;
+	damage = 30;		// default damage if no weapondef found
+	spread = 0.5f;		// default spread in degrees
+
+	// The weapon index is stored in ps.weapon; for CoD1 we use a generic approach
+	Com_Memset( &wd, 0, sizeof(wd) );
+
+	// Hitscan: calculate end point with spread
+	spreadRad = (float)tan( (double)spread * M_PI / 180.0 );
+
+	// CoD1-style random spread
+	rndX = ( ( (float)( rand() & 0xFFFF ) / 65536.0f ) * 2.0f - 1.0f ) * spreadRad * 8192.0f;
+	rndY = ( ( (float)( rand() & 0xFFFF ) / 65536.0f ) * 2.0f - 1.0f ) * spreadRad * 8192.0f;
+
+	VectorMA( muzzle, 8192.0f, forward, end );
+	VectorMA( end, rndX, right, end );
+	VectorMA( end, rndY, up, end );
+
+	Bullet_Fire_Cod1( ent, muzzle, end, damage );
+}
+
+/*
+===============
+FireWeaponMelee — CoD1 style
+
+Separate melee fire function.
+===============
+*/
+void FireWeaponMelee( gentity_t *ent )
+{
+	vec3_t	forward, right, up;
+	vec3_t	muzzle, end;
+	trace_t	tr;
+
+	if ( !ent || !ent->client ) {
+		return;
+	}
+
+	AngleVectors( ent->client->ps.viewangles, forward, right, up );
+	VectorCopy( ent->client->ps.origin, muzzle );
+	muzzle[2] += ent->client->ps.viewheight;
+
+	VectorMA( muzzle, 64.0f, forward, end );
+
+	trap_Trace( &tr, muzzle, NULL, NULL, end, ent->s.number, MASK_SHOT );
+
+	if ( tr.fraction < 1.0f ) {
+		gentity_t *hit = &g_entities[ tr.entityNum ];
+		if ( hit->takedamage ) {
+			G_Damage( hit, ent, ent, forward, tr.endpos, 150, 0, MOD_MELEE );
+		}
+	}
+}
 #endif
