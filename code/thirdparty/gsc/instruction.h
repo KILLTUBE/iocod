@@ -27,8 +27,11 @@
 	X(WAIT)        \
 	X(UNARY)       \
 	X(VECTOR)      \
-	X(PRINT_EXPR)      \
-	X(GLOBAL)
+	X(PRINT_EXPR)  \
+	X(GLOBAL)      \
+	X(WAITTILL)    \
+	X(NOTIFY)      \
+	X(ENDON)
  // X(SELF)
 
 typedef enum
@@ -135,6 +138,7 @@ typedef struct
 	HashTrie includes;
 	HashTrie file_references;
 	int state;
+	const char *source;
 } CompiledFile;
 
 typedef struct

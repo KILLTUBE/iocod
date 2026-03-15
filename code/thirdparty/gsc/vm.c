@@ -148,10 +148,16 @@ static void print_callstack(Thread *thr)
 	}
 	else
 	{
-		for(int i = 0; i < thr->bp + 1; i++)
+		for(int i = 0; i <= thr->bp; i++)
 		{
-			StackFrame *prev_sf = &thr->frames[i];
-			printf("\t-> %s::%s\n", prev_sf->file, prev_sf->function);
+			StackFrame *f = &thr->frames[i];
+			int line = -1;
+			if(f->instructions && f->ip > 0 && f->ip <= f->instruction_count)
+				line = f->instructions[f->ip - 1].line;
+			printf("\t-> %s::%s line %d\n",
+				f->file ? f->file : "?",
+				f->function ? f->function : "?",
+				line);
 		}
 	}
 	printf("____________________________________________\n");
@@ -264,56 +270,163 @@ static void print_object(VM *vm, const char *key, Variable *v, int indent)
 // 	}
 // }
 
-static void vm_stacktrace(VM *vm)
-{
-	// TODO: print instructions
-
-    Thread *thr = vm->thread;
-    StackFrame *sf = stack_frame(vm, thr);
-    // printf("========= STACK =========\n");
-	printf("\t== sp: %d\n", thr->sp);
-	printf("\t== ip: %d\n", sf->ip);
-	printf("\t== bp: %d\n", thr->bp);
-	for(int i = thr->sp - 1; i >= 0; i--)
-    {
-		Variable *sv = &thr->stack[i];
-		if(!sv)
-			continue;
-		printf("\t== %d: type:%s\n", i, variable_type_names[sv->type]);
-	}
-	print_callstack(thr);
-    // printf("====== END OF STACK =====\n");
-}
-
 #ifndef COUNT_OF
 	#define COUNT_OF(x) (sizeof(x) / sizeof((x)[0]))
 #endif
 
+static void print_source_context(const char *source, int error_line, int context)
+{
+	if(!source || error_line <= 0) return;
+	const char *line_starts[8192];
+	int total_lines = 0;
+	line_starts[0] = source;
+	for(const char *p = source; *p && total_lines < 8191; p++)
+	{
+		if(*p == '\n' && *(p+1))
+			line_starts[++total_lines] = p + 1;
+	}
+	total_lines++;
+
+	int start = error_line - context;
+	int end = error_line + context;
+	if(start < 1) start = 1;
+	if(end > total_lines) end = total_lines;
+
+	fprintf(stderr, "   \033[1;36m|\033[0m\n");
+	for(int i = start; i <= end; i++)
+	{
+		if(i - 1 >= total_lines) break;
+		const char *ls = line_starts[i - 1];
+		const char *le = ls;
+		while(*le && *le != '\n' && *le != '\r') le++;
+		int len = (int)(le - ls);
+		if(len > 200) len = 200;
+		while(len > 0 && (ls[0] == '\t' || ls[0] == ' ')) { ls++; len--; }
+		if(i == error_line)
+		{
+			fprintf(stderr, " \033[1;31m%4d\033[0m \033[1;36m|\033[0m \033[1m%.*s\033[0m\n", i, len, ls);
+			fprintf(stderr, "   %4s \033[1;36m|\033[0m \033[1;31m", "");
+			for(int k = 0; k < len; k++) fputc('^', stderr);
+			fprintf(stderr, "\033[0m\n");
+		}
+		else
+		{
+			fprintf(stderr, " \033[2m%4d\033[0m \033[1;36m|\033[0m %.*s\n", i, len, ls);
+		}
+	}
+	fprintf(stderr, "   \033[1;36m|\033[0m\n");
+}
+
 void vm_error(VM *vm, const char *fmt, ...)
 {
-    Thread *thr = vm->thread;
-    StackFrame *sf = NULL;
-	if(thr->bp >= 0)
-		sf = &thr->frames[thr->bp];
-	Instruction *current = sf && sf->instructions ? &sf->instructions[sf->ip > 0 ? sf->ip - 1 : 0] : NULL;
+	Thread *thr = vm->thread;
+	StackFrame *sf = (thr && thr->bp >= 0) ? &thr->frames[thr->bp] : NULL;
+	Instruction *current = (sf && sf->instructions && sf->ip > 0 && sf->ip <= sf->instruction_count)
+		? &sf->instructions[sf->ip - 1] : NULL;
+
 	char message[2048];
 	va_list va;
 	va_start(va, fmt);
 	vsnprintf(message, sizeof(message), fmt, va);
 	va_end(va);
-	printf("[VM] ERROR: %s on line %d (%s::%s)\n",
-		   message,
-		   current ? current->line : -1,
-		   sf && sf->file ? sf->file : "?",
-		   sf && sf->function ? sf->function : "?");
-	vm_stacktrace(vm);
-	// print_globals(vm);
-	// vm_print_thread_info(vm);
-	abort();
-	if(vm->jmp)
-		longjmp(*vm->jmp, 1);
+
+	bool in_script = sf && sf->file && sf->instructions;
+	int err_line = current ? current->line : -1;
+
+	fprintf(stderr, "\n\033[1;31merror\033[0m: %s\n", message);
+
+	if(current && in_script)
+	{
+		fprintf(stderr, "  \033[1;36m-->\033[0m %s::%s",
+			sf->file, sf->function ? sf->function : "?");
+		if(err_line > 0) fprintf(stderr, ":%d", err_line);
+		fprintf(stderr, "\n");
+
+		if(sf->source && err_line > 0)
+			print_source_context(sf->source, err_line, 2);
+	}
+	else if(in_script)
+	{
+		fprintf(stderr, "  \033[1;36m-->\033[0m %s::%s\n",
+			sf->file, sf->function ? sf->function : "?");
+	}
 	else
-		abort();
+	{
+		fprintf(stderr, "  \033[2m(native context, no script frame)\033[0m\n");
+	}
+
+	if(thr && thr->bp >= 0 && in_script)
+	{
+		fprintf(stderr, "\n\033[1mstack trace:\033[0m\n");
+		for(int i = thr->bp; i >= 0; i--)
+		{
+			StackFrame *f = &thr->frames[i];
+			if(!f->file) continue;
+			int line = -1;
+			if(f->instructions && f->ip > 0 && f->ip <= f->instruction_count)
+				line = f->instructions[f->ip - 1].line;
+			fprintf(stderr, "  %s \033[1m%s\033[0m::%s",
+				(i == thr->bp) ? "at" : "by",
+				f->file, f->function ? f->function : "?");
+			if(line > 0) fprintf(stderr, ":%d", line);
+			fprintf(stderr, "\n");
+		}
+		if(thr->caller.file)
+			fprintf(stderr, "  from %s::%s\n",
+				thr->caller.file, thr->caller.function ? thr->caller.function : "?");
+	}
+
+	if(thr && sf && sf->local_count > 0 && sf->local_count < VM_MAX_LOCALS && in_script)
+	{
+		int show = sf->local_count < 12 ? sf->local_count : 12;
+		fprintf(stderr, "\n\033[1mlocals:\033[0m\n");
+		for(int i = 0; i < show; i++)
+		{
+			if(!sf->locals[i]) continue;
+			const char *name = (sf->variable_names && i < (int)sf->local_count)
+				? sf->variable_names[i] : NULL;
+			char buf[256];
+			vm_stringify(vm, sf->locals[i], buf, sizeof(buf));
+			fprintf(stderr, "  \033[33m%s\033[0m = %s\n",
+				name ? name : "?", buf);
+		}
+	}
+
+	if(thr && thr->sp > 0 && in_script)
+	{
+		int show = thr->sp < 6 ? thr->sp : 6;
+		fprintf(stderr, "\n\033[1mstack:\033[0m (%d values)\n", thr->sp);
+		for(int i = thr->sp - 1; i >= thr->sp - show; i--)
+		{
+			char buf[128];
+			vm_stringify(vm, &thr->stack[i], buf, sizeof(buf));
+			fprintf(stderr, "  [%d] %s\n", i, buf);
+		}
+	}
+
+	printf("\n");
+	abort();
+}
+
+static void vm_stacktrace(VM *vm)
+{
+	Thread *thr = vm->thread;
+	if(!thr || thr->bp < 0) return;
+	StackFrame *sf = &thr->frames[thr->bp];
+	printf("  Stack Trace:\n");
+	for(int i = thr->bp; i >= 0; i--)
+	{
+		StackFrame *f = &thr->frames[i];
+		int line = -1;
+		if(f->instructions && f->ip > 0 && f->ip <= f->instruction_count)
+			line = f->instructions[f->ip - 1].line;
+		fprintf(stderr, "  %s \033[1m%s\033[0m::%s",
+			(i == thr->bp) ? "at" : "by",
+			f->file ? f->file : "?",
+			f->function ? f->function : "?");
+		if(line > 0) fprintf(stderr, ":%d", line);
+		fprintf(stderr, "\n");
+	}
 }
 
 static Variable *local(VM *vm, size_t index)
@@ -580,7 +693,13 @@ static int64_t pop_int(VM *vm)
 static void validate_operand_type(VM *vm, Operand *op, OperandType expected_type, const char *type_name)
 {
     if(op->type != expected_type)
-        vm_error(vm, "Operand '%s' is not a %s", operand_type_names[op->type], type_name);
+	{
+		StackFrame *sf = stack_frame(vm, vm->thread);
+		Instruction *ins = (sf->ip > 0) ? &sf->instructions[sf->ip - 1] : NULL;
+        vm_error(vm, "Operand '%s' is not a %s (opcode=%s)",
+			operand_type_names[op->type], type_name,
+			ins ? opcode_names[ins->opcode] : "?");
+	}
 }
 
 static int64_t read_int(VM *vm, Instruction *ins, size_t idx)
@@ -819,6 +938,20 @@ static Variable unary(VM *vm, Variable *arg, int op)
 				case '+': *b = +a; break;
 				default: err = true; break;
 			}
+		}
+		break;
+
+		case VAR_STRING:
+		case VAR_INTERNED_STRING:
+		{
+			if(op == '!')
+			{
+				const char *s = variable_string(vm, arg);
+				result.type = VAR_BOOLEAN;
+				result.u.ival = (!s || !s[0]) ? 1 : 0;
+			}
+			else
+				err = true;
 		}
 		break;
 
@@ -1630,6 +1763,73 @@ bool vm_execute_instruction(VM *vm, Instruction *ins)
 		}
 		break;
 
+		case OP_WAITTILL:
+		{
+			int nargs = read_int(vm, ins, 0);
+			int nrefs = nargs - 1;
+			Variable objVar = pop(vm);
+			Variable nameVar = pop(vm);
+			if(objVar.type != VAR_OBJECT)
+				vm_error(vm, "waittill: '%s' is not an object", variable_type_names[objVar.type]);
+			const char *key = variable_string(vm, &nameVar);
+			int nameIdx = vm_string_index(vm, key);
+			if(nameIdx == -1)
+				vm_error(vm, "waittill: key '%s' not found", key);
+			int captureCount = nrefs < VM_MAX_EVENT_ARGS ? nrefs : VM_MAX_EVENT_ARGS;
+			for(int i = 0; i < captureCount; i++)
+			{
+				Variable ref = pop(vm);
+				if(ref.type != VAR_REFERENCE)
+					vm_error(vm, "waittill: expected reference, got %s", variable_type_names[ref.type]);
+				thr->waittill.arguments[i] = ref;
+			}
+			for(int i = captureCount; i < nrefs; i++)
+				pop(vm);
+			thr->waittill.numargs = captureCount;
+			thr->waittill.name = nameIdx;
+			thr->waittill.object = objVar.u.oval;
+			thr->state = VM_THREAD_WAITING_EVENT;
+			push(vm, undef);
+		}
+		break;
+
+		case OP_NOTIFY:
+		{
+			int nargs = read_int(vm, ins, 0);
+			int ndata = nargs - 1;
+			Variable objVar = pop(vm);
+			Variable nameVar = pop(vm);
+			if(objVar.type != VAR_OBJECT)
+				vm_error(vm, "notify: '%s' is not an object", variable_type_names[objVar.type]);
+			Variable args[VM_MAX_EVENT_ARGS];
+			int argCount = ndata < VM_MAX_EVENT_ARGS ? ndata : VM_MAX_EVENT_ARGS;
+			for(int i = 0; i < argCount; i++)
+				args[i] = pop(vm);
+			for(int i = argCount; i < ndata; i++)
+				pop(vm);
+			const char *key = variable_string(vm, &nameVar);
+			vm_notify_args(vm, objVar.u.oval, key, args, argCount);
+			push(vm, undef);
+		}
+		break;
+
+		case OP_ENDON:
+		{
+			int nargs = read_int(vm, ins, 0);
+			(void)nargs;
+			Variable objVar = pop(vm);
+			Variable nameVar = pop(vm);
+			const char *key = variable_string(vm, &nameVar);
+			int idx = vm_string_index(vm, key);
+			if(idx == -1)
+				vm_error(vm, "endon: key '%s' not found", key);
+			if(thr->endon_string_count >= VM_MAX_ENDON_STRINGS)
+				vm_error(vm, "endon: too many endon strings (%d)", VM_MAX_ENDON_STRINGS);
+			thr->endon[thr->endon_string_count++] = idx;
+			push(vm, undef);
+		}
+		break;
+
 		case OP_UNARY:
 		{
 			int op = read_int(vm, ins, 0);
@@ -1933,10 +2133,8 @@ void vm_init(VM *vm, Allocator *allocator, StringTable *strtab, const char *defa
 	vm->frame = 0;
 	vm->thread_buffer = allocator->malloc(allocator->ctx, sizeof(Thread*) * max_threads);
 	snprintf(vm->default_self, sizeof(vm->default_self), "%s", default_self);
-	for(int i = 0; i < VM_MAX_EVENTS_PER_FRAME; ++i)
-	{
-		vm->events[i].frame = -1;
-	}
+	memset(vm->events, 0, sizeof(vm->events));
+	vm->event_count = 0;
 	if(!uo_init(&vm->pool.uo, (1 << 16), -1, allocator))
 		vm_error(vm, "Failed to initialize union objects");
 	// variable_init(&vm->pool.variables, (1 << 19), -1, allocator);
@@ -2432,6 +2630,8 @@ static bool call_function(VM *vm, Thread *thr, const char *file, const char *fun
     sf->function = function;
     sf->instructions = vmf->instructions;
 	sf->instruction_count = vmf->instruction_count;
+	sf->variable_names = vmf->variable_names;
+	sf->source = vmf->file ? vmf->file->source : NULL;
 	sf->ip = 0;
 	// static char asm_filename[256];
 	// snprintf(asm_filename, sizeof(asm_filename), "debug/%s_%s.gscasm", file, function);
@@ -2482,44 +2682,20 @@ static bool variable_eq(Variable *a, Variable *b)
 	return !memcmp(&a->u, &b->u, sizeof(a->u));
 }
 
-static VMEvent *get_free_event(VM *vm)
-{
-	for(int i = 0; i < VM_MAX_EVENTS_PER_FRAME; ++i)
-	{
-		if(vm->events[i].frame == -1)
-			return &vm->events[i];
-	}
-	vm_error(vm, "No free events");
-	return NULL;
-}
-
-static void free_event(VMEvent *ev)
-{
-	ev->frame = -1;
-}
-
 void vm_notify_args(VM *vm, Object *object, const char *key, const Variable *args, size_t nargs)
 {
 	int name = vm_string_index(vm, key);
 	if(name == -1)
-	{
 		vm_error(vm, "Can't find string '%s'", key);
-	}
-	printf("Notifying '%s'\n", key);
-	VMEvent *ev = get_free_event(vm);
+	if(vm->event_count >= VM_MAX_EVENTS)
+		vm_error(vm, "event overflow (%d)", VM_MAX_EVENTS);
+	VMEvent *ev = &vm->events[vm->event_count++];
 	ev->object = object;
 	ev->name = name;
+	ev->active = 1;
 	for(size_t i = 0; i < nargs && i < VM_MAX_EVENT_ARGS; ++i)
-	{
 		ev->arguments[i] = args[i];
-	}
 	ev->numargs = (int)nargs;
-	ev->frame = vm->frame;
-	// VMEvent ev = { .object = object, .name = name, .arguments = NULL };
-	// if(vm->event_count >= VM_MAX_EVENTS_PER_FRAME)
-	// 	vm_error(vm, "event_count >= VM_MAX_EVENTS_PER_FRAME");
-	// vm->events[vm->event_count++] = ev;
-	// buf_push(vm->events, ev);
 }
 
 void vm_notify(VM *vm, Object *object, const char *key, size_t nargs)
@@ -2565,18 +2741,15 @@ bool vm_run_threads(VM *vm, float dt)
 			sf = &t->frames[t->bp];
 		// printf("Processing thread %s::%s (%s)\n", sf ? sf->file : "?", sf ? sf->function : "?", vm_thread_state_names[t->state]);
 		// getchar();
-		// for(size_t j = 0; j < vm->event_count; j++)
-		for(size_t j = 0; j < VM_MAX_EVENTS_PER_FRAME; j++)
+		for(int j = 0; j < vm->event_count && t->state != VM_THREAD_INACTIVE; j++)
 		{
 			VMEvent *ev = &vm->events[j];
-			if(ev->frame == -1 || ev->frame == vm->frame)
-				continue;
+			if(!ev->active) continue;
 			for(size_t k = 0; k < t->endon_string_count; ++k)
 			{
 				if(ev->name == t->endon[k])
 				{
 					t->state = VM_THREAD_INACTIVE;
-					// printf("Thread %d killed by event '%s'\n", i, string(vm, ev->name));
 					break;
 				}
 			}
@@ -2627,12 +2800,10 @@ bool vm_run_threads(VM *vm, float dt)
 
 			case VM_THREAD_WAITING_EVENT:
 			{
-				// for(size_t j = 0; j < vm->event_count; j++)
-				for(size_t j = 0; j < VM_MAX_EVENTS_PER_FRAME; j++)
+				for(int j = 0; j < vm->event_count; j++)
 				{
 					VMEvent *ev = &vm->events[j];
-					if(ev->frame == -1 || ev->frame == vm->frame)
-						continue;
+					if(!ev->active) continue;
 					if(ev->name == t->waittill.name && ev->object == t->waittill.object)
 					{
 						int min = t->waittill.numargs;
@@ -2646,7 +2817,8 @@ bool vm_run_threads(VM *vm, float dt)
 							memcpy(&dst->u, &src->u, sizeof(dst->u));
 						}
 						t->state = VM_THREAD_ACTIVE;
-						// printf("Thread %d resumed on event '%s'\n", i, string(vm, ev->name));
+						ev->active = 0;
+						break;
 					}
 				}
 			}
@@ -2657,15 +2829,14 @@ bool vm_run_threads(VM *vm, float dt)
 			add_thread(vm, t);
 	}
 
-	for(size_t j = 0; j < VM_MAX_EVENTS_PER_FRAME; j++)
+	int write = 0;
+	for(int j = 0; j < vm->event_count; j++)
 	{
-		VMEvent *ev = &vm->events[j];
-		if(ev->frame == -1 || ev->frame == vm->frame)
-			continue;
-		free_event(ev);
+		if(vm->events[j].active)
+			vm->events[write++] = vm->events[j];
 	}
-	
-	// vm->event_count = 0; // Reset for next frame
+	vm->event_count = write;
+
 	vm->frame++;
 	return vm->thread_read_idx != vm->thread_write_idx;
 }

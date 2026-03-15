@@ -5389,7 +5389,19 @@ void _UI_SetActiveMenu( uiMenuCommand_t menu ) {
 			trap_Key_SetCatcher( KEYCATCH_UI );
 			UI_BuildPlayerList();
 			Menus_CloseAll();
+#ifdef STANDALONE
+			{
+				char scriptMenu[256];
+				trap_Cvar_VariableStringBuffer("g_scriptMainMenu", scriptMenu, sizeof(scriptMenu));
+				if (scriptMenu[0]) {
+					Menus_ActivateByName(scriptMenu);
+				} else {
+					Menus_ActivateByName("main");
+				}
+			}
+#else
 			Menus_ActivateByName("ingame");
+#endif
 		  return;
 	  }
   }

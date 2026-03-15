@@ -1639,13 +1639,9 @@ static int GScr_Meth_OpenMenu( gsc_Context *ctx )
     {
         int menuIdx = G_Scr_GetMenuIndex( menuName );
         if ( menuIdx >= 0 ) {
-            /* Send index-based command (CoD2-style) */
             trap_SendServerCommand( clientNum, va( "t %d", menuIdx ) );
         } else {
-            /* Menu wasn't precached or VM bug returned wrong name.
-               Fall back to sending name directly. */
-            trap_SendServerCommand( clientNum,
-                va( "t %s", menuName ) );
+            trap_SendServerCommand( clientNum, va( "t %s", menuName ) );
         }
     }
 #else
@@ -3898,6 +3894,7 @@ void G_Scr_Init( void )
     */
     gametypeOk = G_Scr_CompileScript( gametypeScript );
     callbackOk = G_Scr_CompileScript( callbackScript );  /* explicit, safe to dup */
+
     mapOk      = G_Scr_CompileScript( mapScript );
     if ( !mapOk ) {
         mapOk = G_Scr_CompileScript( mapScriptSP );      /* SP fallback */
@@ -4156,6 +4153,10 @@ void G_Scr_PlayerBegin( int clientNum )
 
     G_Scr_Hud_SendAllToClient( clientNum );
     G_Scr_NotifyPlayer( clientNum, "begin", 0 );
+
+    /* Run woken threads immediately so the script can open menus
+       before the client's first frame renders. */
+    gsc_update( g_scrCtx, 0.0f );
 }
 
 /* Read a string field from the game[] GSC object.
@@ -4247,9 +4248,22 @@ void G_Scr_PlayerMenuResponse( int clientNum, const char *menu, const char *resp
         return;
     }
 
-    gsc_add_string( g_scrCtx, menu ? menu : "" );
-    gsc_add_string( g_scrCtx, response ? response : "" );
-    G_Scr_NotifyPlayer( clientNum, "menuresponse", 2 );
+    /* Push args then use standard G_Scr_NotifyPlayer which pushes object
+       and calls gsc_notify(numArgs). gsc_notify reads numArgs items from
+       the top of the stack — but the object is also on top. To avoid
+       the object being read as an arg, push args AFTER the object. */
+    if ( g_scrPlayerRefs[ clientNum ] == GSC_NOREF ) {
+        G_Scr_CreatePlayerObj( clientNum );
+    }
+    if ( g_scrPlayerRefs[ clientNum ] != GSC_NOREF ) {
+        gsc_push_ref( g_scrCtx, g_scrPlayerRefs[ clientNum ] );
+        gsc_add_string( g_scrCtx, menu ? menu : "" );
+        gsc_add_string( g_scrCtx, response ? response : "" );
+        /* Object is at sp-3, args at sp-2 and sp-1.
+           gsc_notify reads nargs=2 from top = the 2 strings. Correct. */
+        gsc_notify( g_scrCtx, gsc_top( g_scrCtx ) - 3, "menuresponse", 2 );
+        gsc_pop( g_scrCtx, 1 );  /* pop object */
+    }
 }
 
 void G_Scr_PlayerDisconnect( int clientNum )

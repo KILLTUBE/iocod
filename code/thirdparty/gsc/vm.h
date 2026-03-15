@@ -134,13 +134,14 @@ enum { sizeof_Variable = sizeof(Variable) };
 #pragma pack(push, 8)
 typedef struct
 {
-    Variable *locals[VM_MAX_LOCALS]; // TODO: FIXME
+    Variable *locals[VM_MAX_LOCALS];
     int local_count;
     Instruction *instructions;
     int instruction_count;
     const char *file, *function;
+    const char *source;
+    char **variable_names;
     int ip;
-    // Variable self;
 } StackFrame;
 #pragma pack(pop)
 enum { sizeof_StackFrame = sizeof(StackFrame) };
@@ -153,9 +154,10 @@ typedef struct
     Object *object;
     Variable arguments[VM_MAX_EVENT_ARGS];
     int numargs;
-    int frame;
+    int active;
 } VMEvent;
-enum { sizeof_VMEvent = sizeof(VMEvent) };
+
+#define VM_MAX_EVENTS (256)
 
 typedef enum
 {
@@ -169,8 +171,8 @@ typedef enum
 static const char *vm_thread_state_names[] = { "INACTIVE",		"ACTIVE",		 "WAITING_TIME",
 											   "WAITING_FRAME", "WAITING_EVENT", NULL };
 
-#define VM_STACK_SIZE (64)
-#define VM_FRAME_SIZE (16)
+#define VM_STACK_SIZE (256)
+#define VM_FRAME_SIZE (32)
 // #define VM_THREAD_POOL_SIZE (2048)
 // #define VM_THREAD_POOL_SIZE (8192)
 
@@ -209,8 +211,6 @@ enum { sizeof_Thread = sizeof(Thread) };
 #define VM_FLAG_NONE (0)
 #define VM_FLAG_VERBOSE (1)
 
-#define VM_MAX_EVENTS_PER_FRAME (1024)
-
 struct VM
 {
     jmp_buf *jmp;
@@ -218,12 +218,13 @@ struct VM
     Thread **thread_buffer;//[VM_THREAD_POOL_SIZE];
     int thread_read_idx;
     int thread_write_idx;
-    
+
     // size_t thread_count;
     Thread *thread;
     Thread temp_thread;
-    VMEvent events[VM_MAX_EVENTS_PER_FRAME];
-    // size_t event_count;
+    VMEvent events[VM_MAX_EVENTS];
+    int event_count;
+
 	int flags;
     // Variable globals[VAR_GLOB_MAX];
     Variable global_object;
@@ -273,6 +274,7 @@ bool vm_call_function_thread(VM *vm, const char *file, const char *function, siz
 // bool vm_run(VM *vm, float dt);
 bool vm_run_threads(VM *vm, float dt);
 void vm_init(VM *vm, Allocator *allocator, StringTable *strtab, const char *default_self, int max_threads);
+int thread_count(VM *vm);
 void vm_cleanup(VM*);
 
 void vm_register_callback_function(VM *vm, const char *name, void *callback, void *ctx);

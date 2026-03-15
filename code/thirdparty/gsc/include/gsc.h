@@ -69,7 +69,10 @@ extern "C"
 		int string_table_memory_size;
 		const char *default_self;
 		int max_threads;
-		int ref_capacity;  // Max number of C-held refs (0 = GSC_DEFAULT_REF_CAPACITY)
+		int thread_stack_size;  // 0 = VM_STACK_SIZE
+		int thread_frame_size;  // 0 = VM_FRAME_SIZE
+		int max_events;         // 0 = VM_MAX_EVENTS
+		int ref_capacity;       // 0 = GSC_DEFAULT_REF_CAPACITY
 	} gsc_CreateOptions;
 
 	GSC_API gsc_Context *gsc_create(gsc_CreateOptions options);
@@ -173,6 +176,9 @@ extern "C"
 	GSC_API gsc_Ref gsc_ref(gsc_Context *ctx, int stack_index);
 	GSC_API void    gsc_push_ref(gsc_Context *ctx, gsc_Ref ref);
 	GSC_API void    gsc_unref(gsc_Context *ctx, gsc_Ref ref);
+
+	GSC_API int  gsc_thread_count(gsc_Context *ctx);
+	GSC_API int  gsc_event_count(gsc_Context *ctx);
 
 	// This function may break
 	GSC_API void *gsc_get_internal_pointer(gsc_Context *ctx, const char *tag);
