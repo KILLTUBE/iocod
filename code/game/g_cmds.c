@@ -467,6 +467,47 @@ void Cmd_TeamTask_f( gentity_t *ent ) {
 }
 
 
+#ifdef STANDALONE
+/*
+==================
+Cmd_UFO_f
+
+CoD1: toggles UFO mode (fly without collision)
+==================
+*/
+void Cmd_UFO_f( gentity_t *ent ) {
+	char	*msg;
+
+	if ( !CheatsOk( ent ) ) {
+		return;
+	}
+
+	ent->client->ufo = !ent->client->ufo;
+	if ( ent->client->ufo ) {
+		msg = "ufo ON\n";
+	} else {
+		msg = "ufo OFF\n";
+	}
+
+	trap_SendServerCommand( ent-g_entities, va("print \"%s\"", msg));
+}
+
+/*
+==================
+Cmd_EntityCount_f
+
+CoD1: prints number of active entities
+==================
+*/
+static void Cmd_EntityCount_f( gentity_t *ent ) {
+	if ( !CheatsOk( ent ) ) {
+		return;
+	}
+	trap_SendServerCommand( ent-g_entities,
+		va("print \"entities: %i / %i\n\"", level.num_entities, MAX_GENTITIES) );
+}
+#endif
+
 /*
 =================
 Cmd_Kill_f
@@ -1845,6 +1886,12 @@ void ClientCommand( int clientNum ) {
 		Cmd_Notarget_f (ent);
 	else if (Q_stricmp (cmd, "noclip") == 0)
 		Cmd_Noclip_f (ent);
+#ifdef STANDALONE
+	else if (Q_stricmp (cmd, "ufo") == 0)
+		Cmd_UFO_f (ent);
+	else if (Q_stricmp (cmd, "entitycount") == 0)
+		Cmd_EntityCount_f (ent);
+#endif
 	else if (Q_stricmp (cmd, "kill") == 0)
 		Cmd_Kill_f (ent);
 	else if (Q_stricmp (cmd, "teamtask") == 0)

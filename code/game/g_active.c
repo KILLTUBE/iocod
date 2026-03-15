@@ -831,6 +831,10 @@ void ClientThink_real( gentity_t *ent ) {
 
 	if ( client->noclip ) {
 		client->ps.pm_type = PM_NOCLIP;
+#ifdef STANDALONE
+	} else if ( client->ufo ) {
+		client->ps.pm_type = PM_UFO;
+#endif
 	} else if ( client->ps.stats[STAT_HEALTH] <= 0 ) {
 		client->ps.pm_type = PM_DEAD;
 	} else {
@@ -975,7 +979,11 @@ void ClientThink_real( gentity_t *ent ) {
 
 	// link entity now, after any personal teleporters have been used
 	trap_LinkEntity (ent);
-	if ( !ent->client->noclip ) {
+	if ( !ent->client->noclip
+#ifdef STANDALONE
+		|| ent->client->ufo	// CoD1: UFO mode still touches triggers
+#endif
+	) {
 		G_TouchTriggers( ent );
 	}
 

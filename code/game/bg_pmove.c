@@ -983,7 +983,18 @@ static void PM_WalkMove( void ) {
 	if ( ( pml.groundTrace.surfaceFlags & SURF_SLICK ) || pm->ps->pm_flags & PMF_TIME_KNOCKBACK ) {
 		accelerate = pm_airaccelerate;
 	} else {
+#ifdef STANDALONE
+		// CoD1: stance-based acceleration
+		if ( pm->ps->pm_flags & PMF_PRONE ) {
+			accelerate = pm_prone_accelerate;
+		} else if ( pm->ps->pm_flags & PMF_DUCKED ) {
+			accelerate = pm_ducked_accelerate;
+		} else {
+			accelerate = pm_accelerate;
+		}
+#else
 		accelerate = pm_accelerate;
+#endif
 	}
 
 	PM_Accelerate (wishdir, wishspeed, accelerate);
@@ -1104,6 +1115,54 @@ static void PM_NoclipMove( void ) {
 	// move
 	VectorMA (pm->ps->origin, pml.frametime, pm->ps->velocity, pm->ps->origin);
 }
+
+#ifdef STANDALONE
+/*
+===============
+PM_UFOMove
+
+CoD1 UFO mode: 3D flight like noclip but WITH collision (StepSlideMove).
+Uses normal friction (5.5) and higher acceleration than noclip.
+Forward/right are clipped against ground plane so you slide along walls.
+===============
+*/
+static void PM_UFOMove( void ) {
+	int		i;
+	vec3_t	wishvel, wishdir;
+	float	fmove, smove;
+	float	wishspeed, scale, accel;
+
+	PM_Friction();
+
+	fmove = pm->cmd.forwardmove;
+	smove = pm->cmd.rightmove;
+	scale = PM_CmdScale( &pm->cmd );
+
+	// 3D movement: use full forward/right/up vectors (not flattened)
+	for ( i = 0; i < 3; i++ ) {
+		wishvel[i] = pml.forward[i] * fmove + pml.right[i] * smove;
+	}
+	wishvel[2] += pm->cmd.upmove;
+
+	VectorCopy( wishvel, wishdir );
+	wishspeed = VectorNormalize( wishdir );
+	wishspeed *= scale;
+
+	// CoD1: stance-based acceleration (higher than normal ground accel)
+	if ( pm->ps->pm_flags & PMF_PRONE ) {
+		accel = pm_prone_accelerate;
+	} else if ( pm->ps->pm_flags & PMF_DUCKED ) {
+		accel = pm_ducked_accelerate;
+	} else {
+		accel = pm_accelerate;
+	}
+
+	PM_Accelerate( wishdir, wishspeed, accel );
+
+	// Collision-based movement (unlike noclip which skips this)
+	PM_StepSlideMove( qfalse );
+}
+#endif
 
 //============================================================================
 
@@ -2273,6 +2332,14 @@ void PmoveSingle (pmove_t *pmove) {
 		PM_DropTimers ();
 		return;
 	}
+
+#ifdef STANDALONE
+	if ( pm->ps->pm_type == PM_UFO ) {
+		PM_UFOMove();
+		PM_DropTimers();
+		return;
+	}
+#endif
 
 	if (pm->ps->pm_type == PM_FREEZE) {
 		return;		// no movement at all
