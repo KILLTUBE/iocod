@@ -965,11 +965,17 @@ char *ClientConnect( int clientNum, qboolean firstTime, qboolean isBot ) {
 	}
 	G_ReadSessionData( client );
 
+#ifdef STANDALONE
+	// CoD1: players start in TEAM_FREE (playing), not spectator
+	client->sess.sessionTeam = TEAM_FREE;
+	client->sess.spectatorState = SPECTATOR_NOT;
+#else
 	if ( G_Scr_IsActive() ) {
 		client->sess.sessionTeam = TEAM_SPECTATOR;
 		client->sess.spectatorState = SPECTATOR_FREE;
 		client->sess.spectatorClient = -1;
 	}
+#endif
 
 	// get and distribute relevant parameters
 	G_LogPrintf( "ClientConnect: %i\n", clientNum );
@@ -1039,6 +1045,16 @@ void ClientBegin( int clientNum ) {
 	client->ps.eFlags = flags;
 	client->ps.clientNum = clientNum;
 
+#ifdef STANDALONE
+	// CoD1: ClientBegin always spawns the player directly, then notifies script.
+	// Unlike Q3, we don't put players into spectator waiting for scripts.
+	ClientSpawn( ent );
+	G_Scr_PlayerBegin( clientNum );
+
+	if ( client->sess.sessionTeam != TEAM_SPECTATOR ) {
+		trap_SendServerCommand( -1, va("print \"%s" S_COLOR_WHITE " entered the game\n\"", client->pers.netname) );
+	}
+#else
 	if ( G_Scr_IsActive() ) {
 		client->ps.pm_type = PM_SPECTATOR;
 		client->sess.spectatorState = SPECTATOR_FREE;
@@ -1053,6 +1069,7 @@ void ClientBegin( int clientNum ) {
 			}
 		}
 	}
+#endif
 	G_LogPrintf( "ClientBegin: %i\n", clientNum );
 
 	// count current clients and rank for scoreboard
