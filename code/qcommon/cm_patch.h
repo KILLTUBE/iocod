@@ -22,6 +22,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 //#define	CULL_BBOX
 
+#ifndef __CM_PATCH__
+#define __CM_PATCH__
+
+#include "cm_local.h"
+
 /*
 
 This file does not reference any globals, and has these entry points:
@@ -101,3 +106,4 @@ typedef struct {
 
 patchCollide_t *CM_GeneratePatchCollide  (int width, int height, vec3_t *points);
 patchCollide_t *CM_GenerateTerrainCollide(int numVerts, const vec3_t *verts, int numIndices, const uint16_t *indices);
+#endif

@@ -2436,19 +2436,53 @@ void Com_GameRestart(int checksumFeed, qboolean disconnect)
 }
 
 /*
-==================
-Com_GameRestart_f
-
 Expose possibility to change current running mod to the user
-==================
 */
 
-void Com_GameRestart_f(void)
-{
+void Com_GameRestart_f() {
 	Cvar_Set("fs_game", Cmd_Argv(1));
-
 	Com_GameRestart(0, qtrue);
 }
+
+typedef struct {
+	int numVerts;
+	vec3_t *verts; // owns its own array of vec3_t
+	int numIndices;
+	uint16_t *indices; // owns its own array of indices
+} SurfaceMesh_t;
+int get_yacht(SurfaceMesh_t *outSurfaces, int maxSurfaces);
+void Com_Yacht(void) {
+	Com_Printf("YACHTY YACHT");
+	SurfaceMesh_t yachtSurfaces[32]; // allow up to 32 surfaces
+	int numSurfaces = get_yacht(yachtSurfaces, 32);
+	if (numSurfaces == 0) {
+		printf("No surfaces found!\n");
+		return 1;
+	}
+	for (int i = 0; i < numSurfaces; i++) {
+		SurfaceMesh_t *surf = &yachtSurfaces[i];
+		printf("Surface %d:\n", i);
+		printf("  numVerts: %d\n", surf->numVerts);
+		printf("  numIndices: %d\n", surf->numIndices);
+		printf("  Vertices (first 5):\n");
+		for (int v = 0; v < surf->numVerts && v < 5; v++) {
+			printf("    [%d] = (%.3f, %.3f, %.3f)\n", v, surf->verts[v][0], surf->verts[v][1], surf->verts[v][2]);
+		}
+		printf("  Indices (first 12):\n");
+		for (int idx = 0; idx < surf->numIndices && idx < 12; idx += 3) {
+			printf("    [%d,%d,%d]\n", surf->indices[idx], surf->indices[idx+1], surf->indices[idx+2]);
+		}
+		void makeSpiralCollidePatch(int numVerts, const vec3_t *verts, int numIndices, const uint16_t *indices);
+		makeSpiralCollidePatch(surf->numVerts, surf->verts, surf->numIndices, surf->indices);
+		printf("\n");
+	}
+	// free allocated memory
+	for (int i = 0; i < numSurfaces; i++) {
+		free(yachtSurfaces[i].verts);
+		free(yachtSurfaces[i].indices);
+	}
+}
+
 
 #ifndef STANDALONE
 
@@ -2722,6 +2756,7 @@ void Com_Init( char *commandLine ) {
 	Cmd_AddCommand ("writeconfig", Com_WriteConfig_f );
 	Cmd_SetCommandCompletionFunc( "writeconfig", Cmd_CompleteCfgName );
 	Cmd_AddCommand("game_restart", Com_GameRestart_f);
+	Cmd_AddCommand("yacht", Com_Yacht);
 
 	Com_ExecuteCfg();
 

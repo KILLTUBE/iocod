@@ -546,6 +546,62 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	/* Initialise GSC scripting — must be last so all entities are spawned */
 	G_Scr_Init();
 
+	{
+  gentity_t *ent = G_Spawn();
+	ent->s.modelindex = G_ModelIndex("xmodel/static_shipyacht_in_water");
+	VectorSet (ent->r.mins, -16, -16, -16);
+	VectorSet (ent->r.maxs, 16, 16, 16);
+	trap_LinkEntity(ent);
+	vec3_t pos1 = {0, 0, 0};
+	G_SetOrigin(ent, pos1);
+	}
+
+	{
+  gentity_t *ent = G_Spawn();
+	ent->s.modelindex = G_ModelIndex("xmodel/static_shipyacht_in_water");
+	VectorSet (ent->r.mins, -16, -16, -16);
+	VectorSet (ent->r.maxs, 16, 16, 16);
+	trap_LinkEntity(ent);
+	vec3_t pos1 = {300, -20, 100};
+	G_SetOrigin(ent, pos1);
+	}
+
+
+
+		int count = 20;
+    float angleStep = 360.0f / count;
+		angleStep *= 1.2; // 1.2 full rotations
+    float currentHeight = 40; // starting Z height
+    float angleDeg = 0;
+		int radius = 600;
+		int heightStep = 80;
+		int yachtModelIndex = G_ModelIndex("xmodel/static_shipyacht_in_water");
+    for (int i = 0; i < count; i++, angleDeg += angleStep, currentHeight += heightStep) {
+        float rad = angleDeg * (M_PI / 180.0f);
+        vec3_t pos;
+        pos[0] = cos(rad) * radius;
+        pos[1] = sin(rad) * radius;
+        pos[2] = currentHeight;
+
+/*
+        // --- spawn dynamic patch instance for collision ---
+        dynamicPatchInstance_t *dpi = CM_AddDynamicPatchInstance(yachtPatch, pos);
+        if (!dpi) {
+            G_Printf("Failed to add dynamic patch instance #%d\n", i);
+            continue;
+        }
+*/
+        // --- spawn a visible entity for clients ---
+        gentity_t *ent = G_Spawn();
+        ent->s.modelindex = yachtModelIndex;
+        VectorSet(ent->r.mins, -16, -16, -16);
+        VectorSet(ent->r.maxs, 16, 16, 16);
+        G_SetOrigin(ent, pos);
+        trap_LinkEntity(ent);
+    }
+
+
+
 	G_Printf("G_InitGame Done.\n");
 }
 
