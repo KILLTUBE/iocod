@@ -1146,9 +1146,19 @@ void CM_TraceThroughTree( traceWork_t *tw, int num, float p1f, float p2f, vec3_t
 	CM_TraceThroughTree( tw, node->children[side^1], midf, p2f, mid, p2 );
 }
 
-
-//======================================================================
-
+#include "cm_dynamic_patches.h"
+void CM_TraceThroughDynamicPatches(traceWork_t *tw) {
+    for (int i = 0; i < numDynamicPatches; i++) {
+        patchCollide_t *pc = dynamicPatchCollides + i;
+        if (!CM_BoundsIntersect(tw->bounds[0], tw->bounds[1], pc->bounds[0], pc->bounds[1])) {
+            continue;
+        }
+        CM_TraceThroughPatchCollide(tw, pc);
+        if (!tw->trace.fraction) {
+            return;
+        }
+    }
+}
 
 /*
 ==================
@@ -1349,7 +1359,7 @@ void CM_Trace( trace_t *results, const vec3_t start, const vec3_t end, vec3_t mi
 			CM_TraceThroughTree( &tw, 0, 0, 1, tw.start, tw.end );
 		}
 	}
-
+	CM_TraceThroughDynamicPatches(&tw);
 	// generate endpos from the original, unmodified start/end
 	if ( tw.trace.fraction == 1 ) {
 		VectorCopy (end, tw.trace.endpos);
