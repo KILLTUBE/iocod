@@ -932,6 +932,67 @@ void CM_TraceThroughDynamicPatches(traceWork_t *tw) {
     }
   }
 }
+void CM_TraceThroughDynamicPatchInstances(traceWork_t *tw) {
+  vec3_t worldMins, worldMaxs;
+  vec3_t origStart, origEnd;
+  vec3_t origBoundsMins, origBoundsMaxs;
+  float initialFraction;
+  // 1. Save the original world-space trace definition.
+  // We must preserve these because the trace function expects 'start'/'end' 
+  // to define the ray, and we need to reset them for each instance.
+  VectorCopy(tw->start    , origStart     );
+  VectorCopy(tw->end      , origEnd       );
+  VectorCopy(tw->bounds[0], origBoundsMins);
+  VectorCopy(tw->bounds[1], origBoundsMaxs);
+  // Iterate over all active instances
+  for (int i = 0; i < numDynamicPatchInstances; i++) {
+    dynamicPatchInstance_t *inst = &dynamicPatchInstances[i];
+    patchCollide_t *pc = inst->pc;
+    if (!pc) {
+      continue;
+    }
+    // 2. Broadphase: Calculate World-Space AABB of this instance
+    // Since the patch has no rotation, we just add the origin to the local bounds.
+    VectorAdd(pc->bounds[0], inst->origin, worldMins);
+    VectorAdd(pc->bounds[1], inst->origin, worldMaxs);
+    // Check if the trace's volume intersects the instance's world volume.
+    // tw->bounds is the AABB of the movement in world space.
+    if (!CM_BoundsIntersect(tw->bounds[0], tw->bounds[1], worldMins, worldMaxs)) {
+      continue;
+    }
+    // 3. Translate Trace to Patch-Local Space
+    // Shift the ray and the trace bounds so the instance appears to be at (0,0,0).
+    VectorSubtract(origStart     , inst->origin, tw->start    );
+    VectorSubtract(origEnd       , inst->origin, tw->end      );
+    VectorSubtract(origBoundsMins, inst->origin, tw->bounds[0]);
+    VectorSubtract(origBoundsMaxs, inst->origin, tw->bounds[1]);
+    // Store fraction to detect if we actually found a new hit
+    initialFraction = tw->trace.fraction;
+    // 4. Execute the trace against the static patch geometry
+    CM_TraceThroughPatchCollide(tw, pc);
+    // 5. Re-project Hit Position to World Space
+    // If the trace found a closer hit, CM_TraceThroughPatchCollide updated 
+    // tw->trace.fraction and tw->trace.endpos. The endpos is currently 
+    // in the local space of the instance.
+    if (tw->trace.fraction < initialFraction) {
+      VectorAdd(tw->trace.endpos, inst->origin, tw->trace.endpos);
+      // Note: Since there is no rotation, the plane normal (tw->trace.plane.normal)
+      // does not need to be rotated; it is correct as is.
+    }
+    // 6. Restore Original Trace Definition
+    // We must restore the world-space values so the next iteration 
+    // calculates translation correctly from the base trace.
+    VectorCopy(origStart     , tw->start    );
+    VectorCopy(origEnd       , tw->end      );
+    VectorCopy(origBoundsMins, tw->bounds[0]);
+    VectorCopy(origBoundsMaxs, tw->bounds[1]);
+    // 7. Early Out
+    // If we have hit something at fraction 0.0, we can't hit anything closer.
+    if (tw->trace.fraction == 0.0f) {
+      break;
+    }
+  }
+}
 void CM_Trace( trace_t *results, const vec3_t start, const vec3_t end, vec3_t mins, vec3_t maxs,
               clipHandle_t model, const vec3_t origin, int brushmask, int capsule, sphere_t *sphere ) {
   int      i;
@@ -1102,6 +1163,7 @@ void CM_Trace( trace_t *results, const vec3_t start, const vec3_t end, vec3_t mi
     }
   }
   CM_TraceThroughDynamicPatches(&tw);
+  CM_TraceThroughDynamicPatchInstances(&tw);
   // generate endpos from the original, unmodified start/end
   if ( tw.trace.fraction == 1 ) {
     VectorCopy (end, tw.trace.endpos);
