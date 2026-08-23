@@ -5951,6 +5951,24 @@ qboolean MenuParse_itemDef( itemDef_t *item, int handle ) {
 		}
 		Item_InitControls(menu->items[menu->itemCount]);
 		menu->items[menu->itemCount++]->parent = menu;
+	} else {
+		// Over the item cap — still have to consume this itemDef's
+		// tokens from the stream (braces and all), or every subsequent
+		// token in the file gets misread as a top-level menu keyword,
+		// corrupting the rest of the parse.
+		pc_token_t token;
+		int depth;
+		if (!trap_PC_ReadToken(handle, &token) || token.string[0] != '{') {
+			return qfalse;
+		}
+		depth = 1;
+		while (depth > 0 && trap_PC_ReadToken(handle, &token)) {
+			if (token.string[0] == '{') {
+				depth++;
+			} else if (token.string[0] == '}') {
+				depth--;
+			}
+		}
 	}
 	return qtrue;
 }
@@ -6050,13 +6068,32 @@ Menu_New
 ===============
 */
 void Menu_New(int handle) {
-	menuDef_t *menu = &Menus[menuCount];
-
 	if (menuCount < MAX_MENUS) {
+		menuDef_t *menu = &Menus[menuCount];
 		Menu_Init(menu);
 		if (Menu_Parse(handle, menu)) {
 			Menu_PostParse(menu);
 			menuCount++;
+		}
+	} else {
+		// Over the menu cap — still have to consume this menuDef's
+		// tokens from the stream (braces and all), or every subsequent
+		// token gets misread as a top-level keyword, desyncing the
+		// parser for the rest of this file/load pass — and since
+		// menuCount can never increase past the cap once here, that
+		// would silently break every later menu load for the rest of
+		// the session, not just this one file.
+		pc_token_t token;
+		int depth;
+		if (trap_PC_ReadToken(handle, &token) && token.string[0] == '{') {
+			depth = 1;
+			while (depth > 0 && trap_PC_ReadToken(handle, &token)) {
+				if (token.string[0] == '{') {
+					depth++;
+				} else if (token.string[0] == '}') {
+					depth--;
+				}
+			}
 		}
 	}
 }
