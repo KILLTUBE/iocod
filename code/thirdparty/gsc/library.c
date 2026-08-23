@@ -101,7 +101,13 @@ static void gsc_free(void *ctx, void *ptr)
 
 static CompiledFile *get_file(gsc_Context *state, const char *file)
 {
-	HashTrieNode *n = hash_trie_upsert(&state->files, file, NULL, false);
+	char normalized[256];
+	int i;
+	for (i = 0; file[i] && i < 255; i++) {
+		normalized[i] = (file[i] == '\\') ? '/' : file[i];
+	}
+	normalized[i] = '\0';
+	HashTrieNode *n = hash_trie_upsert(&state->files, normalized, NULL, false);
 	if(!n)
 		return NULL;
 	CompiledFile *cf = n->value;
