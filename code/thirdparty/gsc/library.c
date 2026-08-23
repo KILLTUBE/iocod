@@ -46,9 +46,15 @@ CompiledFile *compile(gsc_Context *state, const char *path, const char *data, in
 	if(cf->state != COMPILE_STATE_DONE)
 		return cf;
 	// printf("%s %s\n", path, cf->name);
+	if (strstr(path, "_teams") != NULL) {
+		printf("^3GSCFUNCS: file '%s' compiled with functions:\n", path);
+	}
 	for(HashTrieNode *it = cf->functions.head; it; it = it->next)
 	{
 		CompiledFunction *f = it->value;
+		if (strstr(path, "_teams") != NULL) {
+			printf("^3GSCFUNCS:   '%s'\n", it->key);
+		}
 		// printf("%s (%d instructions)\n", it->key, buf_size(f->instructions));
 	}
 	for(HashTrieNode *it = cf->file_references.head; it; it = it->next)
