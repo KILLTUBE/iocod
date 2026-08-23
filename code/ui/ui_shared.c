@@ -1037,10 +1037,12 @@ static void Menu_RunCloseScript(menuDef_t *menu) {
 }
 
 void Menus_CloseByName(const char *p) {
-  menuDef_t *menu = Menus_FindByName(p);
-  if (menu != NULL) {
-		Menu_RunCloseScript(menu);
-		menu->window.flags &= ~(WINDOW_VISIBLE | WINDOW_HASFOCUS);
+  int i;
+  for (i = 0; i < menuCount; i++) {
+    if (Q_stricmp(Menus[i].window.name, p) == 0) {
+      Menu_RunCloseScript(&Menus[i]);
+      Menus[i].window.flags &= ~(WINDOW_VISIBLE | WINDOW_HASFOCUS);
+    }
   }
 }
 
