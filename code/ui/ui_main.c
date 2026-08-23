@@ -5414,11 +5414,19 @@ void _UI_SetActiveMenu( uiMenuCommand_t menu ) {
 						scriptMenu, menuCount, activated ? "YES" : "NO (not found)"));
 				}
 				// g_scriptMainMenu can be left pointing at a stale menu name
-				// (e.g. a connect-time popup like "serverinfo_0" that was
-				// never cleared back to empty) that no longer corresponds to
-				// any currently-registered menu. Rather than trust it
-				// blindly, fall back to "main" whenever it's empty OR
-				// doesn't actually resolve to anything.
+				// (e.g. a connect-time popup like "serverinfo_0", or
+				// "viewmap"/"weapon_german" left over from earlier
+				// selections) that no longer corresponds to any
+				// currently-registered menu. Rather than trust it blindly,
+				// try the team-select screen next — very often the player
+				// is mid-selection (e.g. just picked Spectator and wants
+				// back into team select) when this happens — and only
+				// fall back to the generic "main" list as a last resort.
+				if (!activated) {
+					activated = Menus_ActivateByName("team_americangerman");
+					trap_Print(va("^3togglemenu: fallback 'team_americangerman' menuCount=%d activated=%s\n",
+						menuCount, activated ? "YES" : "NO (not found)"));
+				}
 				if (!activated) {
 					activated = Menus_ActivateByName("main");
 					trap_Print(va("^3togglemenu: fallback 'main' menuCount=%d activated=%s\n",
