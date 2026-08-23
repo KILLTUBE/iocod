@@ -820,7 +820,7 @@ static void CL_WeaponInfo_f( void )
 
 void CL_WeaponCod1_Init( void )
 {
-    cl_startWeapon = Cvar_Get( "cl_startWeapon", "mp44_mp", CVAR_ARCHIVE );
+    cl_startWeapon = Cvar_Get( "cl_startWeapon", "", CVAR_ARCHIVE );
     cl_gunFov      = Cvar_Get( "cl_gunFov",      "65",      CVAR_ARCHIVE );
     cl_drawGun     = Cvar_Get( "cl_drawGun",     "1",       CVAR_ARCHIVE );
     /* 0 = suppress Q3 cgame 2D (weapon name, ammo counter, machinegun HUD) */
