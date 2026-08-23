@@ -2520,6 +2520,9 @@ qboolean Item_HandleKey(itemDef_t *item, int key, qboolean down) {
 		}
 	}
 
+	static int s_lastItemClickTime = -99999;
+	const int ITEM_CLICK_DEBOUNCE_MS = 250;
+
 	if (!down) {
 		return qfalse;
 	}
@@ -2532,7 +2535,21 @@ qboolean Item_HandleKey(itemDef_t *item, int key, qboolean down) {
       // corresponding case in Item_StartCapture (only LISTBOX/SLIDER do),
       // so returning qfalse here meant Item_Action could never fire for
       // any button, checkbox, or radio button in the entire UI.
-      return (key == K_MOUSE1 || key == K_MOUSE2 || key == K_MOUSE3 || key == K_ENTER) ? qtrue : qfalse;
+      // Debounce against the same "down" event apparently getting
+      // redispatched multiple times while the button stays physically
+      // held. Time-based rather than a release-triggered latch, since a
+      // click that closes its own menu (e.g. "Back To Game") means the
+      // corresponding release may never reach this code at all — a
+      // strict latch could get stuck true forever and silently break
+      // every future click.
+      if (key == K_MOUSE1 || key == K_MOUSE2 || key == K_MOUSE3 || key == K_ENTER) {
+        if (DC->realTime - s_lastItemClickTime < ITEM_CLICK_DEBOUNCE_MS) {
+          return qfalse;
+        }
+        s_lastItemClickTime = DC->realTime;
+        return qtrue;
+      }
+      return qfalse;
       break;
     case ITEM_TYPE_EDITFIELD:
     case ITEM_TYPE_NUMERICFIELD:
