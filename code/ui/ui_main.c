@@ -5397,10 +5397,23 @@ void _UI_SetActiveMenu( uiMenuCommand_t menu ) {
 			// uiInfo.inGameLoad is never actually set true anywhere (the
 			// assignment in _UI_Init is commented out), so any
 			// "if (uiInfo.inGameLoad)" guard around UI_LoadNonIngame() here
-			// never fires. Call it unconditionally instead so the full
-			// menu set (which "main" and any script menu name belong to)
-			// is guaranteed loaded before we try to activate anything.
-			UI_LoadNonIngame();
+			// never fires. Call it once (guarded by a static flag, not
+			// uiInfo.inGameLoad) so the full menu set (which "main" and
+			// any script menu name belong to) is guaranteed loaded before
+			// we try to activate anything — but only once. Repeatedly
+			// reloading ~30 menu files on every togglemenu invocation
+			// accumulates memory in the UI_Alloc pool (reset=false here
+			// deliberately preserves dynamically-loaded script menus
+			// across reloads, but that also means nothing ever reclaims
+			// memory between calls) and exhausts it within a few menu
+			// opens, crashing with SIGSEGV.
+			{
+				static qboolean s_nonIngameLoaded = qfalse;
+				if (!s_nonIngameLoaded) {
+					UI_LoadNonIngame();
+					s_nonIngameLoaded = qtrue;
+				}
+			}
 			Menus_CloseAll();
 #ifdef STANDALONE
 			{
