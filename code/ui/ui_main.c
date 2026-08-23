@@ -5254,13 +5254,19 @@ void _UI_KeyEvent( int key, qboolean down ) {
     menuDef_t *menu = Menu_GetFocused();
 		if (menu) {
 #ifdef STANDALONE
-			/* Always let Menu_HandleKey process ESC so onESC scripts run
-			   (CoD1 script menus are popups, not fullscreen). */
+			/* Always let Menu_HandleKey process the key so onESC/action
+			   scripts run (CoD1 script menus are popups, not fullscreen). */
 			Menu_HandleKey(menu, key, down);
-			/* If ESC closed the last menu, release the UI key catcher */
-			if (key == K_ESCAPE && down && !Menu_GetFocused()) {
+			/* If this closed the last open menu — whether via ESC or a
+			   mouse click on a "Back To Game"/close-style button — release
+			   the UI key catcher and unpause. Without this, closing the
+			   menu by any means other than literally pressing ESC leaves
+			   the client stuck captured in UI state with nothing visibly
+			   open, which looks identical to the input doing nothing. */
+			if ( down && !Menu_GetFocused() ) {
 				trap_Key_SetCatcher( trap_Key_GetCatcher() & ~KEYCATCH_UI );
 				trap_Key_ClearStates();
+				trap_Cvar_Set( "cl_paused", "0" );
 			}
 #else
 			if (key == K_ESCAPE && down && !Menus_AnyFullScreenVisible()) {
@@ -5388,15 +5394,35 @@ void _UI_SetActiveMenu( uiMenuCommand_t menu ) {
 		  trap_Cvar_Set( "cl_paused", "1" );
 			trap_Key_SetCatcher( KEYCATCH_UI );
 			UI_BuildPlayerList();
+			// uiInfo.inGameLoad is never actually set true anywhere (the
+			// assignment in _UI_Init is commented out), so any
+			// "if (uiInfo.inGameLoad)" guard around UI_LoadNonIngame() here
+			// never fires. Call it unconditionally instead so the full
+			// menu set (which "main" and any script menu name belong to)
+			// is guaranteed loaded before we try to activate anything.
+			UI_LoadNonIngame();
 			Menus_CloseAll();
 #ifdef STANDALONE
 			{
 				char scriptMenu[256];
+				menuDef_t *activated = NULL;
+				extern int menuCount;
 				trap_Cvar_VariableStringBuffer("g_scriptMainMenu", scriptMenu, sizeof(scriptMenu));
 				if (scriptMenu[0]) {
-					Menus_ActivateByName(scriptMenu);
-				} else {
-					Menus_ActivateByName("main");
+					activated = Menus_ActivateByName(scriptMenu);
+					trap_Print(va("^3togglemenu: scriptMenu='%s' menuCount=%d activated=%s\n",
+						scriptMenu, menuCount, activated ? "YES" : "NO (not found)"));
+				}
+				// g_scriptMainMenu can be left pointing at a stale menu name
+				// (e.g. a connect-time popup like "serverinfo_0" that was
+				// never cleared back to empty) that no longer corresponds to
+				// any currently-registered menu. Rather than trust it
+				// blindly, fall back to "main" whenever it's empty OR
+				// doesn't actually resolve to anything.
+				if (!activated) {
+					activated = Menus_ActivateByName("main");
+					trap_Print(va("^3togglemenu: fallback 'main' menuCount=%d activated=%s\n",
+						menuCount, activated ? "YES" : "NO (not found)"));
 				}
 			}
 #else

@@ -2451,6 +2451,18 @@ typedef struct {
 	uint16_t *indices; // owns its own array of indices
 } SurfaceMesh_t;
 int get_yacht(SurfaceMesh_t *outSurfaces, int maxSurfaces);
+int get_yacht(SurfaceMesh_t *outSurfaces, int maxSurfaces) {
+	// stub: real implementation was never present in this fork's source
+	// tree (undefined-reference at link time). "yacht" is an unrelated
+	// debug command, not part of core CoD1 compatibility, so a no-op
+	// stub (no surfaces found) is a safe placeholder.
+	(void)outSurfaces; (void)maxSurfaces;
+	return 0;
+}
+void makeSpiralCollidePatch(int numVerts, const vec3_t *verts, int numIndices, const uint16_t *indices) {
+	// stub: see get_yacht() above.
+	(void)numVerts; (void)verts; (void)numIndices; (void)indices;
+}
 void Com_Yacht(void) {
 	Com_Printf("YACHTY YACHT");
 	SurfaceMesh_t yachtSurfaces[32]; // allow up to 32 surfaces
@@ -2837,7 +2849,12 @@ void Com_Init( char *commandLine ) {
 		Cvar_Get("protocol", com_protocol->string, CVAR_ROM);
 
 #ifndef DEDICATED
-	con_autochat = Cvar_Get("con_autochat", "1", CVAR_ARCHIVE);
+	con_autochat = Cvar_Get("con_autochat", "0", CVAR_ARCHIVE);
+#ifdef STANDALONE
+	/* Archived configs from earlier iocod runs may have saved con_autochat 1,
+	   which turns every plain console line into chat instead of a command. */
+	Cvar_Set("con_autochat", "0");
+#endif
 #endif
 
 	Sys_Init();

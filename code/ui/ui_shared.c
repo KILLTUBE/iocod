@@ -2526,13 +2526,13 @@ qboolean Item_HandleKey(itemDef_t *item, int key, qboolean down) {
 
   switch (item->type) {
     case ITEM_TYPE_BUTTON:
-      return qfalse;
-      break;
     case ITEM_TYPE_RADIOBUTTON:
-      return qfalse;
-      break;
     case ITEM_TYPE_CHECKBOX:
-      return qfalse;
+      // Confirm the click immediately — these item types have no
+      // corresponding case in Item_StartCapture (only LISTBOX/SLIDER do),
+      // so returning qfalse here meant Item_Action could never fire for
+      // any button, checkbox, or radio button in the entire UI.
+      return (key == K_MOUSE1 || key == K_MOUSE2 || key == K_MOUSE3 || key == K_ENTER) ? qtrue : qfalse;
       break;
     case ITEM_TYPE_EDITFIELD:
     case ITEM_TYPE_NUMERICFIELD:
@@ -2573,6 +2573,9 @@ qboolean Item_HandleKey(itemDef_t *item, int key, qboolean down) {
 
 void Item_Action(itemDef_t *item) {
   if (item) {
+    DC->Print(va("^3itemaction: item=%s action=[%s]\n",
+      item->window.name ? item->window.name : "(unnamed)",
+      item->action ? item->action : "(none)"));
     Item_RunScript(item, item->action);
   }
 }
