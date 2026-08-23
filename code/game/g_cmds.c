@@ -1430,6 +1430,23 @@ static void Cmd_MenuResponse_f( gentity_t *ent ) {
 	}
 
 	G_Scr_PlayerMenuResponse( ent - g_entities, menuName, response );
+
+#ifdef STANDALONE
+	/* Automatically equip the selected weapon directly. The script's own
+	   loadout logic (maps/mp/gametypes/_teams::loadout) is missing from
+	   this retail data's compiled _teams.gsc (confirmed by dumping every
+	   function that file actually compiles), so relying on it leaves the
+	   player alive but weaponless. Every weapon selection response we've
+	   observed ends in "_mp" (mp40_mp, kar98k_mp, ppsh_mp, ...), distinct
+	   from control responses like "close"/"team"/"axis"/"allies". */
+	if ( Q_stricmpn( menuName, "weapon_", 7 ) == 0 ) {
+		int len = strlen( response );
+		if ( len > 3 && Q_stricmp( response + len - 3, "_mp" ) == 0 ) {
+			trap_SendServerCommand( ent->s.number, va( "weapon %s 30 90", response ) );
+			trap_SendServerCommand( ent->s.number, va( "print \"Auto-equipped: %s\n\"", response ) );
+		}
+	}
+#endif
 }
 
 /*
