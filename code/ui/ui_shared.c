@@ -4565,9 +4565,29 @@ qboolean ItemParse_focusSound( itemDef_t *item, int handle ) {
 
 // text <string>
 qboolean ItemParse_text( itemDef_t *item, int handle ) {
-	if (!PC_String_Parse(handle, &item->text)) {
+	pc_token_t token;
+	const char *key;
+	const char *loc;
+
+	if (!trap_PC_ReadToken(handle, &token))
 		return qfalse;
+	/* CoD1: text &"MPMENU_TEAM"  — optional '&' then the key */
+	if (token.string[0] == '&' && token.string[1] == '\0') {
+		if (!trap_PC_ReadToken(handle, &token))
+			return qfalse;
 	}
+	key = token.string;
+	if (key[0] == '&') key++;
+	if (key[0] == '@') key++;
+#ifdef UI
+	{
+		extern const char *Localize_GetString(const char *key);
+		loc = Localize_GetString(key);
+	}
+#else
+	loc = key;
+#endif
+	item->text = String_Alloc(loc ? loc : key);
 	return qtrue;
 }
 

@@ -25,6 +25,8 @@ Cvars:
 #include "client.h"
 #include "../qcommon/bg_weapon_cod1.h"
 
+static void CL_PlaceViewmodelOnTagAds( vec3_t origin, vec3_t axis[3], float adsFrac );
+
 
 /* ===========================================================================
    Cvars
@@ -38,6 +40,10 @@ static cvar_t *cl_animDebug;
 static cvar_t *cl_gunX;        /* right (+) / left (-)  */
 static cvar_t *cl_gunY;        /* forward (+) / back (-) */
 static cvar_t *cl_gunZ;        /* up (+) / down (-)     */
+static cvar_t *cl_adsF;
+static cvar_t *cl_adsR;
+static cvar_t *cl_adsU;
+static cvar_t *cl_adsFov;
 
 /* ===========================================================================
    Weapon animation states
@@ -104,9 +110,17 @@ static int  s_lastThinkTime = 0;   /* for dt computation */
 
 static qhandle_t LoadAnim( const char *animName )
 {
+    char path[MAX_QPATH];
+    qhandle_t h;
     if ( !animName || !animName[0] ) return 0;
     if ( !re.RegisterXAnim ) return 0;
-    return re.RegisterXAnim( animName );
+    h = re.RegisterXAnim( animName );
+    if ( h ) return h;
+    Com_sprintf( path, sizeof(path), "xanim/%s", animName );
+    h = re.RegisterXAnim( path );
+    if ( !h )
+        Com_Printf( "LoadAnim: missing '%s'\n", animName );
+    return h;
 }
 
 static qhandle_t LoadXModel( const char *shortName )
@@ -142,6 +156,16 @@ static void SetAnim( int anim )
 
 void CL_GiveWeapon( const char *name )
 {
+    int forceGive = 0;
+
+    Com_Printf( "CL: GiveWeapon '%s' ads=%.2f holding='%s'\n",
+        name ? name : "", cl_weapon.adsFrac, cl_weapon.name );
+    /* pickups must not steal the current gun; console `give` still works via replace */
+    if ( cl_weapon.name[0] && name && Q_stricmp( cl_weapon.name, name ) ) {
+        Com_Printf( "CL: GiveWeapon ignored pickup '%s' (holding %s)\n", name, cl_weapon.name );
+        return;
+    }
+
     weaponDef_t *d;
     char         tryName[64];
 
@@ -359,6 +383,7 @@ static void CL_WeaponThink( void )
      * no WA_ADS_UP / WA_ADS_DOWN states needed in the state machine.
      */
     cl_weapon.adsActive = ( cl_weapon.adsFrac > 0.0f ) ? qtrue : qfalse;
+    Cvar_SetValue( "cl_adsFrac", cl_weapon.adsFrac );
 
     /* Force adsFrac to zero while firing/reloading/meleeing */
     if ( cl_weapon.currentAnim == WA_FIRE || cl_weapon.currentAnim == WA_RELOAD ||
@@ -487,18 +512,18 @@ float CL_WeaponCurrentAnimFrame( void )
     float     elapsed, frame;
 
     /* ADS: override anim selection based on adsFrac */
-    if ( cl_weapon.adsFrac > 0.0f ) {
+    if ( 0 && cl_weapon.adsFrac > 0.0f ) { /* adsUp is tag overlay, not full skeleton */
         usercmd_t *cmd = &cl.cmds[ (cl.cmdNumber - 1) & (CMD_BACKUP - 1) ];
         qboolean wantAds = ( cmd->buttons & BUTTON_WALKING ) ? qtrue : qfalse;
 
-        if ( wantAds && cl_weapon.anims[WA_ADS_UP] ) {
+        if ( 0 && wantAds && cl_weapon.anims[WA_ADS_UP] ) { /* adsUp is 2-bone overlay, not full skel */
             h  = cl_weapon.anims[WA_ADS_UP];
             nf = re.XAnimNumFrames ? re.XAnimNumFrames(h) : 1;
             if ( nf < 1 ) nf = 1;
             /* Drive frame from adsFrac: 0→first, 1→last (held) */
             cl_weapon.currentAnim = WA_ADS_UP;
             return cl_weapon.adsFrac * (float)( nf - 1 );
-        } else if ( !wantAds && cl_weapon.anims[WA_ADS_DOWN] ) {
+        } else if ( 0 && !wantAds && cl_weapon.anims[WA_ADS_DOWN] ) {
             h  = cl_weapon.anims[WA_ADS_DOWN];
             nf = re.XAnimNumFrames ? re.XAnimNumFrames(h) : 1;
             if ( nf < 1 ) nf = 1;
@@ -673,6 +698,8 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     }
 
     ofsR += cl_gunX ? cl_gunX->value : 0.0f;
+    /* hip ofs only — ADS placement is CL_PlaceViewmodelOnTagAds */
+
     ofsF += cl_gunY ? cl_gunY->value : 0.0f;
     ofsU += cl_gunZ ? cl_gunZ->value : 0.0f;
 
@@ -683,12 +710,37 @@ void CL_DrawViewModel( stereoFrame_t stereo )
 
     AnglesToAxis( viewAngles, entityAxis );
 
-    /* --- DObj pose evaluation (must happen before tag_ads query) --- */
-    if ( re.UpdateDObjPose && ( cl_weapon.handModel || cl_weapon.gunModel ) ) {
-        re.UpdateDObjPose( cl_weapon.handModel, cl_weapon.gunModel,
-                           curAnim, animFrame );
+    /* --- DObj pose evaluation --- */
+    {
+        qhandle_t poseAnim = cl_weapon.anims[WA_IDLE];
+        float poseFrame = 0.0f;
+        qhandle_t adsH = cl_weapon.anims[WA_ADS_UP];
+        if ( !poseAnim ) {
+            poseAnim = curAnim;
+            poseFrame = animFrame;
+        }
+        if ( cl_weapon.adsFrac > 0.001f && adsH && re.UpdateDObjPoseBlend ) {
+            int nf = re.XAnimNumFrames ? re.XAnimNumFrames( adsH ) : 1;
+            float adsFrame;
+            if ( nf < 1 ) nf = 1;
+            adsFrame = cl_weapon.adsFrac * (float)( nf - 1 );
+            re.UpdateDObjPoseBlend( cl_weapon.handModel, cl_weapon.gunModel,
+                                      poseAnim, poseFrame,
+                                      adsH, adsFrame,
+                                      "tag_view" );
+            {
+                static int last;
+                if ( cls.realtime - last > 400 ) {
+                    last = cls.realtime;
+                    Com_Printf( "CL: overlay idleH=%i adsH=%i slot=%i frame=%.2f frac=%.2f\n",
+                        poseAnim, adsH, cl_weapon.currentAnim, adsFrame, cl_weapon.adsFrac );
+                }
+            }
+        } else if ( re.UpdateDObjPose ) {
+            re.UpdateDObjPose( cl_weapon.handModel, cl_weapon.gunModel,
+                               poseAnim, poseFrame );
+        }
     }
-
     /* --- tag_ads camera offset ---
      *
      * CoD1 ADS works by repositioning the viewmodel so that the tag_ads bone
@@ -702,12 +754,14 @@ void CL_DrawViewModel( stereoFrame_t stereo )
      * We need to rotate that offset into world space using entityAxis before
      * subtracting it from modelOrigin.
      */
-    if ( cl_weapon.adsFrac > 0.0f && re.LerpTag ) {
+    if ( 0 && cl_weapon.adsFrac > 0.0f && re.LerpTag ) { /* CoD1 MP40 has no tag_ads */
+        Com_Printf( "CL: ads tag block frac=%.2f hand=%i gun=%i\n", cl_weapon.adsFrac, cl_weapon.handModel, cl_weapon.gunModel );
         orientation_t tagAds;
         qhandle_t     tagModel = cl_weapon.gunModel ? cl_weapon.gunModel : cl_weapon.handModel;
 
         Com_Memset( &tagAds, 0, sizeof(tagAds) );
-        if ( re.LerpTag( &tagAds, tagModel, 0, 0, 0.0f, "tag_ads" ) ) {
+        if ( ( re.LerpTag( &tagAds, cl_weapon.handModel, 0, 0, 1.0f, "__dump_hands__" ),
+          re.LerpTag( &tagAds, tagModel, 0, 0, 1.0f, "tag_ads" ) ) ) {
             /* tagAds.origin is in model-local space; rotate to world */
             vec3_t tagWorld;
             tagWorld[0] =  DotProduct( tagAds.origin, entityAxis[0] );
@@ -725,9 +779,13 @@ void CL_DrawViewModel( stereoFrame_t stereo )
                     cl_weapon.adsFrac );
 
     /* --- ADS FOV interpolation --- */
-    gunFov = ( cl_gunFov && cl_gunFov->value > 1.0f ) ? cl_gunFov->value : 65.0f;
-    adsFov = ( cl_weapon.def.adsZoomFov > 1.0f ) ? cl_weapon.def.adsZoomFov : gunFov * 0.6f;
-    gunFov = gunFov + ( adsFov - gunFov ) * cl_weapon.adsFrac;
+    /* Viewmodel FOV stays hip. adsZoomFov zooms the WORLD (cg_view), not the gun
+     * or the camera sits inside the receiver and you see the backfaces. */
+    gunFov = ( cl_gunFov && cl_gunFov->value > 1.0f ) ? cl_gunFov->value : 80.0f;
+    adsFov = ( cl_weapon.def.adsZoomFov > 1.0f ) ? cl_weapon.def.adsZoomFov
+            : ( cl_adsFov && cl_adsFov->value > 1.0f ) ? cl_adsFov->value : 80.0f;
+    Cvar_SetValue( "cl_adsFov", adsFov );
+    Cvar_SetValue( "cl_adsFrac", cl_weapon.adsFrac );
 
     /* --- Build refdef --- */
     Com_Memset( &refdef, 0, sizeof(refdef) );
@@ -748,6 +806,22 @@ void CL_DrawViewModel( stereoFrame_t stereo )
     AnglesToAxis( viewAngles, refdef.viewaxis );
 
     re.ClearScene();
+        /* keep the receiver off the near clip so you don't see inside the mesh */
+    if ( cl_weapon.adsFrac > 0.0f ) {
+        vec3_t fwd;
+        AngleVectors( viewAngles, fwd, NULL, NULL );
+        VectorMA( modelOrigin, 4.0f * cl_weapon.adsFrac, fwd, modelOrigin );
+    }
+    /* residual aim on top of adsUp — tune with cl_adsU / cl_adsR / cl_adsF */
+    if ( cl_weapon.adsFrac > 0.0f ) {
+        cvar_t *u = Cvar_Get( "cl_adsU", "2", 0 );
+        cvar_t *r = Cvar_Get( "cl_adsR", "0", 0 );
+        cvar_t *f = Cvar_Get( "cl_adsF", "3", 0 );
+        float s = cl_weapon.adsFrac;
+        VectorMA( modelOrigin,  f->value * s, entityAxis[0], modelOrigin );
+        VectorMA( modelOrigin,  r->value * s, entityAxis[1], modelOrigin );
+        VectorMA( modelOrigin,  u->value * s, entityAxis[2], modelOrigin );
+    }
     if ( cl_weapon.handModel )
         AddViewmodelEnt( cl_weapon.handModel, modelOrigin, entityAxis );
     if ( cl_weapon.gunModel )
@@ -762,6 +836,7 @@ void CL_DrawViewModel( stereoFrame_t stereo )
 
 static void CL_Give_f( void )
 {
+    cl_weapon.name[0] = '\0';
     if ( Cmd_Argc() < 2 ) {
         Com_Printf( "Usage: give <weaponname>\n"
                     "  e.g.  give mp44_mp\n"
@@ -769,6 +844,7 @@ static void CL_Give_f( void )
                     "  e.g.  give mp40_mp\n" );
         return;
     }
+    /* console give always wins */
     CL_GiveWeapon( Cmd_Argv(1) );
 }
 
@@ -829,6 +905,11 @@ void CL_WeaponCod1_Init( void )
     cl_gunX        = Cvar_Get( "cl_gunX",        "0",       CVAR_ARCHIVE );
     cl_gunY        = Cvar_Get( "cl_gunY",        "0",       CVAR_ARCHIVE );
     cl_gunZ        = Cvar_Get( "cl_gunZ",        "0",       CVAR_ARCHIVE );
+    cl_adsF        = Cvar_Get( "cl_adsF",        "10",      CVAR_ARCHIVE );
+    cl_adsR        = Cvar_Get( "cl_adsR",        "0",       CVAR_ARCHIVE );
+    cl_adsU        = Cvar_Get( "cl_adsU",        "4",       CVAR_ARCHIVE );
+    cl_adsFov      = Cvar_Get( "cl_adsFov",      "50",      CVAR_ARCHIVE );
+    Cvar_Get( "cl_adsFrac", "0", 0 );
 
     Cmd_AddCommand( "give",       CL_Give_f       );
     Cmd_AddCommand( "dropweapon", CL_DropWeapon_f );
@@ -869,3 +950,62 @@ int CL_WeaponCurrentPlayerAnimType( void )
     if ( !cl_weapon.active ) return -1;
     return cl_weapon.def.playerAnimType;
 }
+
+
+static void CL_PlaceViewmodelOnTagAds( vec3_t origin, vec3_t axis[3], float adsFrac ) {
+	orientation_t tag;
+	vec3_t hipOrg, adsOrg, invTag[3], adsAxis[3], tmp;
+	int i, j;
+	qboolean got = qfalse;
+	static int lastPrint;
+
+	if ( adsFrac <= 0.0f )
+		return;
+
+	VectorCopy( origin, hipOrg );
+	Com_Memset( &tag, 0, sizeof(tag) );
+
+	if ( re.LerpTag && cl_weapon.gunModel ) {
+		got = re.LerpTag( &tag, cl_weapon.gunModel, 0, 0, 1.0f, "tag_ads" ) ? qtrue : qfalse;
+		if ( !got )
+			got = re.LerpTag( &tag, cl_weapon.gunModel, 0, 0, 1.0f, "tag_aim" ) ? qtrue : qfalse;
+	}
+
+	if ( !got ) {
+		if ( cls.realtime - lastPrint > 1000 ) {
+			lastPrint = cls.realtime;
+			Com_Printf( "CL: tag_ads LerpTag failed\n" );
+		}
+		return;
+	}
+	if ( cls.realtime - lastPrint > 500 ) {
+		lastPrint = cls.realtime;
+		Com_Printf( "CL: tag_ads org=%.1f %.1f %.1f frac=%.2f\n",
+			tag.origin[0], tag.origin[1], tag.origin[2], adsFrac );
+	}
+
+	for ( i = 0; i < 3; i++ )
+		for ( j = 0; j < 3; j++ )
+			invTag[i][j] = tag.axis[j][i];
+	MatrixMultiply( axis, invTag, adsAxis );
+
+	VectorCopy( origin, adsOrg );
+	VectorMA( adsOrg, -tag.origin[0], adsAxis[0], adsOrg );
+	VectorMA( adsOrg, -tag.origin[1], adsAxis[1], adsOrg );
+	VectorMA( adsOrg, -tag.origin[2], adsAxis[2], adsOrg );
+
+	for ( i = 0; i < 3; i++ )
+		origin[i] = hipOrg[i] + ( adsOrg[i] - hipOrg[i] ) * adsFrac;
+	for ( i = 0; i < 3; i++ ) {
+		tmp[0] = axis[i][0] + ( adsAxis[i][0] - axis[i][0] ) * adsFrac;
+		tmp[1] = axis[i][1] + ( adsAxis[i][1] - axis[i][1] ) * adsFrac;
+		tmp[2] = axis[i][2] + ( adsAxis[i][2] - axis[i][2] ) * adsFrac;
+		VectorNormalize( tmp );
+		VectorCopy( tmp, axis[i] );
+	}
+	CrossProduct( axis[0], axis[1], axis[2] );
+	VectorNormalize( axis[2] );
+	CrossProduct( axis[2], axis[0], axis[1] );
+	VectorNormalize( axis[1] );
+}
+

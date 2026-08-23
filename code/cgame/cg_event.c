@@ -1016,6 +1016,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 
 	case EV_BULLET_HIT_WALL:
 		DEBUGNAME("EV_BULLET_HIT_WALL");
+		CG_Printf( "CG: bullet wall\n" );
 		ByteToDir( es->eventParm, dir );
 		CG_Bullet( es->pos.trBase, es->otherEntityNum, dir, qfalse, ENTITYNUM_WORLD );
 		break;

@@ -319,6 +319,13 @@ static void SV_AddEntitiesVisibleFromPoint( vec3_t origin, clientSnapshot_t *fra
 	for ( e = 0 ; e < sv.num_entities ; e++ ) {
 		ent = SV_GentityNum(e);
 
+		// broadcast entities are always sent (even if unlinked —
+		// CoD1 bullet events often spawn in solid and fail LinkEntity)
+		if ( ent->r.svFlags & SVF_BROADCAST ) {
+			SV_AddEntToSnapshot( SV_SvEntityForGentity( ent ), ent, eNums );
+			continue;
+		}
+
 		// never send entities that aren't linked in
 		if ( !ent->r.linked ) {
 			continue;

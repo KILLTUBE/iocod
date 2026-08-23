@@ -1633,7 +1633,12 @@ static int GScr_Meth_OpenMenu( gsc_Context *ctx )
         return 1;
     }
 
-    menuName = gsc_get_string( ctx, 0 );
+    {
+        int t0 = gsc_type( ctx, 0 );
+        menuName = gsc_get_string( ctx, 0 );
+        fprintf(stderr, "GSC: openMenu type=%d name='%s'\n", t0, menuName ? menuName : "(null)");
+        fflush(stderr);
+    }
     if ( !menuName || !menuName[0] ) {
         gsc_add_int( ctx, 0 );
         return 1;
@@ -1766,6 +1771,10 @@ static int GScr_Meth_GiveWeapon( gsc_Context *ctx )
 
     if ( !ent || !ent->client || gsc_numargs( ctx ) < 1 ) return 0;
     weapName = gsc_to_string( ctx, 0 );
+    if ( !weapName || !weapName[0] || !Q_stricmp( weapName, "undefined" ) ) {
+        G_Printf( "GSC giveWeapon: skip undefined\n" );
+        return 0;
+    }
     if ( !G_IsValidWeaponName( weapName ) ) return 0;
 
     /* already have it? */
@@ -3034,12 +3043,19 @@ static void GScr_DebugLogDvarQuery( const char *name, const char *value )
     }
 }
 
+static void G_Scr_GetGametypeString( char *out, int outSize );
+
 static int GScr_Fn_GetDvar( gsc_Context *ctx )
 {
     char        buf[ 256 ];
     const char *name = gsc_get_string( ctx, 0 );
     if ( !name ) name = "";
-    trap_Cvar_VariableStringBuffer( name, buf, sizeof( buf ) );
+    /* CoD1 g_gametype is a string ("dm","tdm",...). ioq3 stores an int. */
+    if ( !Q_stricmp( name, "g_gametype" ) ) {
+        G_Scr_GetGametypeString( buf, sizeof( buf ) );
+    } else {
+        trap_Cvar_VariableStringBuffer( name, buf, sizeof( buf ) );
+    }
     GScr_DebugLogDvarQuery( name, buf );
     gsc_add_string( ctx, buf );
     return 1;
@@ -4212,6 +4228,8 @@ static void G_Scr_GetGametypeString( char *out, int outSize )
    ========================================================================= */
 void G_Scr_Init( void )
 {
+    fprintf(stderr, "GSC: grok-loadout-patch v3 G_Scr_Init\n"); fflush(stderr);
+
     gsc_CreateOptions opts;
     char              serverinfo[ MAX_INFO_STRING ];
     const char       *mapnameRaw;
@@ -4297,6 +4315,7 @@ void G_Scr_Init( void )
     }
 
     G_Scr_RegisterFunctions();
+    G_Printf( "GSC: grok-loadout-patch v2\n" );
     G_Scr_CreateGlobals();
 
     /*
@@ -4311,6 +4330,9 @@ void G_Scr_Init( void )
     */
     gametypeOk = G_Scr_CompileScript( gametypeScript );
     callbackOk = G_Scr_CompileScript( callbackScript );  /* explicit, safe to dup */
+
+	G_Scr_CompileScript( "maps/mp/gametypes/_teams" );
+	G_Scr_CompileScript( "maps/mp/gametypes/_spawnlogic" );
 
     mapOk      = G_Scr_CompileScript( mapScript );
     if ( !mapOk ) {

@@ -9,13 +9,16 @@ extern "C"
 #include "ast.h"
 #include "compiler.h"
 #include "library.h"
+#include "gsc_path.h"
 #include <setjmp.h>
 
 #define SMALL_STACK_SIZE (16)
 
 CompiledFile *find_or_create_compiled_file(gsc_Context *state, const char *path)
 {
-	HashTrieNode *entry = hash_trie_upsert(&state->files, path, &state->allocator, false);
+	char normalized[256];
+	gsc_normalize_script_path(normalized, sizeof(normalized), path);
+	HashTrieNode *entry = hash_trie_upsert(&state->files, normalized, &state->allocator, false);
 	if(!entry->value)
 	{
 		CompiledFile *cf = new(&state->perm, CompiledFile, 1);
@@ -41,10 +44,22 @@ CompiledFile *compile(gsc_Context *state, const char *path, const char *data, in
 		memcpy(src, data, len + 1);
 		cf->source = src;
 	}
-	int status = compile_file(path, data, cf, &state->perm, temp, &state->strtab, flags, globals);
+	int status = compile_file(cf->name, data, cf, &state->perm, temp, &state->strtab, flags, globals);
 	cf->state = status == 0 ? COMPILE_STATE_DONE : COMPILE_STATE_FAILED;
 	if(cf->state != COMPILE_STATE_DONE)
 		return cf;
+	{
+		int nfuncs = 0;
+		for(HashTrieNode *it = cf->functions.head; it; it = it->next)
+			nfuncs++;
+		fprintf(stderr, "GSC: compiled '%s' (%d functions)\n", cf->name, nfuncs);
+		if(strstr(cf->name, "_teams") || strstr(cf->name, "_spawnlogic"))
+		{
+			fprintf(stderr, "GSCFUNCS: file '%s'\n", cf->name);
+			for(HashTrieNode *it = cf->functions.head; it; it = it->next)
+				fprintf(stderr, "GSCFUNCS:   '%s'\n", it->key);
+		}
+	}
 	// printf("%s %s\n", path, cf->name);
 	if (strstr(path, "_teams") != NULL) {
 		printf("^3GSCFUNCS: file '%s' compiled with functions:\n", path);

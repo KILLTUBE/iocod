@@ -40,6 +40,13 @@ void CG_CheckAmmo( void ) {
 	int		previous;
 	int		weapons;
 
+#ifdef STANDALONE
+	/* CoD1 weapons don't use Q3 ps.ammo[]. That array stays 0, so this
+	   would always flash OUT OF AMMO on a loaded Kar98/MP40. */
+	cg.lowAmmoWarning = 0;
+	return;
+#endif
+
 	// see about how many seconds of ammo we have remaining
 	weapons = cg.snap->ps.stats[ STAT_WEAPONS ];
 	total = 0;

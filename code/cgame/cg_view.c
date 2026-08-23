@@ -490,6 +490,21 @@ static int CG_CalcFov( void ) {
 			fov_x = 90;
 		} else {
 			fov_x = cg_fov.value;
+#ifdef STANDALONE
+			{
+				char adsFbuf[32], adsFovbuf[32];
+				float adsF, adsFov;
+				trap_Cvar_VariableStringBuffer( "cl_adsFrac", adsFbuf, sizeof(adsFbuf) );
+				trap_Cvar_VariableStringBuffer( "cl_adsFov", adsFovbuf, sizeof(adsFovbuf) );
+				adsF = atof( adsFbuf );
+				adsFov = atof( adsFovbuf );
+				if ( adsF < 0.0f ) adsF = 0.0f;
+				if ( adsF > 1.0f ) adsF = 1.0f;
+				if ( adsFov < 1.0f ) adsFov = 55.0f;
+				if ( adsF > 0.001f )
+					fov_x = fov_x + ( adsFov - fov_x ) * adsF;
+			}
+#endif
 			if ( fov_x < 1 ) {
 				fov_x = 1;
 			} else if ( fov_x > 160 ) {

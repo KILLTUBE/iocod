@@ -1354,6 +1354,11 @@ Add the weapon, and flash for the player's view
 ==============
 */
 void CG_AddViewWeapon( playerState_t *ps ) {
+#ifdef STANDALONE
+	(void)ps;
+	return; /* CoD viewmodel is drawn by cl_weapon_cod1 */
+#endif
+
 	refEntity_t	hand;
 	centity_t	*cent;
 	clientInfo_t	*ci;
@@ -2095,78 +2100,10 @@ CG_Tracer
 ===============
 */
 void CG_Tracer( vec3_t source, vec3_t dest ) {
-	vec3_t		forward, right;
-	polyVert_t	verts[4];
-	vec3_t		line;
-	float		len, begin, end;
-	vec3_t		start, finish;
-	vec3_t		midpoint;
-
-	// tracer
-	VectorSubtract( dest, source, forward );
-	len = VectorNormalize( forward );
-
-	// start at least a little ways from the muzzle
-	if ( len < 100 ) {
-		return;
-	}
-	begin = 50 + random() * (len - 60);
-	end = begin + cg_tracerLength.value;
-	if ( end > len ) {
-		end = len;
-	}
-	VectorMA( source, begin, forward, start );
-	VectorMA( source, end, forward, finish );
-
-	line[0] = DotProduct( forward, cg.refdef.viewaxis[1] );
-	line[1] = DotProduct( forward, cg.refdef.viewaxis[2] );
-
-	VectorScale( cg.refdef.viewaxis[1], line[1], right );
-	VectorMA( right, -line[0], cg.refdef.viewaxis[2], right );
-	VectorNormalize( right );
-
-	VectorMA( finish, cg_tracerWidth.value, right, verts[0].xyz );
-	verts[0].st[0] = 0;
-	verts[0].st[1] = 1;
-	verts[0].modulate[0] = 255;
-	verts[0].modulate[1] = 255;
-	verts[0].modulate[2] = 255;
-	verts[0].modulate[3] = 255;
-
-	VectorMA( finish, -cg_tracerWidth.value, right, verts[1].xyz );
-	verts[1].st[0] = 1;
-	verts[1].st[1] = 0;
-	verts[1].modulate[0] = 255;
-	verts[1].modulate[1] = 255;
-	verts[1].modulate[2] = 255;
-	verts[1].modulate[3] = 255;
-
-	VectorMA( start, -cg_tracerWidth.value, right, verts[2].xyz );
-	verts[2].st[0] = 1;
-	verts[2].st[1] = 1;
-	verts[2].modulate[0] = 255;
-	verts[2].modulate[1] = 255;
-	verts[2].modulate[2] = 255;
-	verts[2].modulate[3] = 255;
-
-	VectorMA( start, cg_tracerWidth.value, right, verts[3].xyz );
-	verts[3].st[0] = 0;
-	verts[3].st[1] = 0;
-	verts[3].modulate[0] = 255;
-	verts[3].modulate[1] = 255;
-	verts[3].modulate[2] = 255;
-	verts[3].modulate[3] = 255;
-
-	trap_R_AddPolyToScene( cgs.media.tracerShader, 4, verts );
-
-	midpoint[0] = ( start[0] + finish[0] ) * 0.5;
-	midpoint[1] = ( start[1] + finish[1] ) * 0.5;
-	midpoint[2] = ( start[2] + finish[2] ) * 0.5;
-
-	// add the tracer sound
-	trap_S_StartSound( midpoint, ENTITYNUM_WORLD, CHAN_AUTO, cgs.media.tracerSound );
-
+	(void)source;
+	(void)dest;
 }
+
 
 
 /*
@@ -2253,7 +2190,56 @@ void CG_Bullet( vec3_t end, int sourceEntityNum, vec3_t normal, qboolean flesh, 
 	if ( flesh ) {
 		CG_Bleed( end, fleshEntityNum );
 	} else {
+#ifdef STANDALONE
+		{
+			qhandle_t sh = cgs.media.bulletMarkShader;
+			polyVert_t verts[4];
+			vec3_t axis[3], o;
+			markPoly_t *mark;
+			int vi;
+			float r = 3.0f;
+			if ( !sh ) sh = trap_R_RegisterShader( "iocod_bullethole" );
+			CG_Printf( "CG: plaster=%i\n", sh );
+			if ( !sh ) sh = trap_R_RegisterShader( "iocod_bullethole" );
+			VectorNormalize2( normal, axis[0] );
+			if ( VectorLength( axis[0] ) < 0.1f ) { axis[0][0]=0; axis[0][1]=0; axis[0][2]=1; }
+			PerpendicularVector( axis[1], axis[0] );
+			CrossProduct( axis[0], axis[1], axis[2] );
+			VectorMA( end, 1.5f, axis[0], o );
+			for ( vi = 0; vi < 4; vi++ ) {
+				float s = ( vi == 0 || vi == 3 ) ? -r : r;
+				float t = ( vi < 2 ) ? -r : r;
+				verts[vi].xyz[0] = o[0] + s*axis[1][0] + t*axis[2][0];
+				verts[vi].xyz[1] = o[1] + s*axis[1][1] + t*axis[2][1];
+				verts[vi].xyz[2] = o[2] + s*axis[1][2] + t*axis[2][2];
+				verts[vi].st[0] = (s < 0) ? 0 : 1;
+				verts[vi].st[1] = (t < 0) ? 0 : 1;
+				verts[vi].modulate[0] = 255;
+				verts[vi].modulate[1] = 220;
+				verts[vi].modulate[2] = 80;
+				verts[vi].modulate[3] = 255;
+			}
+			trap_R_AddPolyToScene( sh, 4, verts );
+			{
+				polyVert_t tmpv = verts[1];
+				verts[1] = verts[3];
+				verts[3] = tmpv;
+				trap_R_AddPolyToScene( sh, 4, verts ); /* reverse winding */
+			}
+			mark = CG_AllocMark();
+			mark->time = cg.time;
+			mark->markShader = sh;
+			mark->poly.numVerts = 4;
+			mark->color[0] = mark->color[1] = mark->color[2] = mark->color[3] = 1;
+			memcpy( mark->verts, verts, sizeof(verts) );
+			CG_Printf( "CG: quad mark sh=%i\n", sh );
+			 /* muzzle flash disabled */ 
+			CG_MachineGunEjectBrass( &cg_entities[ cg.predictedPlayerState.clientNum ] );
+			/* explosion sprite disabled */
+		}
+#else
 		CG_MissileHitWall( WP_MACHINEGUN, 0, end, normal, IMPACTSOUND_DEFAULT );
+#endif
 	}
 
 }

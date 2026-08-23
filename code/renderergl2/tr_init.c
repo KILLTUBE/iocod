@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // tr_init.c -- functions that are not called every frame
 
 #include "tr_local.h"
+#include "tr_xmodel.h"
 
 #include "tr_dsa.h"
 
@@ -1734,7 +1735,7 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 		re.UpdateXModelPose = R_UpdateXModelPose;
 		re.UpdateDObjPose   = R_UpdateDObjPose;
 		re.UpdateXModelPoseBlend = R_UpdateXModelPoseBlend;
-		re.UpdateDObjPoseBlend = R_UpdateDObjPoseBlend;
+	re.UpdateDObjPoseBlend = R_UpdateDObjPoseBlend;
 	}
 
 	return &re;

@@ -1,6 +1,7 @@
 
 #include "ast.h"
 #include "parse.h"
+#include "gsc_path.h"
 #include <assert.h>
 
 static const char *string(Parser *parser, TokenType type)
@@ -276,18 +277,11 @@ void parse(Parser *parser, const char *path, HashTrie *functions, HashTrie *glob
 				// printf("ident:%s\n", ident);
 				if(!strcmp(ident, "include"))
 				{
+					char npath[256];
 					const char *path = string(parser, TK_FILE_REFERENCE);
-					// printf("path:%s\n", path);
-					// Node *include = malloc(sizeof(Node));
+					gsc_normalize_script_path(npath, sizeof(npath), path);
 					Allocator allocator = arena_allocator(parser->perm);
-					HashTrieNode *entry = hash_trie_upsert(parser->includes, path, &allocator, false);
-					 // TODO: FIXME
-					if(entry)
-					{
-						for(char *p = entry->key; *p; p++)
-							if(*p == '\\')
-								*p = '/';
-					}
+					hash_trie_upsert(parser->includes, npath, &allocator, false);
 					// Node *include = parser->allocator->malloc(parser->allocator->ctx, sizeof(Node));
 					// include->data = ast_add_file(prog, path);
 					// include->next = file->includes;

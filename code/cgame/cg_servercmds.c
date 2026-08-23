@@ -1123,6 +1123,16 @@ static void CG_ServerCommand( void ) {
 	}
 
 #ifdef STANDALONE
+	if ( !strcmp( cmd, "codimpact" ) ) {
+		vec3_t origin, dir;
+		origin[0] = atof( CG_Argv(1) );
+		origin[1] = atof( CG_Argv(2) );
+		origin[2] = atof( CG_Argv(3) );
+		ByteToDir( atoi( CG_Argv(4) ), dir );
+		CG_Printf( "CG: bullet wall\n" );
+		CG_Bullet( origin, cg.snap ? cg.snap->ps.clientNum : 0, dir, qfalse, ENTITYNUM_WORLD );
+		return;
+	}
 	if ( !strcmp( cmd, "scr_hud" ) ) {
 		CG_ScrHud_ServerCommand();
 		return;

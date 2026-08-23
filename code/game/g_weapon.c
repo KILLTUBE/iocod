@@ -205,7 +205,12 @@ void Bullet_Fire (gentity_t *ent, float spread, int damage, int mod ) {
 				ent->client->accuracy_hits++;
 			}
 		} else {
-			tent = G_TempEntity( tr.endpos, EV_BULLET_HIT_WALL );
+			tent = {
+			gentity_t *tent = G_TempEntity( tr.endpos, EV_BULLET_HIT_WALL );
+			tent->s.eventParm = DirToByte( tr.plane.normal );
+			tent->s.otherEntityNum = ent->s.number;
+			G_Printf( "GSC: wall event\n" );
+		}
 			tent->s.eventParm = DirToByte( tr.plane.normal );
 		}
 		tent->s.otherEntityNum = ent->s.number;
@@ -1176,6 +1181,7 @@ static void Bullet_Fire_Cod1( gentity_t *ent, vec3_t muzzle, vec3_t end, int dam
 	int			hitLoc;
 
 	trap_Trace( &tr, muzzle, NULL, NULL, end, ent->s.number, MASK_SHOT );
+	G_Printf( "GSC: bullet hit frac=%.2f ent=%d\n", tr.fraction, tr.entityNum );
 
 	if ( tr.fraction == 1.0f ) {
 		return;		// missed everything
@@ -1185,9 +1191,23 @@ static void Bullet_Fire_Cod1( gentity_t *ent, vec3_t muzzle, vec3_t end, int dam
 
 	// bullet impact event
 	if ( traceEnt->takedamage && traceEnt->client ) {
+		G_Printf( "GSC: flesh event\n" );
 		G_TempEntity( tr.endpos, EV_BULLET_HIT_FLESH );
 	} else if ( tr.entityNum != ENTITYNUM_NONE ) {
-		G_TempEntity( tr.endpos, EV_BULLET_HIT_WALL );
+		SnapVectorTowards( tr.endpos, muzzle );
+		VectorMA( tr.endpos, 4.0f, tr.plane.normal, tr.endpos );
+		{
+			gentity_t *tent = G_TempEntity( tr.endpos, EV_BULLET_HIT_WALL );
+			tent->s.eventParm = DirToByte( tr.plane.normal );
+			tent->s.otherEntityNum = ent->s.number;
+			tent->r.svFlags |= SVF_BROADCAST;
+			tent->r.linked = qtrue;
+			VectorCopy( muzzle, tent->s.origin2 );
+			G_Printf( "GSC: wall event\n" );
+			trap_SendServerCommand( -1, va( "codimpact %f %f %f %i",
+				tr.endpos[0], tr.endpos[1], tr.endpos[2],
+				DirToByte( tr.plane.normal ) ) );
+		}
 	}
 
 	if ( !traceEnt->takedamage ) {
@@ -1227,6 +1247,7 @@ void FireWeapon( gentity_t *ent )
 	if ( !ent || !ent->client ) {
 		return;
 	}
+	G_Printf( "GSC: FireWeapon\n" );
 
 	// Build muzzle point from origin + viewheight
 	AngleVectors( ent->client->ps.viewangles, forward, right, up );
