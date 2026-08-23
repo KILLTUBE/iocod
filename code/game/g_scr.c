@@ -3067,6 +3067,20 @@ static int GScr_Fn_SetDvar( gsc_Context *ctx )
     return 0;
 }
 
+static int GScr_Fn_SetDvarIfUninitialized( gsc_Context *ctx )
+{
+    const char *name  = gsc_get_string( ctx, 0 );
+    const char *value = gsc_get_string( ctx, 1 );
+    char        current[256];
+    if ( name && value ) {
+        trap_Cvar_VariableStringBuffer( name, current, sizeof( current ) );
+        if ( !current[0] ) {
+            GScr_DebugLogDvarQuery( name, value );
+            trap_Cvar_Set( name, value );
+        }
+    }
+    return 0;
+}
 static int GScr_Fn_GetDvarFloat( gsc_Context *ctx )
 {
     const char *name = gsc_get_string( ctx, 0 );
@@ -3834,6 +3848,8 @@ static void G_Scr_RegisterFunctions( void )
     gsc_register_function( g_scrCtx, NULL, "getdvarint",   GScr_Fn_GetDvarInt );
     gsc_register_function( g_scrCtx, NULL, "getdvarfloat", GScr_Fn_GetDvarFloat );
     gsc_register_function( g_scrCtx, NULL, "setdvar",      GScr_Fn_SetDvar );
+    gsc_register_function( g_scrCtx, NULL, "setdvarifuninitialized",  GScr_Fn_SetDvarIfUninitialized );
+    gsc_register_function( g_scrCtx, NULL, "setcvarifuninitialized",  GScr_Fn_SetDvarIfUninitialized );
     gsc_register_function( g_scrCtx, NULL, "getcvar",      GScr_Fn_GetCvar );   /* CoD1 alias */
     gsc_register_function( g_scrCtx, NULL, "getcvarint",   GScr_Fn_GetDvarInt );
     gsc_register_function( g_scrCtx, NULL, "getcvarfloat", GScr_Fn_GetDvarFloat );
