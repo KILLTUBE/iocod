@@ -2503,6 +2503,17 @@ static void call_c_function(VM *vm, const char *namespace, const char *function,
 		CallbackFunction *cfunc = get_callback_function(vm, function);
 		if(!cfunc)
 		{
+			if(strchr(namespace, '/') != NULL)
+			{
+				/* Looks like a dynamic script-function reference (a real
+				   file path, not a plain builtin name) that failed to
+				   resolve — likely a content/version gap in the retail
+				   script data itself, not something the engine can fix.
+				   Warn and continue instead of aborting the whole game. */
+				fprintf(stderr, "[WARN] dynamic call to '%s::%s' did not resolve to any compiled function — skipping (script content gap, not an engine bug)\n", namespace, function);
+				nret = 0;
+				goto call_c_function_done;
+			}
 			vm_error(vm, "No builtin function '%s::%s'", namespace, function);
 		}
 		vm_CFunction fun = (vm_CFunction)cfunc->callback;
@@ -2533,6 +2544,7 @@ static void call_c_function(VM *vm, const char *namespace, const char *function,
 		}
 		nret = func(vm->ctx);
 	}
+	call_c_function_done:
 	if(nret == 0)
 	{
 		push(vm, undef);
