@@ -3020,12 +3020,27 @@ static int GScr_Fn_RandomFloat( gsc_Context *ctx )
     return 1;
 }
 
+static void GScr_DebugLogDvarQuery( const char *name, const char *value )
+{
+    char lower[256];
+    int i;
+    if ( !name ) return;
+    for ( i = 0; name[i] && i < 255; i++ ) {
+        lower[i] = (name[i] >= 'A' && name[i] <= 'Z') ? name[i] + 32 : name[i];
+    }
+    lower[i] = '\0';
+    if ( strstr( lower, "weapon" ) || strstr( lower, "restrict" ) || strstr( lower, "allow" ) ) {
+        G_Printf( "^3GSCDVAR: '%s' = '%s'\n", name, value ? value : "" );
+    }
+}
+
 static int GScr_Fn_GetDvar( gsc_Context *ctx )
 {
     char        buf[ 256 ];
     const char *name = gsc_get_string( ctx, 0 );
     if ( !name ) name = "";
     trap_Cvar_VariableStringBuffer( name, buf, sizeof( buf ) );
+    GScr_DebugLogDvarQuery( name, buf );
     gsc_add_string( ctx, buf );
     return 1;
 }
@@ -3033,8 +3048,11 @@ static int GScr_Fn_GetDvar( gsc_Context *ctx )
 static int GScr_Fn_GetDvarInt( gsc_Context *ctx )
 {
     const char *name = gsc_get_string( ctx, 0 );
+    int value;
     if ( !name ) name = "";
-    gsc_add_int( ctx, trap_Cvar_VariableIntegerValue( name ) );
+    value = trap_Cvar_VariableIntegerValue( name );
+    GScr_DebugLogDvarQuery( name, va( "%d", value ) );
+    gsc_add_int( ctx, value );
     return 1;
 }
 
@@ -3043,6 +3061,7 @@ static int GScr_Fn_SetDvar( gsc_Context *ctx )
     const char *name  = gsc_get_string( ctx, 0 );
     const char *value = gsc_get_string( ctx, 1 );
     if ( name && value ) {
+        GScr_DebugLogDvarQuery( name, value );
         trap_Cvar_Set( name, value );
     }
     return 0;
