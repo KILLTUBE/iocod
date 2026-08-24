@@ -1312,9 +1312,18 @@ patchCollide_t *CM_GenerateTerrainCollide(int numVerts, const vec3_t *verts,
     facet_t         *facet;
     float           *p1, *p2, *p3;
     vec3_t          bounds[2];
-    if (numVerts <= 2 || !verts || numIndices <= 2 || !indices) {
-        Com_Error(ERR_DROP, "CM_GenerateTerrainCollide: bad parameters: (%i, %p, %i, %p)", 
+    if ((numVerts > 0 && !verts) || (numIndices > 0 && !indices)) {
+        Com_Error(ERR_DROP, "CM_GenerateTerrainCollide: null pointer(s) with nonzero count: (%i, %p, %i, %p)",
                   numVerts, verts, numIndices, indices);
+    }
+    if (numVerts <= 2 || numIndices <= 2) {
+        // Legitimately empty/degenerate terrain patch — some retail CoD1
+        // maps (e.g. mp_brecourt) contain sub-patches with a handful of
+        // vertices but zero triangle indices. That's not corrupt data,
+        // it's just a patch with no collidable geometry, exactly like the
+        // numFacets == 0 case below. Treat it the same way: no collision
+        // for this patch, rather than aborting the whole map load.
+        return NULL;
     }
     // Com_Printf("=== TERRAIN PATCH START: %d verts, %d indices (%d tris) ===\n", numVerts, numIndices, numTriangles );
     // Initialize global counters

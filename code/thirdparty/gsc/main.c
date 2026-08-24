@@ -6,6 +6,7 @@
 // #include "interpreter.h"
 #include "traverse.h"
 #include "compiler.h"
+#include "gsc_path.h"
 #include "vm.h"
 #ifndef _WIN32
 	#include <unistd.h>
@@ -31,10 +32,7 @@ static bool node_fn(ASTNode *n, void *ctx)
 	if(n->type != AST_FILE_REFERENCE)
 		return false;
 	Parser *parser = ctx;
-	snprintf(parser->string, parser->max_string_length, "%s", n->ast_file_reference_data.file);
-	// for(char *p = parser->string; *p; p++)
-	// 	if(*p == '\\')
-	// 		*p = '/';
+	gsc_normalize_script_path(parser->string, parser->max_string_length, n->ast_file_reference_data.file);
 	Allocator allocator = arena_allocator(parser->perm);
 	hash_trie_upsert(parser->file_references, parser->string, &allocator, false);
 	return false;

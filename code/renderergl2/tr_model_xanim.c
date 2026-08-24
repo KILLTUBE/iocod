@@ -327,13 +327,17 @@ static void R_ComposeBlendedPose( const xmBone_t *bindPose, int numBones,
         return;
     }
 
+    if ( torsoRootBone && ( torsoRootBone[0] == '*' || !Q_stricmp( torsoRootBone, "tag_view" ) ) ) {
+        R_ComputePoseFromAnim( bindPose, numBones, legsAnimHandle, legsFrame, outBones );
+        if ( torsoAnimHandle > 0 )
+            R_EvalXAnimBones( torsoAnimHandle, torsoFrame, outBones, numBones );
+        return;
+    }
     R_ComputePoseFromAnim( bindPose, numBones, legsAnimHandle, legsFrame, s_blendWorkA );
-
     if ( torsoAnimHandle <= 0 ) {
         Com_Memcpy( outBones, s_blendWorkA, sizeof(xmBone_t) * numBones );
         return;
     }
-
     R_ComputePoseFromAnim( bindPose, numBones, torsoAnimHandle, torsoFrame, s_blendWorkB );
 
     torsoRoot = R_FindTorsoRootBone( bindPose, numBones, torsoRootBone );
@@ -348,6 +352,7 @@ static void R_ComposeBlendedPose( const xmBone_t *bindPose, int numBones,
     for ( i = 0; i < numBones; ++i ) {
         if ( s_blendTorsoMask[i] ) {
             Vector4Copy( s_blendWorkB[i].lRot, outBones[i].lRot );
+            VectorCopy( s_blendWorkB[i].lTrans, outBones[i].lTrans );
         }
     }
 

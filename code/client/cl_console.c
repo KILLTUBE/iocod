@@ -97,6 +97,23 @@ void Con_ToggleMenu_f( void ) {
 }
 
 /*
+===================
+Con_ForceCloseMenu_f
+
+Forcibly returns to gameplay from any UI menu, regardless of that
+menu's own script logic. Needed because the standalone togglemenu
+fallback can end up showing the persistent "main" root menu, which
+has no built-in way to close itself (there's nothing to escape back
+to from the true main menu).
+===================
+*/
+void Con_ForceCloseMenu_f( void ) {
+	if ( uivm ) {
+		VM_Call( uivm, UI_SET_ACTIVE_MENU, UIMENU_NONE );
+	}
+}
+
+/*
 ================
 Con_MessageMode_f
 ================
@@ -402,6 +419,7 @@ void Con_Init (void) {
 
 	Cmd_AddCommand ("toggleconsole", Con_ToggleConsole_f);
 	Cmd_AddCommand ("togglemenu", Con_ToggleMenu_f);
+	Cmd_AddCommand ("forceclosemenu", Con_ForceCloseMenu_f);
 	Cmd_AddCommand ("messagemode", Con_MessageMode_f);
 	Cmd_AddCommand ("messagemode2", Con_MessageMode2_f);
 	Cmd_AddCommand ("messagemode3", Con_MessageMode3_f);
@@ -420,6 +438,7 @@ void Con_Shutdown(void)
 {
 	Cmd_RemoveCommand("toggleconsole");
 	Cmd_RemoveCommand("togglemenu");
+	Cmd_RemoveCommand("forceclosemenu");
 	Cmd_RemoveCommand("messagemode");
 	Cmd_RemoveCommand("messagemode2");
 	Cmd_RemoveCommand("messagemode3");

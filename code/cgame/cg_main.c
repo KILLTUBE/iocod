@@ -226,7 +226,7 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_drawSnapshot, "cg_drawSnapshot", "0", CVAR_ARCHIVE  },
 	{ &cg_draw3dIcons, "cg_draw3dIcons", "1", CVAR_ARCHIVE  },
 	{ &cg_drawIcons, "cg_drawIcons", "1", CVAR_ARCHIVE  },
-	{ &cg_drawAmmoWarning, "cg_drawAmmoWarning", "1", CVAR_ARCHIVE  },
+	{ &cg_drawAmmoWarning, "cg_drawAmmoWarning", "0", CVAR_ARCHIVE  },
 	{ &cg_drawAttacker, "cg_drawAttacker", "1", CVAR_ARCHIVE  },
 	{ &cg_drawCrosshair, "cg_drawCrosshair", "4", CVAR_ARCHIVE },
 	{ &cg_drawCrosshairNames, "cg_drawCrosshairNames", "1", CVAR_ARCHIVE },
@@ -259,9 +259,9 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_noPlayerAnims, "cg_noplayeranims", "0", CVAR_CHEAT },
 	{ &cg_showmiss, "cg_showmiss", "0", 0 },
 	{ &cg_footsteps, "cg_footsteps", "1", CVAR_CHEAT },
-	{ &cg_tracerChance, "cg_tracerchance", "0.4", CVAR_CHEAT },
-	{ &cg_tracerWidth, "cg_tracerwidth", "1", CVAR_CHEAT },
-	{ &cg_tracerLength, "cg_tracerlength", "100", CVAR_CHEAT },
+	{ &cg_tracerChance, "cg_tracerchance", "1", CVAR_ARCHIVE },
+	{ &cg_tracerWidth, "cg_tracerwidth", "3", CVAR_ARCHIVE },
+	{ &cg_tracerLength, "cg_tracerlength", "200", CVAR_ARCHIVE },
 	{ &cg_thirdPersonRange, "cg_thirdPersonRange", "40", CVAR_CHEAT },
 	{ &cg_thirdPersonAngle, "cg_thirdPersonAngle", "0", CVAR_CHEAT },
 	{ &cg_thirdPerson, "cg_thirdPerson", "0", 0 },
@@ -869,7 +869,10 @@ static void CG_RegisterGraphics( void ) {
 
 	cgs.media.waterBubbleShader = trap_R_RegisterShader( "waterBubble" );
 
-	cgs.media.tracerShader = trap_R_RegisterShader( "gfx/misc/tracer" );
+	cgs.media.tracerShader = trap_R_RegisterShader( "iocod_tracer" );
+	if ( !cgs.media.tracerShader )
+		cgs.media.tracerShader = trap_R_RegisterShader( "gfx/misc/tracer" );
+	CG_Printf( "CG: tracer sh=%i\n", cgs.media.tracerShader );
 	cgs.media.selectShader = trap_R_RegisterShader( "gfx/2d/select" );
 
 	for ( i = 0 ; i < NUM_CROSSHAIRS ; i++ ) {
@@ -963,6 +966,15 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.armorIcon  = trap_R_RegisterShaderNoMip( "icons/iconr_yellow" );
 
 	cgs.media.machinegunBrassModel = trap_R_RegisterModel( "models/weapons2/shells/m_shell.md3" );
+#ifdef STANDALONE
+	if ( !cgs.media.machinegunBrassModel )
+		cgs.media.machinegunBrassModel = trap_R_RegisterModel( "xmodel/shell" );
+	if ( !cgs.media.machinegunBrassModel )
+		cgs.media.machinegunBrassModel = trap_R_RegisterModel( "xmodel/weapon_shell" );
+	if ( !cgs.media.machinegunBrassModel )
+		cgs.media.machinegunBrassModel = trap_R_RegisterModel( "xmodel/ammo_shell" );
+	CG_Printf( "CG: brass model=%i\n", cgs.media.machinegunBrassModel );
+#endif
 	cgs.media.shotgunBrassModel = trap_R_RegisterModel( "models/weapons2/shells/s_shell.md3" );
 
 	cgs.media.gibAbdomen = trap_R_RegisterModel( "models/gibs/abdomen.md3" );
@@ -1029,7 +1041,16 @@ static void CG_RegisterGraphics( void ) {
 	}
 
 	// wall marks
-	cgs.media.bulletMarkShader = trap_R_RegisterShader( "gfx/damage/bullet_mrk" );
+	cgs.media.bulletMarkShader = trap_R_RegisterShader( "gfx/impact/bullethit_plaster" );
+	if ( !cgs.media.bulletMarkShader )
+		cgs.media.bulletMarkShader = trap_R_RegisterShader( "gfx/damage/bullet_mrk" );
+#ifdef STANDALONE
+	/* white fallback marks — CoD1 has no Q3 gfx/damage/* */
+	if ( !cgs.media.bulletMarkShader )
+		cgs.media.bulletMarkShader = trap_R_RegisterShader( "white" );
+	if ( !cgs.media.tracerShader )
+		cgs.media.tracerShader = trap_R_RegisterShader( "white" );
+#endif
 	cgs.media.burnMarkShader = trap_R_RegisterShader( "gfx/damage/burn_med_mrk" );
 	cgs.media.holeMarkShader = trap_R_RegisterShader( "gfx/damage/hole_lg_mrk" );
 	cgs.media.energyMarkShader = trap_R_RegisterShader( "gfx/damage/plasma_mrk" );

@@ -202,7 +202,10 @@ void CM_TestInLeaf( traceWork_t *tw, cLeaf_t *leaf ) {
       if ( !(patch->contents & tw->contents)) {
         continue;
       }
-      
+      if ( !patch->pc ) {
+        continue;
+      }
+
       if ( CM_PositionTestInPatchCollide( tw, patch->pc ) ) {
         tw->trace.startsolid = tw->trace.allsolid = qtrue;
         tw->trace.fraction = 0;
@@ -338,6 +341,9 @@ TRACING
 */
 void CM_TraceThroughPatch( traceWork_t *tw, cPatch_t *patch ) {
   float    oldFrac;
+  if ( !patch || !patch->pc ) {
+    return;
+  }
   c_patch_traces++;
   oldFrac = tw->trace.fraction;
   CM_TraceThroughPatchCollide( tw, patch->pc );

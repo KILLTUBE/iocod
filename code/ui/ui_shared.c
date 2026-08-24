@@ -1037,10 +1037,12 @@ static void Menu_RunCloseScript(menuDef_t *menu) {
 }
 
 void Menus_CloseByName(const char *p) {
-  menuDef_t *menu = Menus_FindByName(p);
-  if (menu != NULL) {
-		Menu_RunCloseScript(menu);
-		menu->window.flags &= ~(WINDOW_VISIBLE | WINDOW_HASFOCUS);
+  int i;
+  for (i = 0; i < menuCount; i++) {
+    if (Q_stricmp(Menus[i].window.name, p) == 0) {
+      Menu_RunCloseScript(&Menus[i]);
+      Menus[i].window.flags &= ~(WINDOW_VISIBLE | WINDOW_HASFOCUS);
+    }
   }
 }
 
@@ -2520,18 +2522,35 @@ qboolean Item_HandleKey(itemDef_t *item, int key, qboolean down) {
 		}
 	}
 
+	static int s_lastItemClickTime = -99999;
+	const int ITEM_CLICK_DEBOUNCE_MS = 250;
+
 	if (!down) {
 		return qfalse;
 	}
 
   switch (item->type) {
     case ITEM_TYPE_BUTTON:
-      return qfalse;
-      break;
     case ITEM_TYPE_RADIOBUTTON:
-      return qfalse;
-      break;
     case ITEM_TYPE_CHECKBOX:
+      // Confirm the click immediately — these item types have no
+      // corresponding case in Item_StartCapture (only LISTBOX/SLIDER do),
+      // so returning qfalse here meant Item_Action could never fire for
+      // any button, checkbox, or radio button in the entire UI.
+      // Debounce against the same "down" event apparently getting
+      // redispatched multiple times while the button stays physically
+      // held. Time-based rather than a release-triggered latch, since a
+      // click that closes its own menu (e.g. "Back To Game") means the
+      // corresponding release may never reach this code at all — a
+      // strict latch could get stuck true forever and silently break
+      // every future click.
+      if (key == K_MOUSE1 || key == K_MOUSE2 || key == K_MOUSE3 || key == K_ENTER) {
+        if (DC->realTime - s_lastItemClickTime < ITEM_CLICK_DEBOUNCE_MS) {
+          return qfalse;
+        }
+        s_lastItemClickTime = DC->realTime;
+        return qtrue;
+      }
       return qfalse;
       break;
     case ITEM_TYPE_EDITFIELD:
@@ -2573,6 +2592,9 @@ qboolean Item_HandleKey(itemDef_t *item, int key, qboolean down) {
 
 void Item_Action(itemDef_t *item) {
   if (item) {
+    DC->Print(va("^3itemaction: item=%s action=[%s]\n",
+      item->window.name ? item->window.name : "(unnamed)",
+      item->action ? item->action : "(none)"));
     Item_RunScript(item, item->action);
   }
 }
@@ -4543,9 +4565,29 @@ qboolean ItemParse_focusSound( itemDef_t *item, int handle ) {
 
 // text <string>
 qboolean ItemParse_text( itemDef_t *item, int handle ) {
-	if (!PC_String_Parse(handle, &item->text)) {
+	pc_token_t token;
+	const char *key;
+	const char *loc;
+
+	if (!trap_PC_ReadToken(handle, &token))
 		return qfalse;
+	/* CoD1: text &"MPMENU_TEAM"  — optional '&' then the key */
+	if (token.string[0] == '&' && token.string[1] == '\0') {
+		if (!trap_PC_ReadToken(handle, &token))
+			return qfalse;
 	}
+	key = token.string;
+	if (key[0] == '&') key++;
+	if (key[0] == '@') key++;
+#ifdef UI
+	{
+		extern const char *Localize_GetString(const char *key);
+		loc = Localize_GetString(key);
+	}
+#else
+	loc = key;
+#endif
+	item->text = String_Alloc(loc ? loc : key);
 	return qtrue;
 }
 
@@ -5929,6 +5971,24 @@ qboolean MenuParse_itemDef( itemDef_t *item, int handle ) {
 		}
 		Item_InitControls(menu->items[menu->itemCount]);
 		menu->items[menu->itemCount++]->parent = menu;
+	} else {
+		// Over the item cap — still have to consume this itemDef's
+		// tokens from the stream (braces and all), or every subsequent
+		// token in the file gets misread as a top-level menu keyword,
+		// corrupting the rest of the parse.
+		pc_token_t token;
+		int depth;
+		if (!trap_PC_ReadToken(handle, &token) || token.string[0] != '{') {
+			return qfalse;
+		}
+		depth = 1;
+		while (depth > 0 && trap_PC_ReadToken(handle, &token)) {
+			if (token.string[0] == '{') {
+				depth++;
+			} else if (token.string[0] == '}') {
+				depth--;
+			}
+		}
 	}
 	return qtrue;
 }
@@ -6028,13 +6088,32 @@ Menu_New
 ===============
 */
 void Menu_New(int handle) {
-	menuDef_t *menu = &Menus[menuCount];
-
 	if (menuCount < MAX_MENUS) {
+		menuDef_t *menu = &Menus[menuCount];
 		Menu_Init(menu);
 		if (Menu_Parse(handle, menu)) {
 			Menu_PostParse(menu);
 			menuCount++;
+		}
+	} else {
+		// Over the menu cap — still have to consume this menuDef's
+		// tokens from the stream (braces and all), or every subsequent
+		// token gets misread as a top-level keyword, desyncing the
+		// parser for the rest of this file/load pass — and since
+		// menuCount can never increase past the cap once here, that
+		// would silently break every later menu load for the rest of
+		// the session, not just this one file.
+		pc_token_t token;
+		int depth;
+		if (trap_PC_ReadToken(handle, &token) && token.string[0] == '{') {
+			depth = 1;
+			while (depth > 0 && trap_PC_ReadToken(handle, &token)) {
+				if (token.string[0] == '{') {
+					depth++;
+				} else if (token.string[0] == '}') {
+					depth--;
+				}
+			}
 		}
 	}
 }

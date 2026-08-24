@@ -337,6 +337,9 @@ qhandle_t R_RegisterXAnim( const char *name );
  * Animation data overrides only bones whose names match part names in the anim.
  * World transforms (wTrans, wRot) are recomputed on return.
  * numBones: number of entries in inOutBones. */
+void R_UpdateDObjPoseLayered( qhandle_t handModel, qhandle_t gunModel,
+                              qhandle_t baseAnim, float baseFrame,
+                              qhandle_t overlayAnim, float overlayFrame );
 void R_EvalXAnimBones( qhandle_t animHandle, float frame,
                        xmBone_t *inOutBones, int numBones );
 

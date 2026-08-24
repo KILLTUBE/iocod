@@ -2360,6 +2360,11 @@ static void CG_DrawAmmoWarning( void ) {
 	const char	*s;
 	int			w;
 
+#ifdef STANDALONE
+	/* STANDALONE CoD: no Q3 ammo banner — ps.ammo[] is unused. */
+	return;
+#endif
+
 	if ( cg_drawAmmoWarning.integer == 0 ) {
 		return;
 	}

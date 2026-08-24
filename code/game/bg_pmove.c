@@ -2104,7 +2104,12 @@ static void PM_Weapon( void ) {
 	pm->ps->weaponstate = WEAPON_FIRING;
 
 	// check for out of ammo
-	if ( ! pm->ps->ammo[ pm->ps->weapon ] ) {
+#ifdef STANDALONE
+	/* CoD1 clip lives in cl_weapon / weaponSlots, not Q3 ps.ammo[].
+	   That array is always 0, so this used to abort every shot with
+	   EV_NOAMMO — fire anim played locally, server never traced. */
+#else
+	if ( 0 && ! pm->ps->ammo[ pm->ps->weapon ] ) /* CoD: skip Q3 ammo */ {
 		PM_AddEvent( EV_NOAMMO );
 		pm->ps->weaponTime += 500;
 		return;
@@ -2114,6 +2119,7 @@ static void PM_Weapon( void ) {
 	if ( pm->ps->ammo[ pm->ps->weapon ] != -1 ) {
 		pm->ps->ammo[ pm->ps->weapon ]--;
 	}
+#endif
 
 	// fire weapon
 	PM_AddEvent( EV_FIRE_WEAPON );

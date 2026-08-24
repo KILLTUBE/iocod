@@ -1633,7 +1633,12 @@ static int GScr_Meth_OpenMenu( gsc_Context *ctx )
         return 1;
     }
 
-    menuName = gsc_get_string( ctx, 0 );
+    {
+        int t0 = gsc_type( ctx, 0 );
+        menuName = gsc_get_string( ctx, 0 );
+        fprintf(stderr, "GSC: openMenu type=%d name='%s'\n", t0, menuName ? menuName : "(null)");
+        fflush(stderr);
+    }
     if ( !menuName || !menuName[0] ) {
         gsc_add_int( ctx, 0 );
         return 1;
@@ -1766,6 +1771,10 @@ static int GScr_Meth_GiveWeapon( gsc_Context *ctx )
 
     if ( !ent || !ent->client || gsc_numargs( ctx ) < 1 ) return 0;
     weapName = gsc_to_string( ctx, 0 );
+    if ( !weapName || !weapName[0] || !Q_stricmp( weapName, "undefined" ) ) {
+        G_Printf( "GSC giveWeapon: skip undefined\n" );
+        return 0;
+    }
     if ( !G_IsValidWeaponName( weapName ) ) return 0;
 
     /* already have it? */
@@ -3020,12 +3029,34 @@ static int GScr_Fn_RandomFloat( gsc_Context *ctx )
     return 1;
 }
 
+static void GScr_DebugLogDvarQuery( const char *name, const char *value )
+{
+    char lower[256];
+    int i;
+    if ( !name ) return;
+    for ( i = 0; name[i] && i < 255; i++ ) {
+        lower[i] = (name[i] >= 'A' && name[i] <= 'Z') ? name[i] + 32 : name[i];
+    }
+    lower[i] = '\0';
+    if ( strstr( lower, "weapon" ) || strstr( lower, "restrict" ) || strstr( lower, "allow" ) ) {
+        G_Printf( "^3GSCDVAR: '%s' = '%s'\n", name, value ? value : "" );
+    }
+}
+
+static void G_Scr_GetGametypeString( char *out, int outSize );
+
 static int GScr_Fn_GetDvar( gsc_Context *ctx )
 {
     char        buf[ 256 ];
     const char *name = gsc_get_string( ctx, 0 );
     if ( !name ) name = "";
-    trap_Cvar_VariableStringBuffer( name, buf, sizeof( buf ) );
+    /* CoD1 g_gametype is a string ("dm","tdm",...). ioq3 stores an int. */
+    if ( !Q_stricmp( name, "g_gametype" ) ) {
+        G_Scr_GetGametypeString( buf, sizeof( buf ) );
+    } else {
+        trap_Cvar_VariableStringBuffer( name, buf, sizeof( buf ) );
+    }
+    GScr_DebugLogDvarQuery( name, buf );
     gsc_add_string( ctx, buf );
     return 1;
 }
@@ -3033,8 +3064,11 @@ static int GScr_Fn_GetDvar( gsc_Context *ctx )
 static int GScr_Fn_GetDvarInt( gsc_Context *ctx )
 {
     const char *name = gsc_get_string( ctx, 0 );
+    int value;
     if ( !name ) name = "";
-    gsc_add_int( ctx, trap_Cvar_VariableIntegerValue( name ) );
+    value = trap_Cvar_VariableIntegerValue( name );
+    GScr_DebugLogDvarQuery( name, va( "%d", value ) );
+    gsc_add_int( ctx, value );
     return 1;
 }
 
@@ -3043,11 +3077,26 @@ static int GScr_Fn_SetDvar( gsc_Context *ctx )
     const char *name  = gsc_get_string( ctx, 0 );
     const char *value = gsc_get_string( ctx, 1 );
     if ( name && value ) {
+        GScr_DebugLogDvarQuery( name, value );
         trap_Cvar_Set( name, value );
     }
     return 0;
 }
 
+static int GScr_Fn_SetDvarIfUninitialized( gsc_Context *ctx )
+{
+    const char *name  = gsc_get_string( ctx, 0 );
+    const char *value = gsc_get_string( ctx, 1 );
+    char        current[256];
+    if ( name && value ) {
+        trap_Cvar_VariableStringBuffer( name, current, sizeof( current ) );
+        if ( !current[0] ) {
+            GScr_DebugLogDvarQuery( name, value );
+            trap_Cvar_Set( name, value );
+        }
+    }
+    return 0;
+}
 static int GScr_Fn_GetDvarFloat( gsc_Context *ctx )
 {
     const char *name = gsc_get_string( ctx, 0 );
@@ -3815,6 +3864,8 @@ static void G_Scr_RegisterFunctions( void )
     gsc_register_function( g_scrCtx, NULL, "getdvarint",   GScr_Fn_GetDvarInt );
     gsc_register_function( g_scrCtx, NULL, "getdvarfloat", GScr_Fn_GetDvarFloat );
     gsc_register_function( g_scrCtx, NULL, "setdvar",      GScr_Fn_SetDvar );
+    gsc_register_function( g_scrCtx, NULL, "setdvarifuninitialized",  GScr_Fn_SetDvarIfUninitialized );
+    gsc_register_function( g_scrCtx, NULL, "setcvarifuninitialized",  GScr_Fn_SetDvarIfUninitialized );
     gsc_register_function( g_scrCtx, NULL, "getcvar",      GScr_Fn_GetCvar );   /* CoD1 alias */
     gsc_register_function( g_scrCtx, NULL, "getcvarint",   GScr_Fn_GetDvarInt );
     gsc_register_function( g_scrCtx, NULL, "getcvarfloat", GScr_Fn_GetDvarFloat );
@@ -4177,6 +4228,8 @@ static void G_Scr_GetGametypeString( char *out, int outSize )
    ========================================================================= */
 void G_Scr_Init( void )
 {
+    fprintf(stderr, "GSC: grok-loadout-patch v3 G_Scr_Init\n"); fflush(stderr);
+
     gsc_CreateOptions opts;
     char              serverinfo[ MAX_INFO_STRING ];
     const char       *mapnameRaw;
@@ -4262,6 +4315,7 @@ void G_Scr_Init( void )
     }
 
     G_Scr_RegisterFunctions();
+    G_Printf( "GSC: grok-loadout-patch v2\n" );
     G_Scr_CreateGlobals();
 
     /*
@@ -4276,6 +4330,9 @@ void G_Scr_Init( void )
     */
     gametypeOk = G_Scr_CompileScript( gametypeScript );
     callbackOk = G_Scr_CompileScript( callbackScript );  /* explicit, safe to dup */
+
+	G_Scr_CompileScript( "maps/mp/gametypes/_teams" );
+	G_Scr_CompileScript( "maps/mp/gametypes/_spawnlogic" );
 
     mapOk      = G_Scr_CompileScript( mapScript );
     if ( !mapOk ) {

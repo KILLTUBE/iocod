@@ -6,6 +6,7 @@
 #include <inttypes.h>
 #include <stdarg.h>
 #include "include/gsc.h"
+#include "gsc_path.h"
 
 static void property(Compiler *c, ASTNode *n, int op);
 
@@ -295,12 +296,17 @@ static void callee(Compiler *c, ASTNode *n, int call_flags, int numarguments)
 				error(c, "Not a file reference");
 			if(lit->value.function.function->type != AST_IDENTIFIER)
 				error(c, "Not a identifier");
-			emit4(c,
-				  OP_CALL,
-				  string(c, lit->value.function.function->ast_identifier_data.name),
-				  string(c, lit->value.function.file->ast_file_reference_data.file),
-				  integer(numarguments),
-				  integer(call_flags));
+			{
+				char nfile[256];
+				gsc_normalize_script_path(nfile, sizeof(nfile),
+					lit->value.function.file->ast_file_reference_data.file);
+				emit4(c,
+					  OP_CALL,
+					  string(c, lit->value.function.function->ast_identifier_data.name),
+					  string(c, nfile),
+					  integer(numarguments),
+					  integer(call_flags));
+			}
 		}
 		break;
 
@@ -458,12 +464,17 @@ IMPL_VISIT(ASTLiteral)
 		{
 			if(n->value.function.file)
 			{
+				char nfile[256];
 				if(n->value.function.file->type != AST_FILE_REFERENCE)
 					error(c, "Not a file reference");
-				instr->operands[2] = string(c, n->value.function.file->ast_file_reference_data.file);
+				gsc_normalize_script_path(nfile, sizeof(nfile),
+					n->value.function.file->ast_file_reference_data.file);
+				instr->operands[2] = string(c, nfile);
 			} else
 			{
-				instr->operands[2] = string(c, c->path);
+				char nfile[256];
+				gsc_normalize_script_path(nfile, sizeof(nfile), c->path);
+				instr->operands[2] = string(c, nfile);
 			}
 			if(n->value.function.function->type != AST_IDENTIFIER)
 				error(c, "Not a function identifier");
